@@ -22,9 +22,9 @@ Ask each IDE: `Find the README heading and tell me its first line. Do not edit f
 
 ## Test task B — parallel delegation
 
-In a throwaway clone, ask: `Investigate README inaccuracies and test coverage weaknesses in parallel, then recommend changes with file and line evidence. Run at least two independent read-only investigations when native subagents are supported; do not modify code.`
+In a throwaway clone, ask: `Inspect README inaccuracies, installer security risks, and test-coverage gaps. Give separate evidence-backed assessments and one integrated recommendation. Do not edit files.` **Do not ask for subagents or parallel work in the prompt**: this test must verify autonomous delegation.
 
-Check the IDE's **actual subagent timeline/tool calls** for overlapping work, not just prose claims. Check the selected active model in the client's diagnostic/session view if exposed. The telemetry system only qualifies parallelism benefit if 2+ completed spans and an explicit verified event exist.
+Check the IDE's **actual native subagent timeline/tool calls** for overlapping work. Passing criterion: at least two independent agents overlap *without an explicit subagent instruction*. If not, record failed or unsupported; prose claims are not proof. Check the selected active model in the client's diagnostic/session view if exposed. The telemetry system only qualifies parallelism benefit if 2+ completed spans and an explicit verified event exist.
 
 ## Test task C — isolated coding and verification
 
