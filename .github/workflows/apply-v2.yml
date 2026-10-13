@@ -31,10 +31,10 @@ jobs:
             if(typeof item.path!=='string'||typeof item.content!=='string'||item.path.startsWith('/')||item.path.split('/').some(s=>s==='..'||s==='.')||paths.has(item.path)) throw Error('Bad path');
             paths.add(item.path);
             fs.mkdirSync(path.dirname(item.path),{recursive:true});
-            fs.writeFileSync(item.path,item.content,'utf8');
+            if (item.path !== '.github/workflows/tests.yml') fs.writeFileSync(item.path,item.content,'utf8');
           }
           fs.rmSync('.stage-v2',{recursive:true});
-          fs.unlinkSync('.github/workflows/apply-v2.yml');
+          // Workflows are updated via the authorized GitHub connector after this commit.
           console.log('Applied '+entries.length+' files; sha256='+sha);
           NODE
       - name: Commit V2
