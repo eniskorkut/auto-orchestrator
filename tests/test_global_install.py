@@ -64,4 +64,26 @@ class GlobalInstallTests(unittest.TestCase):
         txt=(self.home/'.config/opencode/plugins/auto_orchestrator.js').read_text()
         self.assertIn('AutoOrchestratorPlugin',txt)
 
+
+    def test_global_codex_antigravity_hooks_point_at_installed_bridge(self):
+        import json
+        self.run_install()
+        codex=json.loads((self.home/'.codex/hooks.json').read_text())
+        cmd=codex['hooks']['SubagentStart'][0]['hooks'][0]['command']
+        self.assertIn(str(self.home/'.codex/auto-orchestrator/tools/hook_bridge.py'),cmd)
+        self.assertTrue((self.home/'.codex/auto-orchestrator/tools/perf.py').is_file())
+        antigravity=json.loads((self.home/'.gemini/config/hooks.json').read_text())
+        self.assertIn(str(self.home/'.gemini/config/auto-orchestrator/tools/hook_bridge.py'),
+                      antigravity['auto-orchestrator']['SessionStart'][0]['command'])
+    def test_existing_global_hooks_are_preserved(self):
+        import json
+        for rel in ['.codex/hooks.json','.gemini/config/hooks.json']:
+            path=self.home/rel
+            path.parent.mkdir(parents=True,exist_ok=True)
+            path.write_text('{"owned-by-user":{}}')
+        notes=self.run_install()
+        self.assertIn('manual integration needed',' '.join(notes))
+        self.assertEqual((self.home/'.codex/hooks.json').read_text(),'{"owned-by-user":{}}')
+        self.assertEqual((self.home/'.gemini/config/hooks.json').read_text(),'{"owned-by-user":{}}')
+
 if __name__=='__main__':unittest.main()
