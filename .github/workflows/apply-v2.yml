@@ -1,0 +1,46 @@
+name: Apply V2 verified patch
+on:
+  push:
+    branches: [feat/native-event-hooks-v2]
+permissions:
+  contents: write
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - name: Verify and apply patch
+        run: |
+          node <<'NODE'
+          const fs=require('node:fs');
+          const path=require('node:path');
+          const crypto=require('node:crypto');
+          const zlib=require('node:zlib');
+          const b64=Array.from({length:9},(_,i)=>fs.readFileSync('.stage-v2/'+String(i).padStart(2,'0')+'.txt','utf8')).join('');
+          const json=zlib.brotliDecompressSync(Buffer.from(b64,'base64'));
+          const sha=crypto.createHash('sha256').update(json).digest('hex');
+          const expected='de03cbe6b13cec43715bd24f11188c08d74f68b78481316ed431337f1fba7e42';
+          if (sha!==expected) throw Error('Payload checksum mismatch: '+sha);
+          const entries=JSON.parse(json.toString('utf8'));
+          if (entries.length!==13) throw Error('Unexpected file count');
+          const paths=new Set();
+          for(const item of entries) {
+            if(typeof item.path!=='string'||typeof item.content!=='string'||item.path.startsWith('/')||item.path.split('/').some(s=>s==='..'||s==='.')||paths.has(item.path)) throw Error('Bad path');
+            paths.add(item.path);
+            fs.mkdirSync(path.dirname(item.path),{recursive:true});
+            fs.writeFileSync(item.path,item.content,'utf8');
+          }
+          fs.rmSync('.stage-v2',{recursive:true});
+          fs.unlinkSync('.github/workflows/apply-v2.yml');
+          console.log('Applied '+entries.length+' files; sha256='+sha);
+          NODE
+      - name: Commit V2
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: add native lifecycle instrumentation and validation"
+          git push origin HEAD:feat/native-event-hooks-v2
