@@ -116,3 +116,5 @@ python tools/install_global.py --uninstall
 For Codex Luna Max, pass `--codex-model luna-max`. If your existing `~/.codex/config.toml` requires edits, the global installer **fails safely** and provides instructions rather than rewriting it. Global OpenCode V2 uses a native `setup(ctx)` plugin with event subscriptions; V1 uses its legacy plugin. User files are not overwritten. See [IDE_TESTING.md](IDE_TESTING.md) for three independent manual smoke scenarios.
 
 **Limits:** global installation does not configure global Codex hooks or produce verified telemetry for every client. The `doctor` command checks file readiness, **not** real model choice, native subagent spawning or human time savings. Hosted CI tests mocked lifecycle contracts; actual IDE integration still needs manual smoke testing.
+
+**Project-local OpenCode version:** `python tools/install.py --target /your/project --platform opencode --opencode-version v2` (default). For Classic use `--opencode-version v1`; a previously installed plugin requires `--force-generated` to switch safely with backup.
