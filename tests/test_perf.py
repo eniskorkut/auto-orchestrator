@@ -1,0 +1,100 @@
+import json
+import tempfile
+import unittest
+from pathlib import Path
+from tools.perf import EventError, append_event, analyze, load_events, path_for
+
+
+class PerformanceTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp=tempfile.TemporaryDirectory()
+        self.root=Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def emit(self,event,t,**kw):
+        append_event(self.root,'run_1',event,at=t,**kw)
+
+    def get(self):
+        return analyze('run_1',load_events(path_for(self.root,'run_1')))
+
+    def test_parallel_estimate(self):
+        self.emit('start',100,platform='codex')
+        self.emit('agent-start',102,agent_id='a')
+        self.emit('agent-start',103,agent_id='b')
+        self.emit('agent-stop',117,agent_id='b')
+        self.emit('agent-stop',119,agent_id='a')
+        self.emit('finish',122,status='success',verified=True)
+        s=self.get()
+        self.assertTrue(s.has_valid_estimate)
+        self.assertEqual(s.subagents,2)
+        self.assertEqual(s.elapsed_seconds,22)
+        self.assertEqual(s.estimated_parallelism_seconds,9)
+
+    def test_failure_never_claims_savings(self):
+        self.emit('start',100,platform='opencode')
+        for agent in ('a','b'): self.emit('agent-start',101,agent_id=agent)
+        for agent in ('a','b'): self.emit('agent-stop',110,agent_id=agent)
+        self.emit('finish',112,status='failed')
+        self.assertFalse(self.get().has_valid_estimate)
+
+    def test_unverified_never_claims_savings(self):
+        self.emit('start',100,platform='opencode')
+        for agent in ('a','b'): self.emit('agent-start',101,agent_id=agent)
+        for agent in ('a','b'): self.emit('agent-stop',110,agent_id=agent)
+        self.emit('finish',112,status='success')
+        self.assertFalse(self.get().has_valid_estimate)
+
+    def test_missing_stop_never_claims(self):
+        self.emit('start',100,platform='codex')
+        self.emit('agent-start',101,agent_id='a')
+        self.emit('agent-start',101,agent_id='b')
+        self.emit('agent-stop',110,agent_id='a')
+        self.emit('finish',111,status='success',verified=True)
+        self.assertFalse(self.get().has_valid_estimate)
+
+    def test_negative_benefit(self):
+        self.emit('start',100,platform='codex')
+        self.emit('agent-start',102,agent_id='a')
+        self.emit('agent-stop',104,agent_id='a')
+        self.emit('agent-start',108,agent_id='b')
+        self.emit('agent-stop',109,agent_id='b')
+        self.emit('finish',130,status='success',verified=True)
+        self.assertFalse(self.get().has_valid_estimate)
+
+    def test_path_traversal_rejected(self):
+        with self.assertRaises(EventError): path_for(self.root,'../evil')
+        with self.assertRaises(EventError): append_event(self.root,'run_1','start',at=100,platform='codex',agent_id='../bad')
+
+    def test_finish_prevents_mutation(self):
+        self.emit('start',100,platform='codex')
+        self.emit('finish',110,status='success',verified=True)
+        with self.assertRaises(EventError):self.emit('agent-start',111,agent_id='a')
+
+    def test_duplicate_run_rejected(self):
+        self.emit('start',100,platform='codex')
+        with self.assertRaises((EventError,FileExistsError)):self.emit('start',120,platform='codex')
+
+    def test_read_invalid_log(self):
+        f=path_for(self.root,'bad');f.parent.mkdir(parents=True);f.write_text('{bad\n')
+        with self.assertRaises(EventError):load_events(f)
+
+    def test_only_agent_one_no_estimate(self):
+        self.emit('start',100,platform='codex')
+        self.emit('agent-start',101,agent_id='a')
+        self.emit('agent-stop',103,agent_id='a')
+        self.emit('finish',105,status='success',verified=True)
+        self.assertFalse(self.get().has_valid_estimate)
+
+    def test_end_before_agent_stop(self):
+        self.emit('start',100,platform='codex')
+        self.emit('agent-start',101,agent_id='a')
+        self.emit('agent-stop',109,agent_id='a')
+        self.emit('agent-start',103,agent_id='b')
+        self.emit('agent-stop',115,agent_id='b')
+        self.emit('finish',112,status='success',verified=True)
+        self.assertFalse(self.get().has_valid_estimate)
+
+
+if __name__=='__main__':unittest.main()
