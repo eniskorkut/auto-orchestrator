@@ -72,12 +72,16 @@ def patch_ignore(dest: Path, dry_run: bool) -> str:
     return 'updated'
 
 
-def install(target: Path, platform: str, codex_model: str, dry_run: bool, force_generated: bool) -> list[tuple[str,str]]:
+def install(target: Path, platform: str, codex_model: str, dry_run: bool, force_generated: bool, opencode_version: str = 'v2') -> list[tuple[str,str]]:
     if not target.is_dir():
         raise Conflict(f'Target project directory does not exist: {target}')
     if (target / 'tools' / 'install.py').resolve() == Path(__file__).resolve():
         raise Conflict('Install into a separate target project (do not self-install).')
     selected = {'codex','opencode','antigravity'} if platform == 'all' else {platform}
+    def destination(source: Path) -> Path:
+        if source == ROOT/'adapters/opencode-v2/auto_orchestrator.js':
+            return target/'.opencode/plugins/auto_orchestrator.js'
+        return target/source.relative_to(ROOT)
     sources = [ROOT/'.agents/skills/auto-orchestrator/SKILL.md']
     sources.extend(sorted((ROOT/'.agents/skills/auto-orchestrator/references').glob('*.md')))
     sources += [ROOT/'tools/perf.py', ROOT/'tools/hook_bridge.py']
@@ -86,13 +90,13 @@ def install(target: Path, platform: str, codex_model: str, dry_run: bool, force_
         sources.append(ROOT/'.codex/hooks.json')
     if 'opencode' in selected:
         sources.extend(sorted((ROOT/'.opencode/agents').glob('*.md')))
-        sources.extend(sorted((ROOT/'.opencode/plugins').glob('*.js')))
+        sources.append(ROOT/('adapters/opencode-v2/auto_orchestrator.js' if opencode_version == 'v2' else '.opencode/plugins/auto_orchestrator.js'))
     if 'antigravity' in selected:
         sources.extend(sorted((ROOT/'.agents/agents').glob('*.md')))
         sources.append(ROOT/'.agents/hooks.json')
     # Preflight all non-managed destinations, so no partial install on conflict.
     for source in sources:
-        dest = target/source.relative_to(ROOT)
+        dest = destination(source)
         if dest.exists() and not force_generated and dest.read_bytes() != source.read_bytes():
             raise Conflict(f'Existing file differs: {dest}; nothing changed.')
     conf = target/'.codex/config.toml'
@@ -108,7 +112,7 @@ def install(target: Path, platform: str, codex_model: str, dry_run: bool, force_
             raise Conflict(f'Invalid markers in {g}; nothing changed.')
     results=[]
     for source in sources:
-        dest=target/source.relative_to(ROOT)
+        dest=destination(source)
         results.append((str(dest.relative_to(target)),write_file(dest,source.read_text(encoding='utf-8'),dry_run,force_generated)))
     if 'codex' in selected:
         results.append(('.codex/config.toml',write_file(conf,MODEL_SETTING[codex_model],dry_run,force=True)))
@@ -122,11 +126,12 @@ def main(argv=None):
     p.add_argument('--target',required=True,type=Path)
     p.add_argument('--platform',choices=['all','codex','opencode','antigravity'],default='all')
     p.add_argument('--codex-model',choices=['inherit','luna-max'],default='inherit')
+    p.add_argument('--opencode-version',choices=['v1','v2'],default='v2')
     p.add_argument('--dry-run',action='store_true')
     p.add_argument('--force-generated',action='store_true',help='Back up and replace generated profiles/skill files; not existing Codex config')
     args=p.parse_args(argv)
     try:
-        for path,state in install(args.target.resolve(),args.platform,args.codex_model,args.dry_run,args.force_generated):
+        for path,state in install(args.target.resolve(),args.platform,args.codex_model,args.dry_run,args.force_generated,args.opencode_version):
             print(f'{state:9s} {path}')
     except (Conflict,OSError) as e:
         print(f'INSTALL ERROR: {e}',file=sys.stderr)
