@@ -39,3 +39,6 @@ In a disposable project, ask: `Add input validation and tests to a small sample 
 ## Honest CI boundary
 
 GitHub Actions runs Python unit tests, mocked lifecycle events, OpenCode V2 plugin contract tests and OS matrix tests. Hosted runners do **not** verify authenticated sessions in Codex, OpenCode or Antigravity IDE. Complete the three manual smoke tasks before marking native E2E verified.
+## Global hooks
+
+When no global hook configuration exists, the installer creates Codex `~/.codex/hooks.json` and Antigravity `~/.gemini/config/hooks.json`, pointing to safe local Python bridge copies. If you already have these files, the installer **preserves** them and reports that manual integration is necessary; it does not replace existing hook definitions. Trust Codex hooks through the IDE /hooks interface before relying on event capture. Antigravity hooks can be viewed in Customizations > Hooks. Captured Antigravity session timing is **not** authoritative subagent runtime; any benefits are omitted when evidence is insufficient.
