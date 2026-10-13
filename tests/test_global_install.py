@@ -70,10 +70,10 @@ class GlobalInstallTests(unittest.TestCase):
         self.run_install()
         codex=json.loads((self.home/'.codex/hooks.json').read_text())
         cmd=codex['hooks']['SubagentStart'][0]['hooks'][0]['command']
-        self.assertIn(str(self.home/'.codex/auto-orchestrator/tools/hook_bridge.py'),cmd)
+        self.assertIn(str((self.home/'.codex/auto-orchestrator/tools/hook_bridge.py').resolve()),cmd)
         self.assertTrue((self.home/'.codex/auto-orchestrator/tools/perf.py').is_file())
         antigravity=json.loads((self.home/'.gemini/config/hooks.json').read_text())
-        self.assertIn(str(self.home/'.gemini/config/auto-orchestrator/tools/hook_bridge.py'),
+        self.assertIn(str((self.home/'.gemini/config/auto-orchestrator/tools/hook_bridge.py').resolve()),
                       antigravity['auto-orchestrator']['SessionStart'][0]['command'])
     def test_existing_global_hooks_are_preserved(self):
         import json
