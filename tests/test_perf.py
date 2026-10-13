@@ -98,3 +98,25 @@ class PerformanceTests(unittest.TestCase):
 
 
 if __name__=='__main__':unittest.main()
+
+class VerifiedEventTests(unittest.TestCase):
+    def test_verified_before_finish_is_accepted(self):
+        from tools.perf import analyze
+        events=[{'event':'start','platform':'codex','time':1.0},
+                {'event':'agent-start','agent_id':'a','time':2.0},
+                {'event':'agent-start','agent_id':'b','time':2.0},
+                {'event':'agent-stop','agent_id':'a','time':8.0},
+                {'event':'agent-stop','agent_id':'b','time':8.0},
+                {'event':'verified','time':9.0},
+                {'event':'finish','status':'success','verified':False,'time':10.0}]
+        s=analyze('run-1',events)
+        self.assertTrue(s.has_valid_estimate)
+        self.assertTrue(s.verified)
+        self.assertEqual(s.estimated_parallelism_seconds,3)
+
+    def test_verified_event_cannot_override_failure(self):
+        from tools.perf import analyze
+        events=[{'event':'start','platform':'codex','time':1},
+                {'event':'verified','time':2},
+                {'event':'finish','status':'failed','time':3}]
+        self.assertFalse(analyze('run-1',events).has_valid_estimate)

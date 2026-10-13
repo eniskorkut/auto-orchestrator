@@ -1,0 +1,49 @@
+{
+  "description": "Auto-Orchestrator auto-activation and subagent runtime capture (project local).",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python tools/hook_bridge.py codex",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python tools/hook_bridge.py codex",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python tools/hook_bridge.py codex",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python tools/hook_bridge.py codex",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

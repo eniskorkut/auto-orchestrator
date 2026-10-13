@@ -29,12 +29,15 @@ Read this skill whenever a coding task is non-trivial, spans components, needs i
 
 ## Instrumentation
 
-If Python is available, and you can access the installed `tools/perf.py` in the project root:
+If the optional native hooks/plugin were installed and trusted, they capture platform lifecycle events automatically. Codex emits authoritative subagent spans via SubagentStart/SubagentStop. The OpenCode classic plugin measures the native synchronous `task` tool span. Antigravity's hooks track total execution duration but **do not** claim subagent runtimes without authoritative completion signals.
 
-1. For **delegated** tasks call `python tools/perf.py start --run-id <opaque-unique-run-id> --platform <codex|opencode|antigravity>` at the task start.
-2. Call `agent-start` just before native spawn and `agent-stop` when the corresponding job completes; use unique opaque agent IDs (not prompts or names containing personal data). If event timings are not observable, do not fabricate them.
-3. After integration/testing, call `finish --status success --verified` only if verification truly passed. Otherwise finish with `--status failed` (no `--verified`).
-4. Call `report` and append a **single sentence** only when it provides a positive estimate. When missing evidence, omit the performance sentence. No event storage outside `.auto-orchestrator/`.
+If Python is available and the installed project has `tools/perf.py`:
+
+1. Hooks/plugin start and finish a run automatically when supported. **Do not manually duplicate** those events. For installs without active hooks, use the V1 CLI events manually with real timestamps.
+2. After you have actually verified tests and integration, and **before the final answer/Stop hook**, run `python tools/perf.py verified --latest`. This is not an automatic success assumption; do not run it on partial/failed validation.
+3. At completion inspect `python tools/perf.py report --latest`. Append one performance sentence **only if** `has_valid_estimate` is true. A lack of a verified estimate is not evidence of savings.
+4. Codex hook-derived run IDs are opaque SHA-256 prefixes of session/turn. OpenCode plugin derives opaque run IDs from its session and nonce; don't infer these IDs from task text.
+5. If native hooks are not trusted/active, do not claim they captured timing. No prompts, code, raw session or agent IDs go to the telemetry log.
 
 If installation lacks `perf.py` or the agent cannot reliably track timing, omit metrics. You can always report what actually ran.
 

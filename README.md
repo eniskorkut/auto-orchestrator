@@ -1,4 +1,4 @@
-# Auto-Orchestrator (V1)
+# Auto-Orchestrator (V2)
 
 Portable, opt-in native-subagent orchestration for **Codex**, **OpenCode**, and **Google Antigravity**.
 
@@ -35,9 +35,28 @@ py -3 tools/install.py --target C:\\work\\my-project --platform all --codex-mode
 
 New chats/sessions may be necessary for configuration to be discovered. The skill is discovered automatically but a given model may still decline delegation; no hook-based hard enforcement is claimed.
 
+## Automatic activation and telemetry (V2)
+
+Installer now includes the following project-local instrumentation by default:
+
+| Client | Activation/telemetry | Limit |
+|---|---|---|
+| Codex | `.codex/hooks.json` + `tools/hook_bridge.py` (`UserPromptSubmit`, `SubagentStart`, `SubagentStop`, `Stop`) | Trust the project and hooks with `/hooks` before they run. |
+| OpenCode classic | `.opencode/plugins/auto_orchestrator.js` (system instructions, session + native `task` tool lifecycle) | OpenCode V2 plugin API is different; V2 adapter not yet provided. |
+| Antigravity | `.agents/hooks.json` + hook bridge (`SessionStart`, `PreInvocation`, `Stop`) | Measures main execution only; native subagent run-time events not established. |
+
+The hooks are advisory and do not bypass user approval, client permissions, or native capabilities. Some client installs only discover new hooks after restart. Auto-activation is best-effort, not guaranteed spawning. Hook tool commands assume `python` is available and run from the project root; adjust the command on installations with only `python3`.
+
 ## Reporting
 
-When the agent follows the skill it calls `tools/perf.py` around a delegated run:
+Hook-aware mode begins/ends runs automatically where supported. After successful validation, **before the final answer**:
+
+```bash
+python tools/perf.py verified --latest
+python tools/perf.py report --latest
+```
+
+Manual fallback (no enabled hooks/plugin):
 
 ```bash
 python tools/perf.py start --run-id demo --platform codex
@@ -45,7 +64,8 @@ python tools/perf.py agent-start --run-id demo --agent-id explorer
 python tools/perf.py agent-stop --run-id demo --agent-id explorer
 python tools/perf.py agent-start --run-id demo --agent-id tester
 python tools/perf.py agent-stop --run-id demo --agent-id tester
-python tools/perf.py finish --run-id demo --status success --verified
+python tools/perf.py verified --run-id demo
+python tools/perf.py finish --run-id demo --status success
 python tools/perf.py report --run-id demo
 ```
 
@@ -62,7 +82,7 @@ Formula: `sum(agent wall times) - elapsed run wall time` (conservative approxima
 - **Antigravity** native custom subagents are documented for **2.0/CLI**; IDE skill discovery is supported, but native subagent parity needs verification on installed IDE versions.
 - **OpenCode** agent definitions follow the current classic Markdown agent config. V2 may require adapting permissions/schema depending on installed client version.
 - **Codex** subagent model override is best-effort configuration; model ID and access should be checked on an actual run.
-- **V1** has no background daemon, hook-based event adapter, true cross-process DAG scheduler, automatic Git worktree operations, or live client telemetry ingestion. Native platforms execute the work and the skill defines a safe policy. Native-client end-to-end tests have **not** been run.
+- **V2** adds Codex/Antigravity lifecycle hook adapters and OpenCode classic plugin capture, but has no background daemon, standalone DAG runner, automatic Git worktree operations, or cross-platform guaranteed active-model telemetry. Native-client end-to-end tests have **not** been run.
 
 ## Sources
 
@@ -74,6 +94,9 @@ Formula: `sum(agent wall times) - elapsed run wall time` (conservative approxima
 
 ```bash
 python -m unittest discover -s tests -v
+node --test tests/js/test_opencode.mjs
 ```
+
+Integration tests replay real documented hook input shapes using subprocesses and simulate OpenCode events in Node. They do not authenticate to or launch Codex, OpenCode, or Antigravity clients.
 
 Licensed under MIT (see LICENSE).

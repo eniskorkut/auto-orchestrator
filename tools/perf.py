@@ -12,7 +12,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 SAFE_ID = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$')
-EVENTS = {'start','agent-start','agent-stop','finish'}
+EVENTS = {'start','agent-start','agent-stop','verified','finish'}
 
 class EventError(ValueError):
     pass
@@ -69,6 +69,8 @@ def append_event(root: Path, run_id: str, event: str, *, platform: str | None = 
         if not agent_id:
             raise EventError('Agent ID required')
         payload['agent_id'] = agent_id
+    elif event == 'verified':
+        pass  # Must be emitted by the agent after actual validation, never by a lifecycle hook.
     elif event == 'finish':
         if status not in ('success','failed','cancelled'):
             raise EventError('Finish status must be success, failed or cancelled')
@@ -124,11 +126,13 @@ def analyze(run_id: str, events: list[dict]) -> Summary:
                 begun=started.pop(aid)
                 if t<begun: issue='Agent stopped before it started'
                 spans.append((aid,begun,t))
+        elif name=='verified':
+            pass
         elif name=='finish':
             finished=e
         else:
             issue='Unknown event'
-    verified = bool(finished and finished.get('verified'))
+    verified = bool(finished and (finished.get('verified') or any(e.get('event')=='verified' for e in events[1:])))
     status = finished.get('status','unknown') if finished else 'running'
     elapsed=float(finished['time'])-start if finished else None
     summed=sum(e-s for _,s,e in spans) if not issue else None
@@ -169,9 +173,10 @@ def main(argv=None) -> int:
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root',default='.',type=Path,help='Project directory (default: current directory)')
     commands=parser.add_subparsers(dest='command',required=True)
-    for cmd in ('start','agent-start','agent-stop','finish','report'):
+    for cmd in ('start','agent-start','agent-stop','verified','finish','report'):
         p=commands.add_parser(cmd)
-        p.add_argument('--run-id',required=True)
+        p.add_argument('--run-id')
+        if cmd in ('verified','report'): p.add_argument('--latest',action='store_true',help='Use most recent locally recorded run')
         if cmd=='start':p.add_argument('--platform',required=True,choices=['codex','opencode','antigravity'])
         if cmd in ('agent-start','agent-stop'):p.add_argument('--agent-id',required=True)
         if cmd=='finish':
@@ -181,6 +186,15 @@ def main(argv=None) -> int:
         if cmd=='report':p.add_argument('--json',action='store_true')
     a=parser.parse_args(argv)
     try:
+        if getattr(a,'latest',False):
+            if a.run_id:
+                raise EventError('Choose either --run-id or --latest')
+            paths = sorted((a.root/'.auto-orchestrator/runs').glob('*.jsonl'), key=lambda p: (p.stat().st_mtime_ns, p.name))
+            if not paths:
+                raise EventError('No recorded run')
+            a.run_id = paths[-1].stem
+        if not a.run_id:
+            raise EventError('Supply --run-id or --latest')
         if a.command=='report':
             summary=analyze(a.run_id,load_events(path_for(a.root,a.run_id)))
             print(json.dumps(asdict(summary),indent=2) if a.json else display(summary))
