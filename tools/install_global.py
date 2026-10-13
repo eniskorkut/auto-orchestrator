@@ -133,7 +133,7 @@ def execute(home:Path,platforms:set[str],opencode_version:str='v2',codex_model:s
     guides=global_guidance_paths(home,platforms)
     for name in ('.codex/hooks.json','.gemini/config/hooks.json'):
         p=home/name
-        if p.is_file() and p not in files and ((name.startswith('.codex') and 'codex' in platforms) or
+        if p.is_file() and p not in files and str(p) not in old_files and ((name.startswith('.codex') and 'codex' in platforms) or
                                                 (name.startswith('.gemini') and 'antigravity' in platforms)):
             notes.append('preserved existing hooks, manual integration needed: '+str(p))
     # Preflight everything before changing files.
