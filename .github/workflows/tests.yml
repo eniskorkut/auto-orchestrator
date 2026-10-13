@@ -24,7 +24,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: node --test tests/js/test_opencode.mjs
+      - run: node --test tests/js/test_opencode.mjs tests/js/test_opencode_v2.mjs
   cross-platform:
     strategy:
       matrix:
