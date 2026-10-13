@@ -71,4 +71,18 @@ class InstallerTests(unittest.TestCase):
         with self.assertRaises(Conflict):self.call('opencode')
         self.assertEqual(p.read_text(),'important user file')
 
+
+class OpenCodeVersionTests(unittest.TestCase):
+    def test_v2_default_and_v1_switch(self):
+        with tempfile.TemporaryDirectory() as td:
+            target=Path(td)
+            install(target,'opencode','inherit',False,False)
+            plugin=target/'.opencode/plugins/auto_orchestrator.js'
+            self.assertIn("id: 'auto-orchestrator'",plugin.read_text())
+            with self.assertRaises(Conflict):
+                install(target,'opencode','inherit',False,False,'v1')
+            install(target,'opencode','inherit',False,True,'v1')
+            self.assertIn('AutoOrchestratorPlugin',plugin.read_text())
+            self.assertTrue(plugin.with_name('auto_orchestrator.js.bak').exists())
+
 if __name__=='__main__':unittest.main()
