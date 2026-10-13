@@ -35,6 +35,18 @@ def installed_map(home:Path,platforms:set[str],opencode_version:str,codex_model:
         skills_at(codex/'skills/auto-orchestrator')
         for source in (ROOT/'.codex/agents').glob('*.toml'):
             files[codex/'agents'/source.name]=source.read_bytes()
+        # Global runtime adapters. Existing hook files belong to the user and are left untouched.
+        bridge=codex/'auto-orchestrator/tools/hook_bridge.py'
+        files[bridge]=(ROOT/'tools/hook_bridge.py').read_bytes()
+        files[codex/'auto-orchestrator/tools/perf.py']=(ROOT/'tools/perf.py').read_bytes()
+        hooks_path=codex/'hooks.json'
+        if not hooks_path.exists():
+            hooks=json.loads((ROOT/'.codex/hooks.json').read_text(encoding='utf-8'))
+            for group in hooks['hooks'].values():
+                for item in group:
+                    for h in item.get('hooks',[]):
+                        h['command']=h['command'].replace('python tools/hook_bridge.py','python "'+str(bridge)+'"')
+            files[hooks_path]=(json.dumps(hooks,indent=2)+'\n').encode('utf-8')
         config=codex/'config.toml'
         if not config.exists():
             lines=['[agents]','enabled = true','max_concurrent_threads_per_session = 3']
@@ -61,6 +73,19 @@ def installed_map(home:Path,platforms:set[str],opencode_version:str,codex_model:
         skills_at(gemini/'antigravity-cli/skills/auto-orchestrator')
         for source in (ROOT/'.agents/agents').glob('*.md'):
             files[gemini/'config/agents'/source.stem/'agent.md']=source.read_bytes()
+        bridge=gemini/'config/auto-orchestrator/tools/hook_bridge.py'
+        files[bridge]=(ROOT/'tools/hook_bridge.py').read_bytes()
+        files[gemini/'config/auto-orchestrator/tools/perf.py']=(ROOT/'tools/perf.py').read_bytes()
+        hooks_path=gemini/'config/hooks.json'
+        if not hooks_path.exists():
+            hooks=json.loads((ROOT/'.agents/hooks.json').read_text(encoding='utf-8'))
+            for group in hooks.values():
+                for entries in group.values():
+                    if not isinstance(entries,list): continue
+                    for h in entries:
+                        if isinstance(h,dict) and isinstance(h.get('command'),str):
+                            h['command']=h['command'].replace('python tools/hook_bridge.py','python "'+str(bridge)+'"')
+            files[hooks_path]=(json.dumps(hooks,indent=2)+'\n').encode('utf-8')
         files[gemini/'config/rules/auto-orchestrator.md']=('# Auto-Orchestrator\n'+GUIDANCE.replace(BEGIN,'').replace(END,'').strip()+'\n').encode()
     return files
 
@@ -106,6 +131,11 @@ def execute(home:Path,platforms:set[str],opencode_version:str='v2',codex_model:s
     if not platforms: raise InstallError('Choose a platform')
     files=installed_map(home,platforms,opencode_version,codex_model)
     guides=global_guidance_paths(home,platforms)
+    for name in ('.codex/hooks.json','.gemini/config/hooks.json'):
+        p=home/name
+        if p.is_file() and p not in files and ((name.startswith('.codex') and 'codex' in platforms) or
+                                                (name.startswith('.gemini') and 'antigravity' in platforms)):
+            notes.append('preserved existing hooks, manual integration needed: '+str(p))
     # Preflight everything before changing files.
     for path,content in files.items():
         if path.is_file() and path.read_bytes()!=content and old_files.get(str(path))!=sha(path.read_bytes()):
@@ -127,8 +157,8 @@ def execute(home:Path,platforms:set[str],opencode_version:str='v2',codex_model:s
             path.write_text(content,encoding='utf-8')
         manifest_path.parent.mkdir(parents=True,exist_ok=True)
         manifest_path.write_text(json.dumps({'files':new_files,'guidance':new_guidance},indent=2),encoding='utf-8')
-    return [('would install' if dry_run else 'installed')+' '+str(len(files))+' files',
-            'Restart IDE to detect global skill; live subagent spawning needs native client testing.']
+    return notes+[('would install' if dry_run else 'installed')+' '+str(len(files))+' files',
+            'Restart IDE and trust hooks; native subagent/model execution still requires manual testing.']
 
 def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__)
