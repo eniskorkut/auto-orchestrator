@@ -100,3 +100,19 @@ node --test tests/js/test_opencode.mjs
 Integration tests replay real documented hook input shapes using subprocesses and simulate OpenCode events in Node. They do not authenticate to or launch Codex, OpenCode, or Antigravity clients.
 
 Licensed under MIT (see LICENSE).
+
+## V3 — global installation and IDE testing
+
+V3 adds a global, reversible setup for **Codex, OpenCode Classic/V2, and Antigravity IDE/CLI**; it supplements the project-local V2 installer.
+
+```bash
+python tools/install_global.py --platform all --opencode-version v2 --codex-model inherit --dry-run
+python tools/install_global.py --platform all --opencode-version v2 --codex-model inherit
+python tools/doctor.py --platform all
+# Remove only managed, unchanged assets (preserves user-edited files):
+python tools/install_global.py --uninstall
+```
+
+For Codex Luna Max, pass `--codex-model luna-max`. If your existing `~/.codex/config.toml` requires edits, the global installer **fails safely** and provides instructions rather than rewriting it. Global OpenCode V2 uses a native `setup(ctx)` plugin with event subscriptions; V1 uses its legacy plugin. User files are not overwritten. See [IDE_TESTING.md](IDE_TESTING.md) for three independent manual smoke scenarios.
+
+**Limits:** global installation does not configure global Codex hooks or produce verified telemetry for every client. The `doctor` command checks file readiness, **not** real model choice, native subagent spawning or human time savings. Hosted CI tests mocked lifecycle contracts; actual IDE integration still needs manual smoke testing.
