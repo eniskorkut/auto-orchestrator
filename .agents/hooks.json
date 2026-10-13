@@ -1,0 +1,25 @@
+{
+  "auto-orchestrator": {
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "python tools/hook_bridge.py antigravity SessionStart",
+        "timeout": 5
+      }
+    ],
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "python tools/hook_bridge.py antigravity PreInvocation",
+        "timeout": 5
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "python tools/hook_bridge.py antigravity Stop",
+        "timeout": 5
+      }
+    ]
+  }
+}

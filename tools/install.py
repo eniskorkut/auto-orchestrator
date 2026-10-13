@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install Auto-Orchestrator V1 to an existing project safely (stdlib only)."""
+"""Install Auto-Orchestrator V2 to an existing project safely (stdlib only)."""
 from __future__ import annotations
 
 import argparse
@@ -80,10 +80,16 @@ def install(target: Path, platform: str, codex_model: str, dry_run: bool, force_
     selected = {'codex','opencode','antigravity'} if platform == 'all' else {platform}
     sources = [ROOT/'.agents/skills/auto-orchestrator/SKILL.md']
     sources.extend(sorted((ROOT/'.agents/skills/auto-orchestrator/references').glob('*.md')))
-    sources += [ROOT/'tools/perf.py']
-    if 'codex' in selected: sources.extend(sorted((ROOT/'.codex/agents').glob('*.toml')))
-    if 'opencode' in selected: sources.extend(sorted((ROOT/'.opencode/agents').glob('*.md')))
-    if 'antigravity' in selected: sources.extend(sorted((ROOT/'.agents/agents').glob('*.md')))
+    sources += [ROOT/'tools/perf.py', ROOT/'tools/hook_bridge.py']
+    if 'codex' in selected:
+        sources.extend(sorted((ROOT/'.codex/agents').glob('*.toml')))
+        sources.append(ROOT/'.codex/hooks.json')
+    if 'opencode' in selected:
+        sources.extend(sorted((ROOT/'.opencode/agents').glob('*.md')))
+        sources.extend(sorted((ROOT/'.opencode/plugins').glob('*.js')))
+    if 'antigravity' in selected:
+        sources.extend(sorted((ROOT/'.agents/agents').glob('*.md')))
+        sources.append(ROOT/'.agents/hooks.json')
     # Preflight all non-managed destinations, so no partial install on conflict.
     for source in sources:
         dest = target/source.relative_to(ROOT)
