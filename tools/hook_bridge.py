@@ -18,7 +18,7 @@ except ModuleNotFoundError:
     from perf import EventError, append_event, load_events, path_for
 
 POLICY = ('Auto-Orchestrator: for non-trivial coding tasks read '
-          '.agents/skills/auto-orchestrator/SKILL.md. Delegate independent work '
+          'auto-orchestrator SKILL.md (project-local or globally installed). Delegate independent work '
           'to native subagents automatically when safe, with max 3 concurrent; '
           'use one agent for trivial work. Verify changes before reporting. '
           'Do not invent subagent timings or human time savings.')
@@ -89,18 +89,34 @@ def handle_antigravity(payload: dict, root: Path, event: str) -> dict:
     return {}
 
 
+def root_for_payload(payload: dict, platform: str) -> Path:
+    # Native hooks may run from the IDE process directory rather than a
+    # workspace directory. Prefer the caller-reported active workspace.
+    if platform == 'codex':
+        cwd=payload.get('cwd')
+        if isinstance(cwd,str) and cwd and Path(cwd).is_dir():
+            return Path(cwd).resolve()
+    elif platform == 'antigravity':
+        paths=payload.get('workspacePaths')
+        if isinstance(paths,list) and len(paths)==1 and isinstance(paths[0],str):
+            candidate=Path(paths[0])
+            if candidate.is_dir():
+                return candidate.resolve()
+    return Path.cwd()
+
 def main(argv=None) -> int:
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('platform',choices=['codex','antigravity'])
     parser.add_argument('event',nargs='?',default='')
-    parser.add_argument('--root',type=Path,default=Path.cwd())
+    parser.add_argument('--root',type=Path,default=None)
     args=parser.parse_args(argv)
     try:
         payload=json.load(sys.stdin)
         if not isinstance(payload,dict):
             return 0
-        result=(handle_codex(payload,args.root) if args.platform=='codex' else
-                handle_antigravity(payload,args.root,args.event))
+        root=args.root if args.root is not None else root_for_payload(payload,args.platform)
+        result=(handle_codex(payload,root) if args.platform=='codex' else
+                handle_antigravity(payload,root,args.event))
         if result:
             print(json.dumps(result,separators=(',',':')))
     except (EventError,OSError,TypeError,ValueError,KeyError) as exc:
