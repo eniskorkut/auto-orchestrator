@@ -9,6 +9,10 @@ import os
 import shlex
 import subprocess
 from pathlib import Path
+try:
+    from tools.hook_integration import HookIntegrationError, merge as merge_hooks, remove as remove_hooks, parse_hooks, pretty
+except ModuleNotFoundError:
+    from hook_integration import HookIntegrationError, merge as merge_hooks, remove as remove_hooks, parse_hooks, pretty
 
 ROOT = Path(__file__).resolve().parents[1]
 BEGIN = '<!-- auto-orchestrator:begin -->'
@@ -118,6 +122,30 @@ def installed_map(home:Path,platforms:set[str],opencode_version:str,codex_model:
         files[gemini/'config/rules/auto-orchestrator.md']=('# Auto-Orchestrator\n'+GUIDANCE.replace(BEGIN,'').replace(END,'').strip()+'\n').encode()
     return files
 
+def native_hook_fragment(home: Path, platform: str) -> dict:
+    if platform == 'codex':
+        source=ROOT/'.codex/hooks.json'
+        bridge=home/'.codex/auto-orchestrator/tools/hook_bridge.py'
+        data=json.loads(source.read_text(encoding='utf-8'))
+        for groups in data['hooks'].values():
+            for group in groups:
+                for handler in group.get('hooks',[]):
+                    handler['command']=handler['command'].replace(
+                        'python tools/hook_bridge.py',
+                        shell_arg(Path(sys.executable))+' '+shell_arg(bridge))
+        return {'hooks':data['hooks']}
+    if platform == 'antigravity':
+        source=ROOT/'.agents/hooks.json'
+        bridge=home/'.gemini/config/auto-orchestrator/tools/hook_bridge.py'
+        data=json.loads(source.read_text(encoding='utf-8'))
+        for handlers in data['auto-orchestrator'].values():
+            for handler in handlers:
+                handler['command']=handler['command'].replace(
+                    'python tools/hook_bridge.py',
+                    shell_arg(Path(sys.executable))+' '+shell_arg(bridge))
+        return data
+    raise InstallError('Unknown native hook platform')
+
 def global_guidance_paths(home:Path,platforms:set[str])->list[Path]:
     result=[]
     if 'codex' in platforms: result.append(home/'.codex/AGENTS.md')
@@ -141,9 +169,27 @@ def execute(home:Path,platforms:set[str],opencode_version:str='v2',codex_model:s
     old=json.loads(manifest_path.read_text(encoding='utf-8')) if manifest_path.exists() else {'files':{},'guidance':[]}
     old_files=old.get('files',{})
     notes=[]
+    old_hook_injections=old.get('hook_injections',{})
+    if not isinstance(old_hook_injections,dict):
+        raise InstallError('Invalid saved hook integration metadata')
     if uninstall:
         for name in list(old_files)+old.get('guidance',[]):
             guard_path(home,Path(name))
+        hook_removals=[]
+        for name,entry in old_hook_injections.items():
+            path=Path(name)
+            guard_path(home,path)
+            if not path.is_file():
+                notes.append('hook file missing, nothing to remove: '+str(path))
+                continue
+            if not isinstance(entry,dict) or entry.get('platform') not in ('codex','antigravity'):
+                raise InstallError('Invalid hook integration manifest entry')
+            current=parse_hooks(path.read_text(encoding='utf-8'))
+            new,changed,modified=remove_hooks(current,entry['fragment'],entry['platform'])
+            if changed:
+                hook_removals.append((path,pretty(new)))
+            if modified:
+                notes.append('preserved user-modified hook entry: '+str(path))
         remove_files=[]
         for name,checksum in old_files.items():
             path=Path(name)
@@ -158,6 +204,7 @@ def execute(home:Path,platforms:set[str],opencode_version:str='v2',codex_model:s
         if not dry_run:
             for path in remove_files:path.unlink()
             for path,data in edits:path.write_text(data,encoding='utf-8')
+            for path,data in hook_removals:path.write_text(data,encoding='utf-8')
             if manifest_path.exists():manifest_path.unlink()
         return notes+['removed '+str(len(remove_files))+' managed files (dry-run='+str(dry_run)+')']
     if not platforms: raise InstallError('Choose a platform')
@@ -165,11 +212,29 @@ def execute(home:Path,platforms:set[str],opencode_version:str='v2',codex_model:s
     guides=global_guidance_paths(home,platforms)
     for path in [*files,*guides]:
         guard_path(home,path)
-    for name in ('.codex/hooks.json','.gemini/config/hooks.json'):
-        p=home/name
-        if p.is_file() and p not in files and str(p) not in old_files and ((name.startswith('.codex') and 'codex' in platforms) or
-                                                (name.startswith('.gemini') and 'antigravity' in platforms)):
-            notes.append('preserved existing hooks, manual integration needed: '+str(p))
+    # Existing user-owned hook files are extended in place, never managed as
+    # complete files; uninstall removes only the exact entries we injected.
+    hook_edits=[]
+    hook_injections=dict(old_hook_injections)
+    for platform,relative in (('codex','.codex/hooks.json'),('antigravity','.gemini/config/hooks.json')):
+        if platform not in platforms:
+            continue
+        p=home/relative
+        guard_path(home,p)
+        if not p.is_file() or p in files or str(p) in old_files:
+            continue
+        existing=parse_hooks(p.read_text(encoding='utf-8'))
+        stored=hook_injections.get(str(p))
+        fragment=stored['fragment'] if stored else native_hook_fragment(home,platform)
+        try:
+            merged,changed=merge_hooks(existing,fragment,platform)
+        except HookIntegrationError as exc:
+            raise InstallError(str(exc)) from exc
+        if changed:
+            hook_edits.append((p,pretty(merged)))
+            notes.append('integrated native hooks: '+str(p))
+        if changed or stored:
+            hook_injections[str(p)]={'platform':platform,'fragment':fragment}
     # Preflight everything before changing files.
     for path,content in files.items():
         if path.is_file() and path.read_bytes()!=content and old_files.get(str(path))!=sha(path.read_bytes()):
@@ -189,8 +254,10 @@ def execute(home:Path,platforms:set[str],opencode_version:str='v2',codex_model:s
         for path,content in edits:
             path.parent.mkdir(parents=True,exist_ok=True)
             path.write_text(content,encoding='utf-8')
+        for path,content in hook_edits:
+            path.write_text(content,encoding='utf-8')
         manifest_path.parent.mkdir(parents=True,exist_ok=True)
-        manifest_path.write_text(json.dumps({'files':new_files,'guidance':new_guidance},indent=2),encoding='utf-8')
+        manifest_path.write_text(json.dumps({'files':new_files,'guidance':new_guidance,'hook_injections':hook_injections},indent=2),encoding='utf-8')
     return notes+[('would install' if dry_run else 'installed')+' '+str(len(files))+' files',
             'Restart IDE and trust hooks; native subagent/model execution still requires manual testing.']
 
@@ -205,7 +272,7 @@ def main(argv=None):
     args=parser.parse_args(argv)
     platforms={'codex','opencode','antigravity'} if args.platform=='all' else {args.platform}
     try:print('\n'.join(execute(args.home,platforms,args.opencode_version,args.codex_model,args.dry_run,args.uninstall)))
-    except (InstallError,OSError,ValueError) as exc:
+    except (InstallError,HookIntegrationError,OSError,ValueError) as exc:
         print('INSTALL ERROR: '+str(exc),file=sys.stderr)
         return 1
     return 0
