@@ -29,7 +29,7 @@ class NativeHookIntegrationTests(unittest.TestCase):
         execute(self.home,{"codex"})
         self.assertEqual(json.loads(hooks.read_text()),installed)
         manifest = json.loads((self.home/".auto-orchestrator/auto-orchestrator-global-manifest.json").read_text())
-        self.assertEqual(manifest["hook_injections"][str(hooks)]["platform"],"codex")
+        self.assertEqual(manifest["hook_injections"][str(hooks.resolve())]["platform"],"codex")
         execute(self.home,{"codex"},uninstall=True)
         self.assertEqual(json.loads(hooks.read_text()),custom)
 
