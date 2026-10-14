@@ -115,7 +115,7 @@ python tools/install_global.py --uninstall
 
 For Codex Luna Max, pass `--codex-model luna-max`. If your existing `~/.codex/config.toml` requires edits, the global installer **fails safely** and provides instructions rather than rewriting it. Global OpenCode V2 uses a native `setup(ctx)` plugin with event subscriptions; V1 uses its legacy plugin. User files are not overwritten. See [IDE_TESTING.md](IDE_TESTING.md) for three independent manual smoke scenarios.
 
-**Limits:** global installation creates Codex/Antigravity hook files only when they do not already exist; pre-existing hook files are preserved and require manual integration. OpenCode V2 plugin loading requires an IDE restart. Native telemetry remains unverified until observed in the running client. The `doctor` command checks file readiness, **not** real model choice, native subagent spawning or human time savings. Hosted CI tests mocked lifecycle contracts; actual IDE integration still needs manual smoke testing.
+**Limits:** global installation creates Codex/Antigravity hook files only when they do not already exist; existing hook files are extended with only the Auto-Orchestrator hook groups/namespace; existing user hook entries are preserved and injected entries are removed on uninstall. Conflicting or invalid hook configurations stop installation safely. OpenCode V2 plugin loading requires an IDE restart. Native telemetry remains unverified until observed in the running client. The `doctor` command checks file readiness, **not** real model choice, native subagent spawning or human time savings. Hosted CI tests mocked lifecycle contracts; actual IDE integration still needs manual smoke testing.
 
 **Project-local OpenCode version:** `python tools/install.py --target /your/project --platform opencode --opencode-version v2` (default). For Classic use `--opencode-version v1`; a previously installed plugin requires `--force-generated` to switch safely with backup.
 
@@ -165,3 +165,12 @@ Read [BENCHMARK.md](BENCHMARK.md) to collect matched serial/orchestrated runs. P
 For **global OpenCode V2**, run `python <global-opencode-config>/auto-orchestrator/tools/perf.py --root <your-project> report --latest --json` (replace placeholders with actual paths). The plugin writes local run events in the project. Restart OpenCode after installing to load the V2 plugin, then confirm that new `.auto-orchestrator/runs/*.jsonl` files appear. A passing `doctor` or mock plugin test alone does not prove runtime telemetry is active.
 
 Paths protected by the installers are checked for symlink traversal; concurrent external filesystem mutation is outside this local installer guarantee. Credentials used for Supervisor attempt leases are local control values, not a cross-user authorization mechanism.
+
+
+## Codex / Antigravity native-hook compatibility
+
+Codex user hooks reside at `~/.codex/hooks.json` and Antigravity user hooks at `~/.gemini/config/hooks.json`. When these files already exist, the global installer merges **only** our native hook entries with the existing JSON, preserves user groups, and remembers the injected entries for safe uninstall. Dry runs make no changes. Conflicting Antigravity `auto-orchestrator` namespace entries or malformed hook files cause a safe installation error instead of an overwrite. After setup, review/trust newly configured hooks inside the native client; restarting the IDE and passing `doctor` do not prove runtime execution.
+
+The hook bridge now uses Codex's `cwd` or Antigravity's single active `workspacePaths` path when provided so event logs are saved under the active project; otherwise it falls back to the hook process working directory. For multiple Antigravity workspaces, it intentionally does not guess an active project.
+
+**Important:** Codex `SubagentStart`/`SubagentStop` can supply native subagent durations; Antigravity's hook-based telemetry still tracks sessions, **not** confirmed subagent wall time. Do not derive subagent time savings from Antigravity session hooks. Review [IDE_TESTING.md](IDE_TESTING.md) and platform diagnostics before claiming live E2E success.
