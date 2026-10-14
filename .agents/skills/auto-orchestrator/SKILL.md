@@ -41,4 +41,11 @@ If Python is available and the installed project has `tools/perf.py`:
 
 If installation lacks `perf.py` or the agent cannot reliably track timing, omit metrics. You can always report what actually ran.
 
-For full details see `references/delegation.md`, `references/verification.md`, `references/reporting.md`.
+
+## V4: native task supervision, context routing and safe integration
+
+For **complex** tasks with independent native subagents, use the installed `tools/supervisor.py` to track DAG dependencies, task IDs, attempt leases, timeouts, limited retries, confirmed cancellation, and structured results. Use `tools/router.py` to prepare task-scoped context and select only relevant installed skills. Use `tools/worktree.py` for **independent parallel writing** when explicit workspace isolation is needed.
+
+Read `references/supervision.md` for the exact protocol. Keep trivial tasks single-agent, and do not manufacture a plan to justify subagents. These are coordination helpers: they do **not** spawn/kill native clients and a claimed task is not proof of a spawned agent. Never free a timed-out task's write scope until the client confirms its termination. The worktree tool only previews merges; integration requires the main agent's validation. Do not allow supervisor claims or planned work to inflate performance reports.
+
+For full details see `references/delegation.md`, `references/verification.md`, `references/reporting.md`, `references/supervision.md`.
