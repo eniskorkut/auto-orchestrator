@@ -1,0 +1,13 @@
+{
+  "summary": "Inspected documentation; findings returned",
+  "changed_files": [],
+  "tests": [
+    {
+      "name": "README reference inspection",
+      "status": "passed"
+    }
+  ],
+  "findings": [
+    "No critical issues identified in this sample."
+  ]
+}
