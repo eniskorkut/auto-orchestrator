@@ -44,6 +44,11 @@ def read_manifest(repo,task):
         raise WorktreeError("Managed worktree metadata does not match repository")
     return data
 
+def common_git_dir(path):
+    value=git(path,"rev-parse","--git-common-dir").stdout.strip()
+    p=Path(value)
+    return (p if p.is_absolute() else Path(path)/p).resolve()
+
 def create(repo_path,task):
     repo=repository(repo_path)
     identifier(task)
@@ -73,7 +78,7 @@ def preview(repo_path,task):
     repo=repository(repo_path)
     data=read_manifest(repo,task)
     wt=Path(data["path"])
-    if repository(wt)!=repo:
+    if common_git_dir(wt)!=common_git_dir(repo):
         raise WorktreeError("Task worktree is not attached to expected repository")
     ensure_clean(repo)
     ensure_clean(wt)
