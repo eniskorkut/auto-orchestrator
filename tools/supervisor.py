@@ -189,7 +189,7 @@ class Supervisor:
                 if any(conflicts(left,{"read":json.loads(b["read_scope"]),"write":json.loads(b["write_scope"])})
                        for b in active):
                     continue
-                lease=secrets.token_urlsafe(24)
+                lease='ao_'+secrets.token_hex(24)
                 attempts=task["attempts"]+1
                 self.conn.execute("UPDATE tasks SET state='running', lease=?, attempts=?, started=?, finished=NULL WHERE run_id=? AND id=?",
                                   (lease,attempts,now,run,task["id"]))
