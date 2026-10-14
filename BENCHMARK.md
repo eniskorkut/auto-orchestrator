@@ -24,3 +24,6 @@ Run: python tools/benchmark.py real-observations.json
 The script reports group counts, verified completion rates and median speedup (possibly negative). If task, model or commit differ, no misleading comparison is produced. If fewer than three verified observations per mode exist, both saved seconds and speedup are null. This is not a measurement of human engineering labor.
 
 For repeatability, restore the exact commit, use a disposable environment, and use equivalent acceptance checks on every repetition.
+
+
+The global and project installers ship `benchmark.py` under their respective `auto-orchestrator/tools` or project `tools` paths. Benchmark observations must come from actual independently verified IDE runs.
