@@ -39,6 +39,8 @@ def installed_map(home:Path,platforms:set[str],opencode_version:str,codex_model:
         bridge=codex/'auto-orchestrator/tools/hook_bridge.py'
         files[bridge]=(ROOT/'tools/hook_bridge.py').read_bytes()
         files[codex/'auto-orchestrator/tools/perf.py']=(ROOT/'tools/perf.py').read_bytes()
+        for name in ('supervisor.py','router.py','worktree.py'):
+            files[codex/'auto-orchestrator/tools'/name]=(ROOT/'tools'/name).read_bytes()
         hooks_path=codex/'hooks.json'
         if not hooks_path.exists():
             hooks=json.loads((ROOT/'.codex/hooks.json').read_text(encoding='utf-8'))
@@ -67,6 +69,8 @@ def installed_map(home:Path,platforms:set[str],opencode_version:str,codex_model:
             files[oc/'agents'/source.name]=content.encode()
         plugin=ROOT/('adapters/opencode-v2/auto_orchestrator.js' if opencode_version=='v2' else '.opencode/plugins/auto_orchestrator.js')
         files[oc/'plugins/auto_orchestrator.js']=plugin.read_bytes()
+        for name in ('supervisor.py','router.py','worktree.py'):
+            files[oc/'auto-orchestrator/tools'/name]=(ROOT/'tools'/name).read_bytes()
     if 'antigravity' in platforms:
         gemini=home/'.gemini'
         skills_at(gemini/'config/skills/auto-orchestrator')
@@ -76,6 +80,8 @@ def installed_map(home:Path,platforms:set[str],opencode_version:str,codex_model:
         bridge=gemini/'config/auto-orchestrator/tools/hook_bridge.py'
         files[bridge]=(ROOT/'tools/hook_bridge.py').read_bytes()
         files[gemini/'config/auto-orchestrator/tools/perf.py']=(ROOT/'tools/perf.py').read_bytes()
+        for name in ('supervisor.py','router.py','worktree.py'):
+            files[gemini/'config/auto-orchestrator/tools'/name]=(ROOT/'tools'/name).read_bytes()
         hooks_path=gemini/'config/hooks.json'
         if not hooks_path.exists():
             hooks=json.loads((ROOT/'.agents/hooks.json').read_text(encoding='utf-8'))

@@ -1,0 +1,44 @@
+{
+  "max_parallel": 3,
+  "tasks": [
+    {
+      "id": "docs",
+      "role": "explorer",
+      "objective": "Inspect documentation accuracy and broken links",
+      "read_scope": [
+        "README.md",
+        "IDE_TESTING.md"
+      ],
+      "write_scope": [],
+      "depends_on": [],
+      "timeout_seconds": 600
+    },
+    {
+      "id": "security",
+      "role": "reviewer",
+      "objective": "Review installer safety and file overwrite risks",
+      "read_scope": [
+        "tools/install.py",
+        "tools/install_global.py"
+      ],
+      "write_scope": [],
+      "depends_on": [],
+      "timeout_seconds": 600
+    },
+    {
+      "id": "tests",
+      "role": "tester",
+      "objective": "Run Python tests and inspect coverage gaps",
+      "read_scope": [
+        "tests",
+        "tools"
+      ],
+      "write_scope": [],
+      "depends_on": [
+        "docs",
+        "security"
+      ],
+      "timeout_seconds": 900
+    }
+  ]
+}

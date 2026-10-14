@@ -1,4 +1,4 @@
-# Auto-Orchestrator (V2)
+# Auto-Orchestrator (V4)
 
 Portable, opt-in native-subagent orchestration for **Codex**, **OpenCode**, and **Google Antigravity**.
 
@@ -118,3 +118,42 @@ For Codex Luna Max, pass `--codex-model luna-max`. If your existing `~/.codex/co
 **Limits:** global installation does not configure global Codex hooks or produce verified telemetry for every client. The `doctor` command checks file readiness, **not** real model choice, native subagent spawning or human time savings. Hosted CI tests mocked lifecycle contracts; actual IDE integration still needs manual smoke testing.
 
 **Project-local OpenCode version:** `python tools/install.py --target /your/project --platform opencode --opencode-version v2` (default). For Classic use `--opencode-version v1`; a previously installed plugin requires `--force-generated` to switch safely with backup.
+
+
+## V4 — Native task supervisor, skill router, safe parallel integration
+
+V4 introduces **three standalone Python 3.11+ helpers** (stdlib only) available from both project and global installations:
+
+| Tool | Purpose | Important limit |
+|---|---|---|
+| `tools/supervisor.py` | Durable SQLite task IDs, dependency-aware claiming, max 3 active native agents, attempt-specific leases, timeout/cancel acknowledgement, max 2 retries, structured results | Does not spawn or terminate IDE agents |
+| `tools/router.py` | Discover installed `SKILL.md` metadata and produce minimal per-task context with up to 2 relevant skills | Does not ingest private conversations or execute skill text |
+| `tools/worktree.py` | Create isolated Git worktrees, preview merge conflicts without changing the main tree, safely clean worktrees | Does not automatically merge or delete branches |
+
+### Minimal demonstration (project-local installation)
+
+Run these commands in your **target project**, after installing Auto-Orchestrator:
+
+```bash
+python tools/supervisor.py init --run-id example-001 --plan examples/v4-plan.json
+python tools/supervisor.py claim --run-id example-001
+python tools/router.py brief --root . --plan examples/v4-plan.json --task-id docs
+# Spawn the claimed task(s) through your IDE's native subagent tool.
+# On confirmed native completion with successful checks:
+python tools/supervisor.py completed --run-id example-001 --task-id docs --lease LEASE --result examples/v4-result.json
+python tools/supervisor.py status --run-id example-001
+```
+
+The sample files are included in **this repository**. For another target project, use your own scoped JSON plan and result; copy sample files only as a starting template. The leased task must be executed by the native IDE tool; the helper never fakes its execution.
+
+Isolated worktree operations (in a clean Git project):
+
+```bash
+python tools/worktree.py create --repo . --task-id backend
+# Make and commit changes in the returned worktree path.
+python tools/worktree.py preview --repo . --task-id backend
+```
+
+A clean preview is only a conflict preflight, **not a verified/tested merge**. Main agent still reviews changes, runs tests, and decides integration. If native cancellation or completion cannot be observed, the Supervisor keeps contested scope reserved.
+
+Read [the V4 protocol](.agents/skills/auto-orchestrator/references/supervision.md) and [IDE test guide](IDE_TESTING.md). GitHub Actions runs deterministic unit and mock integration tests; **it does not constitute authenticated real IDE end-to-end evidence**.
