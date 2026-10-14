@@ -1,4 +1,4 @@
-# Auto-Orchestrator (V2)
+# Auto-Orchestrator (V4)
 
 Portable, opt-in native-subagent orchestration for **Codex**, **OpenCode**, and **Google Antigravity**.
 
