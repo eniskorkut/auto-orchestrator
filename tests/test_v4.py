@@ -17,6 +17,7 @@ class SupervisorTests(unittest.TestCase):
         self.tmp=tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.s=Supervisor(self.tmp.name)
+        self.addCleanup(self.s.close)
 
     def test_dependencies_and_parallel_claim(self):
         self.s.init("run",{"tasks":[task("a"),task("b"),task("c",deps=["a","b"])]})
