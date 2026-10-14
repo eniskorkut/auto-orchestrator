@@ -211,6 +211,12 @@ class Supervisor:
             if task_id not in rows:
                 raise SupervisorError("Unknown task")
             task=rows[task_id]
+            if action=="completed":
+                allowed=json.loads(task["write_scope"])
+                if any(not any(intersects(file_path,base) and
+                                   (file_path==base or file_path.startswith(base+"/")) for base in allowed)
+                       for file_path in result["changed_files"]):
+                    raise SupervisorError("Changed files exceed assigned write scope")
             if task["lease"]!=lease or not lease:
                 raise SupervisorError("Stale or invalid attempt lease")
             if action in ("completed","failed"):
