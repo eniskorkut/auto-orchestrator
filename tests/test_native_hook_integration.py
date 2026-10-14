@@ -93,6 +93,26 @@ class NativeHookIntegrationTests(unittest.TestCase):
             self.assertEqual(root_for_payload({"workspacePaths":[str(p)]},"antigravity"),p.resolve())
             self.assertNotEqual(root_for_payload({"workspacePaths":[str(p),"/another"]},"antigravity"),p.resolve())
 
+    def test_codex_existing_settings_warn_not_rewritten(self):
+        config=self.home/".codex/config.toml"
+        config.parent.mkdir(parents=True)
+        original='''[features]
+hooks = false
+multi_agent = false
+[agents]
+enabled = false
+max_concurrent_threads_per_session = 7
+default_subagent_model = "custom-model"
+'''
+        config.write_text(original,encoding="utf-8")
+        notes=execute(self.home,{"codex"},codex_model="inherit")
+        report=" ".join(notes)
+        self.assertIn("multi-agent explicitly disabled",report)
+        self.assertIn("hooks explicitly disabled",report)
+        self.assertIn("3-thread",report)
+        self.assertIn("overrides inherited subagent model",report)
+        self.assertEqual(config.read_text(encoding="utf-8"),original)
+
     def test_missing_hook_entries_not_duplicated(self):
         desired={"hooks":{"Stop":[{"hooks":[{"command":"python hook.py"}]}]}}
         current={"hooks":{"Stop":[{"hooks":[{"command":"python hook.py"}]}]}}
