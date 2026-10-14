@@ -47,7 +47,7 @@ def rendered(source:Path, target:Path)->str:
     content=source.read_text(encoding='utf-8')
     if source in (ROOT/'.codex/hooks.json', ROOT/'.agents/hooks.json'):
         command=shell_arg(Path(sys.executable))+' '+shell_arg((target/'tools/hook_bridge.py').resolve())
-        content=content.replace('python tools/hook_bridge.py',command)
+        content=content.replace('python tools/hook_bridge.py',json.dumps(command)[1:-1])
     return content
 
 
