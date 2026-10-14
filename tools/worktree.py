@@ -33,7 +33,8 @@ def ensure_clean(path):
 
 def manifest_path(repo,task):
     identifier(task)
-    return repo/".auto-orchestrator"/"worktrees"/f"{task}.json"
+    git_directory=Path(git(repo,"rev-parse","--absolute-git-dir").stdout.strip()).resolve()
+    return git_directory/"auto-orchestrator"/"worktrees"/f"{task}.json"
 
 def read_manifest(repo,task):
     path=manifest_path(repo,task)
