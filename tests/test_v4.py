@@ -61,6 +61,14 @@ class SupervisorTests(unittest.TestCase):
         self.s.change("run","a",two["lease"],"failed",reason="test failed")
         with self.assertRaises(SupervisorError):self.s.retry("run","a","again")
 
+    def test_result_cannot_claim_changes_outside_scope(self):
+        self.s.init("run",{"tasks":[task("a",write=["src"])]})
+        x=self.s.claim("run")["claimed"][0]
+        unsafe={"summary":"changed unrelated files","changed_files":["docs/notes.md"],
+                "tests":[{"name":"unit","status":"passed"}],"findings":[]}
+        with self.assertRaises(SupervisorError):
+            self.s.change("run","a",x["lease"],"completed",result=unsafe)
+
     def test_structured_result_and_invalid_plans(self):
         self.s.init("run",{"tasks":[task("a")]})
         one=self.s.claim("run")["claimed"][0]
