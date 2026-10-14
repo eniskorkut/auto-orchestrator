@@ -5,6 +5,9 @@ import argparse
 import hashlib
 import json
 import sys
+import os
+import shlex
+import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -18,12 +21,31 @@ MANIFEST = 'auto-orchestrator-global-manifest.json'
 class InstallError(ValueError):
     pass
 
+def guard_path(home:Path, path:Path)->None:
+    """Refuse symlink traversal or mutations outside the requested home."""
+    home=home.resolve()
+    try:
+        parts=path.relative_to(home).parts
+    except ValueError as exc:
+        raise InstallError('Managed path escapes home: '+str(path)) from exc
+    current=home
+    for part in parts:
+        current=current/part
+        if current.is_symlink():
+            raise InstallError('Symlink in managed path: '+str(current))
+    if not path.resolve(strict=False).is_relative_to(home):
+        raise InstallError('Managed path resolves outside home: '+str(path))
+
+def shell_arg(value:Path)->str:
+    value=str(value)
+    return subprocess.list2cmdline([value]) if os.name=='nt' else shlex.quote(value)
+
 def sha(data:bytes)->str:
     return hashlib.sha256(data).hexdigest()
 
 def skill_files()->dict[str,bytes]:
     root=ROOT/'.agents/skills/auto-orchestrator'
-    return {p.relative_to(root).as_posix():p.read_bytes() for p in root.rglob('*') if p.is_file()}
+    return {p.relative_to(root).as_posix():p.read_bytes() for p in root.rglob('*') if p.is_file() and not p.is_symlink() and not p.parent.is_symlink()}
 
 def installed_map(home:Path,platforms:set[str],opencode_version:str,codex_model:str)->dict[Path,bytes]:
     files={}
@@ -39,7 +61,7 @@ def installed_map(home:Path,platforms:set[str],opencode_version:str,codex_model:
         bridge=codex/'auto-orchestrator/tools/hook_bridge.py'
         files[bridge]=(ROOT/'tools/hook_bridge.py').read_bytes()
         files[codex/'auto-orchestrator/tools/perf.py']=(ROOT/'tools/perf.py').read_bytes()
-        for name in ('supervisor.py','router.py','worktree.py'):
+        for name in ('supervisor.py','router.py','worktree.py','benchmark.py'):
             files[codex/'auto-orchestrator/tools'/name]=(ROOT/'tools'/name).read_bytes()
         hooks_path=codex/'hooks.json'
         if not hooks_path.exists():
@@ -47,7 +69,7 @@ def installed_map(home:Path,platforms:set[str],opencode_version:str,codex_model:
             for group in hooks['hooks'].values():
                 for item in group:
                     for h in item.get('hooks',[]):
-                        h['command']=h['command'].replace('python tools/hook_bridge.py','python "'+str(bridge)+'"')
+                        h['command']=h['command'].replace('python tools/hook_bridge.py',shell_arg(Path(sys.executable))+' '+shell_arg(bridge))
             files[hooks_path]=(json.dumps(hooks,indent=2)+'\n').encode('utf-8')
         config=codex/'config.toml'
         if not config.exists():
@@ -69,7 +91,8 @@ def installed_map(home:Path,platforms:set[str],opencode_version:str,codex_model:
             files[oc/'agents'/source.name]=content.encode()
         plugin=ROOT/('adapters/opencode-v2/auto_orchestrator.js' if opencode_version=='v2' else '.opencode/plugins/auto_orchestrator.js')
         files[oc/'plugins/auto_orchestrator.js']=plugin.read_bytes()
-        for name in ('supervisor.py','router.py','worktree.py'):
+        files[oc/'auto-orchestrator/tools/perf.py']=(ROOT/'tools/perf.py').read_bytes()
+        for name in ('supervisor.py','router.py','worktree.py','benchmark.py'):
             files[oc/'auto-orchestrator/tools'/name]=(ROOT/'tools'/name).read_bytes()
     if 'antigravity' in platforms:
         gemini=home/'.gemini'
@@ -80,7 +103,7 @@ def installed_map(home:Path,platforms:set[str],opencode_version:str,codex_model:
         bridge=gemini/'config/auto-orchestrator/tools/hook_bridge.py'
         files[bridge]=(ROOT/'tools/hook_bridge.py').read_bytes()
         files[gemini/'config/auto-orchestrator/tools/perf.py']=(ROOT/'tools/perf.py').read_bytes()
-        for name in ('supervisor.py','router.py','worktree.py'):
+        for name in ('supervisor.py','router.py','worktree.py','benchmark.py'):
             files[gemini/'config/auto-orchestrator/tools'/name]=(ROOT/'tools'/name).read_bytes()
         hooks_path=gemini/'config/hooks.json'
         if not hooks_path.exists():
@@ -90,7 +113,7 @@ def installed_map(home:Path,platforms:set[str],opencode_version:str,codex_model:
                     if not isinstance(entries,list): continue
                     for h in entries:
                         if isinstance(h,dict) and isinstance(h.get('command'),str):
-                            h['command']=h['command'].replace('python tools/hook_bridge.py','python "'+str(bridge)+'"')
+                            h['command']=h['command'].replace('python tools/hook_bridge.py',shell_arg(Path(sys.executable))+' '+shell_arg(bridge))
             files[hooks_path]=(json.dumps(hooks,indent=2)+'\n').encode('utf-8')
         files[gemini/'config/rules/auto-orchestrator.md']=('# Auto-Orchestrator\n'+GUIDANCE.replace(BEGIN,'').replace(END,'').strip()+'\n').encode()
     return files
@@ -114,10 +137,13 @@ def execute(home:Path,platforms:set[str],opencode_version:str='v2',codex_model:s
             dry_run:bool=False,uninstall:bool=False)->list[str]:
     home=home.resolve()
     manifest_path=home/'.auto-orchestrator'/MANIFEST
+    guard_path(home,manifest_path)
     old=json.loads(manifest_path.read_text(encoding='utf-8')) if manifest_path.exists() else {'files':{},'guidance':[]}
     old_files=old.get('files',{})
     notes=[]
     if uninstall:
+        for name in list(old_files)+old.get('guidance',[]):
+            guard_path(home,Path(name))
         remove_files=[]
         for name,checksum in old_files.items():
             path=Path(name)
@@ -137,6 +163,8 @@ def execute(home:Path,platforms:set[str],opencode_version:str='v2',codex_model:s
     if not platforms: raise InstallError('Choose a platform')
     files=installed_map(home,platforms,opencode_version,codex_model)
     guides=global_guidance_paths(home,platforms)
+    for path in [*files,*guides]:
+        guard_path(home,path)
     for name in ('.codex/hooks.json','.gemini/config/hooks.json'):
         p=home/name
         if p.is_file() and p not in files and str(p) not in old_files and ((name.startswith('.codex') and 'codex' in platforms) or
