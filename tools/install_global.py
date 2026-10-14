@@ -8,6 +8,7 @@ import sys
 import os
 import shlex
 import subprocess
+import tomllib
 from pathlib import Path
 try:
     from tools.hook_integration import HookIntegrationError, merge as merge_hooks, remove as remove_hooks, parse_hooks, pretty
@@ -209,6 +210,27 @@ def execute(home:Path,platforms:set[str],opencode_version:str='v2',codex_model:s
         return notes+['removed '+str(len(remove_files))+' managed files (dry-run='+str(dry_run)+')']
     if not platforms: raise InstallError('Choose a platform')
     files=installed_map(home,platforms,opencode_version,codex_model)
+    # Existing Codex configuration is never silently overwritten; detect
+    # settings that could prevent native hooks or desired subagent behavior.
+    if 'codex' in platforms:
+        cfg=home/'.codex/config.toml'
+        if cfg.is_file() and cfg not in files:
+            try:
+                parsed=tomllib.loads(cfg.read_text(encoding='utf-8'))
+            except (tomllib.TOMLDecodeError, UnicodeError) as exc:
+                raise InstallError('Existing Codex config.toml is invalid; refusing unsafe assumptions') from exc
+            agent_settings=parsed.get('agents',{})
+            if not isinstance(agent_settings,dict):
+                raise InstallError('Codex [agents] configuration must be a table')
+            if agent_settings.get('enabled') is False or parsed.get('features',{}).get('multi_agent') is False:
+                notes.append('WARNING Codex multi-agent explicitly disabled in existing config.toml')
+            if parsed.get('features',{}).get('hooks') is False:
+                notes.append('WARNING Codex hooks explicitly disabled in existing config.toml')
+            if agent_settings.get('max_concurrent_threads_per_session') != 3:
+                notes.append('WARNING existing Codex config does not guarantee a 3-thread subagent limit')
+            current_model=agent_settings.get('default_subagent_model')
+            if codex_model=='inherit' and current_model:
+                notes.append('WARNING existing Codex config overrides inherited subagent model: '+str(current_model))
     guides=global_guidance_paths(home,platforms)
     for path in [*files,*guides]:
         guard_path(home,path)
