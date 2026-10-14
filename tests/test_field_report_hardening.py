@@ -68,6 +68,16 @@ class FieldReportHardening(unittest.TestCase):
             install(self.project, "opencode", "inherit", False, False)
         self.assertFalse((outside / "agents").exists())
 
+    @unittest.skipIf(os.name == "nt", "POSIX permission bits only")
+    def test_supervisor_database_is_private(self):
+        from tools.supervisor import Supervisor
+        supervisor = Supervisor(self.project)
+        try:
+            data = self.project / ".auto-orchestrator/supervisor.sqlite3"
+            self.assertEqual(data.stat().st_mode & 0o077, 0)
+        finally:
+            supervisor.close()
+
     def test_uninstall_rejects_manifest_path_outside_home(self):
         managed = self.home / ".auto-orchestrator"
         managed.mkdir()
