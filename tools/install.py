@@ -5,6 +5,10 @@ from __future__ import annotations
 import argparse
 import shutil
 import sys
+import os
+import shlex
+import json
+import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -21,6 +25,30 @@ MODEL_SETTING = {
 
 class Conflict(Exception):
     pass
+
+def guard_dest(target:Path, dest:Path)->None:
+    try:
+        parts=dest.relative_to(target).parts
+    except ValueError as exc:
+        raise Conflict('Install path is outside target: '+str(dest)) from exc
+    current=target
+    for part in parts:
+        current=current/part
+        if current.is_symlink():
+            raise Conflict('Symlink in destination path: '+str(current))
+    if not dest.resolve(strict=False).is_relative_to(target.resolve()):
+        raise Conflict('Install path resolves outside target: '+str(dest))
+
+def shell_arg(value:Path)->str:
+    value=str(value)
+    return subprocess.list2cmdline([value]) if os.name=='nt' else shlex.quote(value)
+
+def rendered(source:Path, target:Path)->str:
+    content=source.read_text(encoding='utf-8')
+    if source in (ROOT/'.codex/hooks.json', ROOT/'.agents/hooks.json'):
+        command=shell_arg(Path(sys.executable))+' '+shell_arg((target/'tools/hook_bridge.py').resolve())
+        content=content.replace('python tools/hook_bridge.py',command)
+    return content
 
 
 def write_file(dest: Path, text: str, dry_run: bool, force: bool = False) -> str:
@@ -85,7 +113,7 @@ def install(target: Path, platform: str, codex_model: str, dry_run: bool, force_
     sources = [ROOT/'.agents/skills/auto-orchestrator/SKILL.md']
     sources.extend(sorted((ROOT/'.agents/skills/auto-orchestrator/references').glob('*.md')))
     sources += [ROOT/'tools/perf.py', ROOT/'tools/hook_bridge.py',
-                ROOT/'tools/supervisor.py', ROOT/'tools/router.py', ROOT/'tools/worktree.py']
+                ROOT/'tools/supervisor.py', ROOT/'tools/router.py', ROOT/'tools/worktree.py', ROOT/'tools/benchmark.py']
     if 'codex' in selected:
         sources.extend(sorted((ROOT/'.codex/agents').glob('*.toml')))
         sources.append(ROOT/'.codex/hooks.json')
@@ -98,9 +126,13 @@ def install(target: Path, platform: str, codex_model: str, dry_run: bool, force_
     # Preflight all non-managed destinations, so no partial install on conflict.
     for source in sources:
         dest = destination(source)
-        if dest.exists() and not force_generated and dest.read_bytes() != source.read_bytes():
+        guard_dest(target,dest)
+        if dest.exists() and not force_generated and dest.read_text(encoding='utf-8') != rendered(source,target):
             raise Conflict(f'Existing file differs: {dest}; nothing changed.')
     conf = target/'.codex/config.toml'
+    guard_dest(target,conf)
+    guard_dest(target,target/'AGENTS.md')
+    guard_dest(target,target/'.gitignore')
     if 'codex' in selected and conf.exists():
         current = conf.read_text(encoding='utf-8')
         if current not in MODEL_SETTING.values():
@@ -114,7 +146,7 @@ def install(target: Path, platform: str, codex_model: str, dry_run: bool, force_
     results=[]
     for source in sources:
         dest=destination(source)
-        results.append((str(dest.relative_to(target)),write_file(dest,source.read_text(encoding='utf-8'),dry_run,force_generated)))
+        results.append((str(dest.relative_to(target)),write_file(dest,rendered(source,target),dry_run,force_generated)))
     if 'codex' in selected:
         results.append(('.codex/config.toml',write_file(conf,MODEL_SETTING[codex_model],dry_run,force=True)))
     results.append(('AGENTS.md',patch_guidance(g,dry_run)))
