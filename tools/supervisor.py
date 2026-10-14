@@ -129,6 +129,9 @@ class Supervisor:
           termination_confirmed INTEGER NOT NULL DEFAULT 0, result TEXT, reason TEXT,
           PRIMARY KEY(run_id,id), FOREIGN KEY(run_id) REFERENCES runs(id));
         """)
+    def close(self):
+        self.conn.close()
+
     def transaction(self, fn):
         self.conn.execute("BEGIN IMMEDIATE")
         try:
