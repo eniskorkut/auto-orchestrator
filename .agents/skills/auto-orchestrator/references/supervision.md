@@ -17,7 +17,7 @@ From a project-local installation:
 ```bash
 python tools/supervisor.py init --run-id demo --plan examples/v4-plan.json
 python tools/supervisor.py claim --run-id demo
-python tools/router.py brief --root . --plan examples/v4-plan.json --task-id docs
+python tools/router.py --root . brief --plan examples/v4-plan.json --task-id docs
 ```
 
 Global installations can use the corresponding platform's auto-orchestrator/tools path. The returned claim contains each task's **attempt-specific lease**. Store it locally; never send it to the user-facing answer.
@@ -48,9 +48,9 @@ python tools/supervisor.py retry --run-id demo --task-id docs --reason "New repr
 
 For independent writing tasks **only**, the main agent can run:
 ```bash
-python tools/worktree.py create --repo . --task-id backend
+python tools/worktree.py --repo . create --task-id backend
 # let an explicitly scoped native agent edit that worktree
-python tools/worktree.py preview --repo . --task-id backend
+python tools/worktree.py --repo . preview --task-id backend
 ```
 
 `preview` uses `git merge-tree --write-tree` without changing the main working tree. A clean preview is **not** permission to merge: review the diff, verify tests and respect user review requirements. No automatic merge occurs. To remove a worktree without discarding dirty files, use `cleanup`; it preserves its branch and commits.

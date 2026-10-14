@@ -7,6 +7,7 @@ import json
 import re
 import secrets
 import sqlite3
+import os
 import time
 from pathlib import Path
 
@@ -113,8 +114,12 @@ def validate_result(value):
 class Supervisor:
     def __init__(self, root):
         p = Path(root)/".auto-orchestrator"/"supervisor.sqlite3"
-        p.parent.mkdir(parents=True,exist_ok=True)
+        p.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
         self.conn=sqlite3.connect(p,timeout=20,isolation_level=None)
+        # The lease database stores active native task tokens. Restrict access
+        # to the current user on POSIX; Windows access follows the user's ACL.
+        if os.name != 'nt':
+            p.chmod(0o600)
         self.conn.row_factory=sqlite3.Row
         self.conn.execute("PRAGMA busy_timeout=20000")
         self.conn.execute("PRAGMA journal_mode=WAL")

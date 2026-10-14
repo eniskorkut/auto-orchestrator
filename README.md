@@ -42,7 +42,7 @@ Installer now includes the following project-local instrumentation by default:
 | Client | Activation/telemetry | Limit |
 |---|---|---|
 | Codex | `.codex/hooks.json` + `tools/hook_bridge.py` (`UserPromptSubmit`, `SubagentStart`, `SubagentStop`, `Stop`) | Trust the project and hooks with `/hooks` before they run. |
-| OpenCode classic | `.opencode/plugins/auto_orchestrator.js` (system instructions, session + native `task` tool lifecycle) | OpenCode V2 plugin API is different; V2 adapter not yet provided. |
+| OpenCode classic | `.opencode/plugins/auto_orchestrator.js` (system instructions, session + native `task` tool lifecycle) | OpenCode V2 is supported by the separate native `setup(ctx)` adapter (`adapters/opencode-v2/`); V1 and V2 require different plugin APIs. |
 | Antigravity | `.agents/hooks.json` + hook bridge (`SessionStart`, `PreInvocation`, `Stop`) | Measures main execution only; native subagent run-time events not established. |
 
 The hooks are advisory and do not bypass user approval, client permissions, or native capabilities. Some client installs only discover new hooks after restart. Auto-activation is best-effort, not guaranteed spawning. Hook tool commands assume `python` is available and run from the project root; adjust the command on installations with only `python3`.
@@ -80,7 +80,7 @@ Formula: `sum(agent wall times) - elapsed run wall time` (conservative approxima
 ## Caveats and roadmap
 
 - **Antigravity** native custom subagents are documented for **2.0/CLI**; IDE skill discovery is supported, but native subagent parity needs verification on installed IDE versions.
-- **OpenCode** agent definitions follow the current classic Markdown agent config. V2 may require adapting permissions/schema depending on installed client version.
+- **OpenCode** agent definitions follow the current classic Markdown agent config. OpenCode V1 and V2 have different plugin APIs; select `--opencode-version` matching the installed client.
 - **Codex** subagent model override is best-effort configuration; model ID and access should be checked on an actual run.
 - **V2** adds Codex/Antigravity lifecycle hook adapters and OpenCode classic plugin capture, but has no background daemon, standalone DAG runner, automatic Git worktree operations, or cross-platform guaranteed active-model telemetry. Native-client end-to-end tests have **not** been run.
 
@@ -115,7 +115,7 @@ python tools/install_global.py --uninstall
 
 For Codex Luna Max, pass `--codex-model luna-max`. If your existing `~/.codex/config.toml` requires edits, the global installer **fails safely** and provides instructions rather than rewriting it. Global OpenCode V2 uses a native `setup(ctx)` plugin with event subscriptions; V1 uses its legacy plugin. User files are not overwritten. See [IDE_TESTING.md](IDE_TESTING.md) for three independent manual smoke scenarios.
 
-**Limits:** global installation does not configure global Codex hooks or produce verified telemetry for every client. The `doctor` command checks file readiness, **not** real model choice, native subagent spawning or human time savings. Hosted CI tests mocked lifecycle contracts; actual IDE integration still needs manual smoke testing.
+**Limits:** global installation creates Codex/Antigravity hook files only when they do not already exist; pre-existing hook files are preserved and require manual integration. OpenCode V2 plugin loading requires an IDE restart. Native telemetry remains unverified until observed in the running client. The `doctor` command checks file readiness, **not** real model choice, native subagent spawning or human time savings. Hosted CI tests mocked lifecycle contracts; actual IDE integration still needs manual smoke testing.
 
 **Project-local OpenCode version:** `python tools/install.py --target /your/project --platform opencode --opencode-version v2` (default). For Classic use `--opencode-version v1`; a previously installed plugin requires `--force-generated` to switch safely with backup.
 
@@ -137,7 +137,7 @@ Run these commands in your **target project**, after installing Auto-Orchestrato
 ```bash
 python tools/supervisor.py init --run-id example-001 --plan examples/v4-plan.json
 python tools/supervisor.py claim --run-id example-001
-python tools/router.py brief --root . --plan examples/v4-plan.json --task-id docs
+python tools/router.py --root . brief --plan examples/v4-plan.json --task-id docs
 # Spawn the claimed task(s) through your IDE's native subagent tool.
 # On confirmed native completion with successful checks:
 python tools/supervisor.py completed --run-id example-001 --task-id docs --lease LEASE --result examples/v4-result.json
@@ -149,11 +149,19 @@ The sample files are included in **this repository**. For another target project
 Isolated worktree operations (in a clean Git project):
 
 ```bash
-python tools/worktree.py create --repo . --task-id backend
+python tools/worktree.py --repo . create --task-id backend
 # Make and commit changes in the returned worktree path.
-python tools/worktree.py preview --repo . --task-id backend
+python tools/worktree.py --repo . preview --task-id backend
 ```
 
 A clean preview is only a conflict preflight, **not a verified/tested merge**. Main agent still reviews changes, runs tests, and decides integration. If native cancellation or completion cannot be observed, the Supervisor keeps contested scope reserved.
 
 Read [the V4 protocol](.agents/skills/auto-orchestrator/references/supervision.md) and [IDE test guide](IDE_TESTING.md). GitHub Actions runs deterministic unit and mock integration tests; **it does not constitute authenticated real IDE end-to-end evidence**.
+
+## Benchmark and OpenCode V2 telemetry
+
+Read [BENCHMARK.md](BENCHMARK.md) to collect matched serial/orchestrated runs. Project installations now include `tools/benchmark.py`; global installation places it under the platform's `auto-orchestrator/tools` directory.
+
+For **global OpenCode V2**, run `python <global-opencode-config>/auto-orchestrator/tools/perf.py --root <your-project> report --latest --json` (replace placeholders with actual paths). The plugin writes local run events in the project. Restart OpenCode after installing to load the V2 plugin, then confirm that new `.auto-orchestrator/runs/*.jsonl` files appear. A passing `doctor` or mock plugin test alone does not prove runtime telemetry is active.
+
+Paths protected by the installers are checked for symlink traversal; concurrent external filesystem mutation is outside this local installer guarantee. Credentials used for Supervisor attempt leases are local control values, not a cross-user authorization mechanism.
