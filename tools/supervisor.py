@@ -101,6 +101,8 @@ def validate_result(value):
             raise SupervisorError(f"Result requires {key} array")
     for name in value["changed_files"]:
         scope(name)
+    if any(x.get("status")=="failed" for x in value["tests"]):
+        raise SupervisorError("Cannot complete a task with failing tests")
     if not all(isinstance(x,dict) and isinstance(x.get("name"),str) and
                x.get("status") in ("passed","failed","skipped") for x in value["tests"]):
         raise SupervisorError("Tests need name and passed/failed/skipped status")
@@ -182,7 +184,7 @@ class Supervisor:
                     continue
                 left={"read":json.loads(task["read_scope"]),"write":json.loads(task["write_scope"])}
                 if any(conflicts(left,{"read":json.loads(b["read_scope"]),"write":json.loads(b["write_scope"])})
-                       for b in active+selected):
+                       for b in active):
                     continue
                 lease=secrets.token_urlsafe(24)
                 attempts=task["attempts"]+1
