@@ -36,7 +36,7 @@ class FieldReportHardening(unittest.TestCase):
         hooks = json.loads((self.project / ".codex/hooks.json").read_text(encoding="utf-8"))
         command = hooks["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"]
         self.assertIn(str(Path(sys.executable)), command)
-        self.assertIn(str(self.project / "tools/hook_bridge.py"), command)
+        self.assertIn(str((self.project / "tools/hook_bridge.py").resolve()), command)
         self.assertNotIn("python tools/hook_bridge.py", command)
 
     def test_global_hook_uses_absolute_interpreter(self):
