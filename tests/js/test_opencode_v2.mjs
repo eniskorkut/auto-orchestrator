@@ -366,7 +366,7 @@ test('V5 a new approved check after shell edits restores verification', async ()
     await hooks['execute.after'](check2);
     await emit(lifecycle('session.execution.succeeded','recheck-shell',project));
     assert.deepEqual(read()[0].map(e=>e.event),
-      ['start','check','mutation','check','finish','verified']);
+      ['start','check','mutation','mutation','check','finish','verified']);
   });
 });
 
