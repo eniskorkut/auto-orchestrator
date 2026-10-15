@@ -94,7 +94,10 @@ export default {
       const run = existing(sid, event);
       if (!run) return;
       write(run, { event: 'finish', status, verified: false });
-      if (status === 'success' && run.policy && run.tasks.size === 0 &&
+      const currentPolicy = policyForRun();
+      if (status === 'success' && run.policy && currentPolicy &&
+          currentPolicy.hash === run.policy.hash && run.tasks.size === 0 &&
+          run.pendingChecks.size === 0 &&
           run.policy.required_checks.every(check =>
             run.checks.get(check.id)?.passed === true &&
             run.checks.get(check.id)?.tick > run.invalidatedAt)) {
@@ -140,7 +143,7 @@ export default {
       if (toolName(event) !== 'subagent') {
         const run = existing(sid, event);
         if (!run) return;
-        if (event.status === 'completed' && mutatingTools.has(toolName(event))) {
+        if (mutatingTools.has(toolName(event))) {
           run.invalidatedAt = ++run.tick;
           write(run, { event: 'mutation' });
         }
