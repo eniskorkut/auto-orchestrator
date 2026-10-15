@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import re
+import hashlib
 from pathlib import Path
 
 class GateError(ValueError):
@@ -23,10 +24,12 @@ def load_policy(root: Path):
     if path.is_symlink() or path.stat().st_size > MAX_BYTES:
         raise GateError("Invalid or symlinked verification policy")
     try:
-        policy = json.loads(path.read_text(encoding="utf-8"))
+        raw = path.read_bytes()
+        policy = json.loads(raw.decode("utf-8"))
     except (OSError, ValueError) as exc:
         raise GateError("Invalid verification policy JSON") from exc
     validate_policy(policy)
+    policy["_sha256"] = hashlib.sha256(raw).hexdigest()
     return policy
 
 def validate_policy(policy):
@@ -64,7 +67,7 @@ def assess(events, policy) -> dict:
     last_change = max((i for i, e in enumerate(events[:end]) if e.get("event") == "mutation"), default=-1)
     good = set()
     for e in events[last_change + 1:end]:
-        if e.get("event") == "check" and e.get("source") == "native-tool" and isinstance(e.get("exit_code"), int) and not isinstance(e.get("exit_code"), bool):
+        if e.get("event") == "check" and e.get("source") == "native-tool" and (not policy.get("_sha256") or e.get("policy_hash") == policy["_sha256"]) and isinstance(e.get("exit_code"), int) and not isinstance(e.get("exit_code"), bool):
             if e["exit_code"] == 0:
                 good.add(e.get("check_id"))
             else:
