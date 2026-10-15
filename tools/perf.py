@@ -122,7 +122,7 @@ def append_event(root: Path, run_id: str, event: str, *, platform: str | None = 
         os.close(fd)
 
 
-def analyze(run_id: str, events: list[dict]) -> Summary:
+def analyze(run_id: str, events: list[dict], policy: dict | None = None) -> Summary:
     checked_id(run_id)
     if not events or events[0].get('event')!='start' or sum(x.get('event')=='start' for x in events)!=1:
         raise EventError('Exactly one start event must come first')
@@ -172,6 +172,17 @@ def analyze(run_id: str, events: list[dict]) -> Summary:
         else:
             issue='Unknown event'
     verified = bool(finished and (finished.get('verified') or verification_events))
+    for proof in verification_events:
+        if proof.get('source') == 'quality-gate':
+            try:
+                from tools.quality_gate import assess
+            except ModuleNotFoundError:
+                from quality_gate import assess
+            decision=assess(events, policy)
+            if not decision['verified'] or proof.get('check_ids')!=decision.get('check_ids'):
+                issue=issue or 'Invalid or stale automatic verification evidence'
+        elif finished is not None and events.index(proof)>events.index(finished):
+            issue=issue or 'Late verification lacks trusted evidence'
     if issue:
         verified = False
     status = finished.get('status','unknown') if finished else 'running'
@@ -239,7 +250,11 @@ def main(argv=None) -> int:
         if not a.run_id:
             raise EventError('Supply --run-id or --latest')
         if a.command=='report':
-            summary=analyze(a.run_id,load_events(path_for(a.root,a.run_id)))
+            try:
+                from tools.quality_gate import load_policy
+            except ModuleNotFoundError:
+                from quality_gate import load_policy
+            summary=analyze(a.run_id,load_events(path_for(a.root,a.run_id)),load_policy(a.root))
             print(json.dumps(asdict(summary),indent=2) if a.json else display(summary))
         else:
             append_event(a.root,a.run_id,a.command,platform=getattr(a,'platform',None),agent_id=getattr(a,'agent_id',None),
