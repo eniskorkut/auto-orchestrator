@@ -183,3 +183,20 @@ The OpenCode V2 plugin observes the native `subagent` tool rather than the OpenC
 **Workspace privacy:** Global plugin instances may see events from other project locations. Only an event with an **explicit matching location** can open a new local run; later callbacks without a location can update a run already associated with that location. Cross-project events are ignored. Event logs still contain only hashed agent IDs, timings, platform and status—no prompts or model-provided content. On global installations a new project's `.auto-orchestrator/runs/` directory is not automatically added to that project's `.gitignore`; add `.auto-orchestrator/` to project Git ignore rules or `.git/info/exclude` before running monitored sessions if you do not want those local logs listed by Git.
 
 **Background subagents:** When a background `subagent` call returns immediately, its tool span is only the spawn-call duration, **not** the background child execution time. Do not interpret it as an authoritative full child runtime or human time saved. Unverified runs cannot claim benchmark savings. Runtime support and active plugin loading must be verified within OpenCode Desktop; hosted CI simulates hook/event shapes and cannot replace live tests.
+
+
+## V5 — OpenCode opt-in automatic verification (evidence-based)
+
+V5 separates **execution completion** from **verification**. OpenCode V2 native hooks can record minimal check and mutation events. Finish always records the actual outcome. Only after successful execution may the plugin append a separate verified event, provided every configured check was observed with native integer exit code 0 after the last native agent completion or observed code edit.
+
+Auto-verification is **disabled by default**. To enable it, copy [examples/v5-verification.json](examples/v5-verification.json) to the project's .auto-orchestrator/verification.json and edit its required_checks. This requires version 1, auto_verify true, and one or more checks with exact bash/shell tool and command strings. The plugin **never executes these commands itself**; it only observes already-executed commands with native exit-code metadata, recording check IDs and exit codes, not command text, tool output, or prompts.
+
+For a finished run, report with:
+
+~~~bash
+python tools/perf.py --root /path/to/project report --latest --json
+~~~
+
+Use --run-id instead of --latest for concurrent sessions. If a successful run has recorded trustworthy check evidence but no verified event, run: python tools/perf.py --root /path/to/project verified --run-id ID. This independently checks the policy and evidence before allowing post-finish verification. Legacy V4 JSONL logs remain readable.
+
+**Limitations:** Native tool status without integer exit code is not verification. Configured test success does not prove full task correctness. Unknown edits and background child modifications can invalidate evidence; review diffs where warranted. Global installs do not automatically update individual projects' Git ignore settings. Ignore .auto-orchestrator/ if desired. Estimated overlap is not benchmarked serial speedup.
