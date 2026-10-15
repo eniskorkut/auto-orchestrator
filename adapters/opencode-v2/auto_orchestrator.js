@@ -4,7 +4,7 @@
  * create a telemetry run from an event without an explicit matching location.
  */
 import { createHash, randomUUID } from 'node:crypto';
-import { appendFileSync, closeSync, mkdirSync, openSync } from 'node:fs';
+import { appendFileSync, closeSync, mkdirSync, openSync, readFileSync, lstatSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 export const POLICY = 'Auto-Orchestrator: For non-trivial coding tasks read the auto-orchestrator skill and delegate independent work to native subagents automatically; max three concurrent. Verify results and never invent timings or human time savings. Trivial tasks use one agent.';
@@ -22,6 +22,30 @@ export default {
     const directory = normalized(ctx.location?.directory);
     const base = directory && join(directory, '.auto-orchestrator', 'runs');
     const runs = new Map();
+    const approvedTools = new Set(['bash', 'shell', 'powershell']);
+    const mutatingTools = new Set(['edit', 'write', 'apply_patch', 'multiedit']);
+    const policyForRun = () => {
+      if (!directory) return null;
+      try {
+        const file = join(directory, '.auto-orchestrator', 'verification.json');
+        const stat = lstatSync(file);
+        if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 16384) return null;
+        const bytes = readFileSync(file);
+        const policy = JSON.parse(bytes.toString('utf8'));
+        if (policy?.version !== 1 || policy?.auto_verify !== true ||
+            !Array.isArray(policy.required_checks) ||
+            policy.required_checks.length < 1 || policy.required_checks.length > 16) return null;
+        const ids = new Set();
+        for (const check of policy.required_checks) {
+          if (typeof check?.id !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(check.id) ||
+              ids.has(check.id) || !approvedTools.has(check.tool) ||
+              typeof check.command !== 'string' || check.command.length < 1 ||
+              check.command.length > 500 || /[\r\n]/.test(check.command)) return null;
+          ids.add(check.id);
+        }
+        return { ...policy, hash: createHash('sha256').update(bytes).digest('hex') };
+      } catch { return null; }
+    };
 
     // A location belongs to the current plugin instance only if explicit.
     // The event stream is shared across workspace/plugin instances.
@@ -54,7 +78,9 @@ export default {
       if (typeof sid !== 'string' || !sid || !own(event)) return null;
       const old = runs.get(sid);
       if (old && !old.done) return old;
-      const run = { id: hash('opencode-v2|' + sid + '|' + randomUUID()), done: false, tasks: new Set() };
+      const run = { id: hash('opencode-v2|' + sid + '|' + randomUUID()),
+        done: false, tasks: new Set(), pendingChecks: new Map(), checks: new Map(),
+        tick: 0, invalidatedAt: 0, policy: policyForRun() };
       runs.set(sid, run);
       write(run, { event: 'start', platform: 'opencode' });
       return run;
@@ -68,8 +94,19 @@ export default {
       const run = existing(sid, event);
       if (!run) return;
       write(run, { event: 'finish', status, verified: false });
+      const currentPolicy = policyForRun();
+      if (status === 'success' && run.policy && currentPolicy &&
+          currentPolicy.hash === run.policy.hash && run.tasks.size === 0 &&
+          run.pendingChecks.size === 0 &&
+          run.policy.required_checks.every(check =>
+            run.checks.get(check.id)?.passed === true &&
+            run.checks.get(check.id)?.tick > run.invalidatedAt)) {
+        write(run, { event: 'verified', source: 'quality-gate',
+          check_ids: run.policy.required_checks.map(c => c.id).sort() });
+      }
       run.done = true;
       run.tasks.clear();
+      run.pendingChecks.clear();
     };
 
     await ctx.session.hook('context', (event) => {
@@ -77,8 +114,20 @@ export default {
       event.system.push({ type: 'text', text: POLICY });
     });
     await ctx.tool.hook('execute.before', (event) => {
-      if (toolName(event) !== 'subagent') return;
       const sid = session(event), id = callId(event);
+      if (toolName(event) !== 'subagent') {
+        const run = existing(sid, event) ?? begin(sid, event);
+        const command = event?.input?.command ?? event?.data?.input?.command;
+        if (!run || !run.policy || typeof id !== 'string' || !id ||
+            typeof command !== 'string') return;
+        const name = toolName(event);
+        const check = run.policy.required_checks.find(c => c.tool === name && c.command === command);
+        if (!check) return;
+        const cwd = event?.input?.cwd ?? event?.data?.input?.cwd;
+        if (cwd != null && normalized(cwd) !== directory) return;
+        run.pendingChecks.set(id, check.id);
+        return;
+      }
       if (typeof id !== 'string' || !id) return;
       // Hook callbacks may omit location. Only trust them after this
       // session was explicitly associated with our own location.
@@ -90,14 +139,35 @@ export default {
       write(run, { event: 'agent-start', agent_id: agent });
     });
     await ctx.tool.hook('execute.after', (event) => {
-      if (toolName(event) !== 'subagent') return;
       const sid = session(event), id = callId(event);
+      if (toolName(event) !== 'subagent') {
+        const run = existing(sid, event);
+        if (!run) return;
+        if (mutatingTools.has(toolName(event))) {
+          run.invalidatedAt = ++run.tick;
+          write(run, { event: 'mutation' });
+        }
+        if (typeof id !== 'string' || !id || !run.policy) return;
+        const checkId = run.pendingChecks.get(id);
+        run.pendingChecks.delete(id);
+        if (!checkId) return;
+        const code = event?.result?.metadata?.exitCode ??
+          event?.result?.metadata?.exit_code ?? event?.result?.exitCode ??
+          event?.metadata?.exitCode;
+        // Tool "completed" without an actual native integer exit code is NOT evidence.
+        if (event.status !== 'completed' || !Number.isInteger(code)) return;
+        run.checks.set(checkId, { passed: code === 0, tick: ++run.tick });
+        write(run, { event: 'check', check_id: checkId,
+          exit_code: code, source: 'native-tool', policy_hash: run.policy.hash });
+        return;
+      }
       if (typeof id !== 'string' || !id) return;
       const run = existing(sid, event);
       if (!run) return;
       const agent = hash(id);
       if (!run.tasks.has(agent)) return;
       run.tasks.delete(agent);
+      run.invalidatedAt = ++run.tick; // Test results must follow native agent completion.
       // A background task tool ends when the spawn request completes.
       // Its span is NOT proof of the child's total execution time.
       if (event.status === 'completed') write(run, { event: 'agent-stop', agent_id: agent });

@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "auto_verify": true,
+  "required_checks": [
+    {
+      "id": "python-tests",
+      "tool": "bash",
+      "command": "python -m unittest discover -s tests -v"
+    }
+  ]
+}

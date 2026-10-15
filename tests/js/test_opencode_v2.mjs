@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, readdirSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import plugin from '../../adapters/opencode-v2/auto_orchestrator.js';
@@ -154,5 +154,128 @@ test('V2 repeated turns create separate runs and do not reuse stale spans', asyn
     }
     assert.equal(read().length, 2);
     assert.ok(read().every(run => run.length === 4));
+  });
+});
+
+
+const enableGate = project => {
+  const dir = join(project, '.auto-orchestrator');
+  mkdirSync(dir, {recursive:true});
+  writeFileSync(join(dir, 'verification.json'), JSON.stringify({
+    version:1, auto_verify:true,
+    required_checks:[{id:'unit',tool:'bash',command:'python -m pytest -q'}],
+  }));
+};
+const testCommand = (id, sid, code=0, directory) => ({
+  id, tool:'bash', status:'completed',
+  ...(directory ? {location:{directory}} : {}),
+  data:{sessionID:sid},input:{command:'python -m pytest -q'},
+  result:{metadata:{exitCode:code}},
+});
+
+test('V5 auto verifies only after configured native tool exit and native agent completion', async () => {
+  await sandbox(async ({project,hooks,emit,read}) => {
+    enableGate(project);
+    await emit(lifecycle('session.execution.started','verified-run',project));
+    await hooks['execute.before'](subagent('agent-1','verified-run'));
+    await hooks['execute.after'](subagent('agent-1','verified-run','completed'));
+    await hooks['execute.before'](testCommand('test-1','verified-run'));
+    await hooks['execute.after'](testCommand('test-1','verified-run'));
+    await emit(lifecycle('session.execution.succeeded','verified-run',project));
+    const events=read()[0];
+    assert.deepEqual(events.map(e=>e.event), ['start','agent-start','agent-stop','check','finish','verified']);
+    assert.equal(events[3].check_id,'unit');
+    assert.equal(events[3].exit_code,0);
+    assert.equal(events[3].source,'native-tool');
+    assert.equal(events[5].source,'quality-gate');
+    assert.deepEqual(events[5].check_ids,['unit']);
+    assert.doesNotMatch(JSON.stringify(events),/python -m pytest|verified-run|test-1/);
+  });
+});
+
+test('V5 rejects failed native check even when execution succeeds', async () => {
+  await sandbox(async ({project,hooks,emit,read}) => {
+    enableGate(project);
+    await emit(lifecycle('session.execution.started','failed-check',project));
+    await hooks['execute.before'](testCommand('test1','failed-check'));
+    await hooks['execute.after'](testCommand('test1','failed-check',1));
+    await emit(lifecycle('session.execution.succeeded','failed-check',project));
+    assert.deepEqual(read()[0].map(e=>e.event),['start','check','finish']);
+  });
+});
+
+test('V5 missing exit code and later modifications fail closed', async () => {
+  await sandbox(async ({project,hooks,emit,read}) => {
+    enableGate(project);
+    await emit(lifecycle('session.execution.started','unknown-exit',project));
+    await hooks['execute.before'](testCommand('test1','unknown-exit'));
+    await hooks['execute.after']({...testCommand('test1','unknown-exit'),result:{metadata:{}}});
+    await emit(lifecycle('session.execution.succeeded','unknown-exit',project));
+    assert.deepEqual(read()[0].map(e=>e.event),['start','finish']);
+    await emit(lifecycle('session.execution.started','stale',project));
+    await hooks['execute.before'](testCommand('test2','stale'));
+    await hooks['execute.after'](testCommand('test2','stale'));
+    await hooks['execute.after']({id:'edit1',tool:'edit',data:{sessionID:'stale'},status:'completed'});
+    await emit(lifecycle('session.execution.succeeded','stale',project));
+    const stale=read().find(es=>es.some(e=>e.event==='mutation'));
+    assert.deepEqual(stale.map(e=>e.event),['start','check','mutation','finish']);
+  });
+});
+
+test('V5 foreign project and unapproved test command never add evidence', async () => {
+  await sandbox(async ({project,foreignProject,hooks,emit,read}) => {
+    enableGate(project);
+    await emit(lifecycle('session.execution.started','local',project));
+    await hooks['execute.before'](testCommand('foreign','local',0,foreignProject));
+    await hooks['execute.after'](testCommand('foreign','local',0,foreignProject));
+    const invalid={...testCommand('wrong','local'),input:{command:'echo success'}};
+    await hooks['execute.before'](invalid);
+    await hooks['execute.after'](invalid);
+    await emit(lifecycle('session.execution.succeeded','local',project));
+    assert.deepEqual(read()[0].map(e=>e.event),['start','finish']);
+    assert.equal(read(foreignProject).length,0);
+  });
+});
+
+test('V5 requires check to run after native child completion', async () => {
+  await sandbox(async ({project,hooks,emit,read}) => {
+    enableGate(project);
+    await emit(lifecycle('session.execution.started','late-agent',project));
+    await hooks['execute.before'](testCommand('test1','late-agent'));
+    await hooks['execute.after'](testCommand('test1','late-agent'));
+    await hooks['execute.before'](subagent('agent1','late-agent'));
+    await hooks['execute.after'](subagent('agent1','late-agent','completed'));
+    await emit(lifecycle('session.execution.succeeded','late-agent',project));
+    assert.deepEqual(read()[0].map(e=>e.event),
+      ['start','check','agent-start','agent-stop','finish']);
+  });
+});
+
+
+test('V5 policy changes during execution invalidate observed native checks', async () => {
+  await sandbox(async ({project,hooks,emit,read}) => {
+    enableGate(project);
+    await emit(lifecycle('session.execution.started','policy-change',project));
+    await hooks['execute.before'](testCommand('test1','policy-change'));
+    await hooks['execute.after'](testCommand('test1','policy-change'));
+    writeFileSync(join(project,'.auto-orchestrator','verification.json'),
+      JSON.stringify({version:1,auto_verify:true,required_checks:[
+        {id:'unit',tool:'bash',command:'python -m unittest discover -s tests'}
+      ]}));
+    await emit(lifecycle('session.execution.succeeded','policy-change',project));
+    assert.deepEqual(read()[0].map(e=>e.event),['start','check','finish']);
+  });
+});
+
+test('V5 failed edit tools also invalidate earlier passed checks', async () => {
+  await sandbox(async ({project,hooks,emit,read}) => {
+    enableGate(project);
+    await emit(lifecycle('session.execution.started','error-edit',project));
+    await hooks['execute.before'](testCommand('test1','error-edit'));
+    await hooks['execute.after'](testCommand('test1','error-edit'));
+    await hooks['execute.after']({id:'edit1',tool:'edit',status:'error',
+      data:{sessionID:'error-edit'}});
+    await emit(lifecycle('session.execution.succeeded','error-edit',project));
+    assert.deepEqual(read()[0].map(e=>e.event),['start','check','mutation','finish']);
   });
 });

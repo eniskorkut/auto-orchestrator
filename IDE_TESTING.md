@@ -53,3 +53,17 @@ When no global hook configuration exists, the installer creates Codex `~/.codex/
 For existing hook files: run installer `--dry-run` before upgrading and `--uninstall` to remove only managed entries. Never bypass the native client's trust/approval prompts. Workspace and global layers may both load matching hooks, so avoid installing duplicate project/global adapters in the same active workspace unless necessary.
 
 **Codex existing config caveat:** The installer now warns when an existing `~/.codex/config.toml` explicitly disables `multi_agent` or hooks, defines a subagent limit other than three, or overrides the inherited model. It does **not** rewrite user-owned settings. Resolve warnings before calling the Codex live test successful. Trusting hooks remains a separate manual action.
+
+
+## V5 OpenCode Desktop live verification acceptance test
+
+Only test in disposable repositories first. V5 auto-verification is disabled unless the project owner creates .auto-orchestrator/verification.json based on examples/v5-verification.json and intentionally approves the exact native bash/shell test commands.
+
+1. Install/update the global OpenCode V2 adapter. Start a clean test project/session. Verify that the plugin version was loaded, not just that the file exists. Run a regular multi-file task without mentioning agents.
+2. Run the exact test command configured in verification.json **after** all relevant code edits and native subagents finish. The plugin observes the tool result; it never executes commands itself.
+3. Check that the project's JSONL run ends with execution finish then a separate verified event. Validate with perf.py --root PROJECT report --run-id ID --json. Verified indicates the opted-in checks passed; it is not a complete semantic proof.
+4. Repeat with a failing test, a missing exit code, a test followed by a new edit, a config policy change, a cancelled session, and a second unrelated project. All should be unverified without producing cross-project telemetry.
+5. Run two sessions simultaneously; use exact run IDs rather than --latest. Verify that each audit is independent.
+6. Retry installation to ensure idempotence and confirm original provider keys/user plugins are unchanged.
+
+CI simulates native API event payloads on supported OSes; it cannot establish that a specific installed OpenCode V2.0.28 build emits all expected test exit-code metadata. If the native tool result has no authoritative integer exit code, V5 intentionally refuses auto-verification. Do not force this by parsing model-generated text, fabricated metadata or tool output.

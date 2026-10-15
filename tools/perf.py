@@ -12,7 +12,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 SAFE_ID = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$')
-EVENTS = {'start','agent-start','agent-stop','verified','finish'}
+EVENTS = {'start','agent-start','agent-stop','check','mutation','verified','finish'}
 
 class EventError(ValueError):
     pass
@@ -51,7 +51,9 @@ def load_events(path: Path) -> list[dict]:
 
 
 def append_event(root: Path, run_id: str, event: str, *, platform: str | None = None, agent_id: str | None = None,
-                 status: str | None = None, verified: bool = False, at: float | None = None) -> None:
+                 status: str | None = None, verified: bool = False, at: float | None = None,
+                 check_id: str | None = None, exit_code: int | None = None,
+                 source: str | None = None, policy_hash: str | None = None) -> None:
     if event not in EVENTS:
         raise EventError('Unsupported event')
     if agent_id is not None:
@@ -69,8 +71,19 @@ def append_event(root: Path, run_id: str, event: str, *, platform: str | None = 
         if not agent_id:
             raise EventError('Agent ID required')
         payload['agent_id'] = agent_id
+    elif event == 'check':
+        if not check_id or not SAFE_ID.fullmatch(check_id) or type(exit_code) is not int or source != 'native-tool':
+            raise EventError('Check requires ID, native source and integer exit code')
+        payload.update(check_id=check_id,exit_code=exit_code,source=source)
+        if policy_hash:
+            payload['policy_hash']=policy_hash
+    elif event == 'mutation':
+        pass
     elif event == 'verified':
-        pass  # Must be emitted by the agent after actual validation, never by a lifecycle hook.
+        if source == 'quality-gate':
+            payload['source']='quality-gate'
+        elif source is not None:
+            raise EventError('Unsupported verification source')
     elif event == 'finish':
         if status not in ('success','failed','cancelled'):
             raise EventError('Finish status must be success, failed or cancelled')
@@ -82,8 +95,32 @@ def append_event(root: Path, run_id: str, event: str, *, platform: str | None = 
         raise EventError('Start the run first')
     if event == 'start' and path.exists():
         raise EventError('Run ID already exists; choose a fresh run ID')
-    if event != 'start' and any(x['event']=='finish' for x in load_events(path)):
-        raise EventError('Run already finished')
+    if event != 'start':
+        existing=load_events(path)
+        finished=next((x for x in existing if x['event']=='finish'),None)
+        # With V5 explicitly enabled, legacy manual flags must not bypass
+        # native evidence checks by claiming verification before finish.
+        if event in ('verified','finish'):
+            try:
+                from tools.quality_gate import load_policy
+            except ModuleNotFoundError:
+                from quality_gate import load_policy
+            if existing[0].get('platform')=='opencode' and load_policy(root) is not None:
+                if (event=='verified' and not finished) or (event=='finish' and verified):
+                    raise EventError('V5 requires native evidence validation after execution finish')
+        if finished:
+            if event!='verified' or source!='quality-gate' or finished.get('status')!='success':
+                raise EventError('Run already finished')
+            if any(x['event']=='verified' for x in existing):
+                raise EventError('Run already verified')
+            try:
+                from tools.quality_gate import assess, load_policy
+            except ModuleNotFoundError:
+                from quality_gate import assess, load_policy
+            decision=assess(existing,load_policy(root))
+            if not decision['verified']:
+                raise EventError('Evidence gate rejected verification: '+decision['reason'])
+            payload['check_ids']=decision['check_ids']
     path.parent.mkdir(parents=True,exist_ok=True)
     # Each process performs one small append; O_APPEND prevents clobbering concurrent events.
     flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT
@@ -95,7 +132,7 @@ def append_event(root: Path, run_id: str, event: str, *, platform: str | None = 
         os.close(fd)
 
 
-def analyze(run_id: str, events: list[dict]) -> Summary:
+def analyze(run_id: str, events: list[dict], policy: dict | None = None) -> Summary:
     checked_id(run_id)
     if not events or events[0].get('event')!='start' or sum(x.get('event')=='start' for x in events)!=1:
         raise EventError('Exactly one start event must come first')
@@ -105,13 +142,14 @@ def analyze(run_id: str, events: list[dict]) -> Summary:
     spans=[]
     finished=None
     issue=None
+    verification_events=[]
     for e in events[1:]:
         name=e.get('event')
         t=float(e['time'])
         if t < start:
             issue='An event occurred before the task start'
-        if finished is not None:
-            issue='Events occurred after task completion'
+        if finished is not None and name != 'verified':
+            issue='Unexpected event after execution finish'
         if name=='agent-start':
             aid=e['agent_id']
             if aid in started or any(x[0]==aid for x in spans):
@@ -127,12 +165,38 @@ def analyze(run_id: str, events: list[dict]) -> Summary:
                 if t<begun: issue='Agent stopped before it started'
                 spans.append((aid,begun,t))
         elif name=='verified':
+            verification_events.append(e)
+            if len(verification_events)>1:
+                issue='Duplicate verification'
+            if finished is not None and e.get('source')!='quality-gate':
+                issue='Untrusted late verification'
+            if finished is not None and not (
+                isinstance(e.get('check_ids'),list) and e['check_ids'] and
+                all(isinstance(x,str) for x in e['check_ids'])
+            ):
+                issue='Late verification missing gate evidence'
+        elif name in ('check','mutation'):
             pass
         elif name=='finish':
             finished=e
         else:
             issue='Unknown event'
-    verified = bool(finished and (finished.get('verified') or any(e.get('event')=='verified' for e in events[1:])))
+    verified = bool(finished and (finished.get('verified') or verification_events))
+    if platform=='opencode' and policy is not None and finished and finished.get('verified'):
+        issue=issue or 'V5 policy rejects legacy unproven verification flags'
+    for proof in verification_events:
+        if proof.get('source') == 'quality-gate':
+            try:
+                from tools.quality_gate import assess
+            except ModuleNotFoundError:
+                from quality_gate import assess
+            decision=assess(events, policy)
+            if not decision['verified'] or proof.get('check_ids')!=decision.get('check_ids'):
+                issue=issue or 'Invalid or stale automatic verification evidence'
+        elif finished is not None and events.index(proof)>events.index(finished):
+            issue=issue or 'Late verification lacks trusted evidence'
+    if issue:
+        verified = False
     status = finished.get('status','unknown') if finished else 'running'
     elapsed=float(finished['time'])-start if finished else None
     summed=sum(e-s for _,s,e in spans) if not issue else None
@@ -142,6 +206,8 @@ def analyze(run_id: str, events: list[dict]) -> Summary:
         issue='Missing agent stop events'
     if any(s<start or (finished and e>float(finished['time'])) for _,s,e in spans):
         issue='Agent intervals fall outside run interval'
+    if issue:
+        verified=False
     if len(spans)<2:
         issue=issue or 'Fewer than two completed subagents'
     if not verified or status!='success':
@@ -196,11 +262,17 @@ def main(argv=None) -> int:
         if not a.run_id:
             raise EventError('Supply --run-id or --latest')
         if a.command=='report':
-            summary=analyze(a.run_id,load_events(path_for(a.root,a.run_id)))
+            try:
+                from tools.quality_gate import load_policy
+            except ModuleNotFoundError:
+                from quality_gate import load_policy
+            summary=analyze(a.run_id,load_events(path_for(a.root,a.run_id)),load_policy(a.root))
             print(json.dumps(asdict(summary),indent=2) if a.json else display(summary))
         else:
             append_event(a.root,a.run_id,a.command,platform=getattr(a,'platform',None),agent_id=getattr(a,'agent_id',None),
-                         status=getattr(a,'status',None),verified=getattr(a,'verified',False),at=getattr(a,'time',None))
+                         status=getattr(a,'status',None),verified=getattr(a,'verified',False),at=getattr(a,'time',None),
+                         source='quality-gate' if a.command=='verified' and
+                         any(x.get('event')=='finish' for x in load_events(path_for(a.root,a.run_id))) else None)
             print(f'Recorded {a.command} for {a.run_id}')
     except (OSError,EventError,KeyError,TypeError,ValueError) as exc:
         print(f'PERF ERROR: {exc}',file=sys.stderr)
