@@ -174,3 +174,12 @@ Codex user hooks reside at `~/.codex/hooks.json` and Antigravity user hooks at `
 The hook bridge now uses Codex's `cwd` or Antigravity's single active `workspacePaths` path when provided so event logs are saved under the active project; otherwise it falls back to the hook process working directory. For multiple Antigravity workspaces, it intentionally does not guess an active project.
 
 **Important:** Codex `SubagentStart`/`SubagentStop` can supply native subagent durations; Antigravity's hook-based telemetry still tracks sessions, **not** confirmed subagent wall time. Do not derive subagent time savings from Antigravity session hooks. Review [IDE_TESTING.md](IDE_TESTING.md) and platform diagnostics before claiming live E2E success.
+
+
+## OpenCode V2 native event telemetry and workspace isolation
+
+The OpenCode V2 plugin observes the native `subagent` tool rather than the OpenCode V1 `task` tool. It matches hook calls by native event `id`, handles `event.data.sessionID`, and writes `finish` only after `session.execution.succeeded`, `session.execution.failed`, or `session.execution.interrupted`.
+
+**Workspace privacy:** Global plugin instances may see events from other project locations. Only an event with an **explicit matching location** can open a new local run; later callbacks without a location can update a run already associated with that location. Cross-project events are ignored. Event logs still contain only hashed agent IDs, timings, platform and status—no prompts or model-provided content. On global installations a new project's `.auto-orchestrator/runs/` directory is not automatically added to that project's `.gitignore`; add `.auto-orchestrator/` to project Git ignore rules or `.git/info/exclude` before running monitored sessions if you do not want those local logs listed by Git.
+
+**Background subagents:** When a background `subagent` call returns immediately, its tool span is only the spawn-call duration, **not** the background child execution time. Do not interpret it as an authoritative full child runtime or human time saved. Unverified runs cannot claim benchmark savings. Runtime support and active plugin loading must be verified within OpenCode Desktop; hosted CI simulates hook/event shapes and cannot replace live tests.
