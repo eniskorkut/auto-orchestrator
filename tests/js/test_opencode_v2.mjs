@@ -385,3 +385,21 @@ test('V5 a repeated native check with missing exit cannot inherit its previous p
     assert.deepEqual(read()[0].map(e=>e.event),['start','check','finish']);
   });
 });
+
+
+test('V5 approved test cannot pass if an unapproved shell operation begins while it is running', async () => {
+  await sandbox(async ({project,hooks,emit,read}) => {
+    enableGate(project);
+    await emit(lifecycle('session.execution.started','overlap-shell',project));
+    const testEvent=testCommand('long-test','overlap-shell',0,project);
+    await hooks['execute.before'](testEvent);
+    // The test result arrives after an unrelated shell operation started.
+    await hooks['execute.before']({
+      id:'shell-during-test',tool:'bash',data:{sessionID:'overlap-shell'},
+      input:{command:'echo unrelated',workdir:project},
+    });
+    await hooks['execute.after'](testEvent);
+    await emit(lifecycle('session.execution.succeeded','overlap-shell',project));
+    assert.deepEqual(read()[0].map(e=>e.event),['start','mutation','finish']);
+  });
+});
