@@ -382,7 +382,7 @@ test('V5 a repeated native check with missing exit cannot inherit its previous p
     await hooks['execute.before'](second);
     await hooks['execute.after'](second);
     await emit(lifecycle('session.execution.succeeded','repeat-no-exit',project));
-    assert.deepEqual(read()[0].map(e=>e.event),['start','check','finish']);
+    assert.deepEqual(read()[0].map(e=>e.event),['start','check','mutation','finish']);
   });
 });
 
