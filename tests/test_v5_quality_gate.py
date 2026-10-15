@@ -101,6 +101,15 @@ class V5EvidenceGateTests(unittest.TestCase):
         self.event("finish",8,status="success")
         with self.assertRaises(EventError):self.event("verified",9,source="quality-gate")
 
+    def test_manual_verification_cannot_bypass_explicit_v5_policy(self):
+        self.start()
+        with self.assertRaises(EventError):
+            self.event("verified",7)
+        with self.assertRaises(EventError):
+            self.event("finish",8,status="success",verified=True)
+        self.event("finish",8,status="success")
+        self.assertFalse(analyze("v5",self.history(),load_policy(self.root)).verified)
+
     def test_legacy_v4_finish_and_verified_remain_readable(self):
         legacy=[{"event":"start","platform":"codex","time":1},
                 {"event":"verified","time":2},
