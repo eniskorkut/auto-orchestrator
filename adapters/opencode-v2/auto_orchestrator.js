@@ -117,14 +117,28 @@ export default {
       const sid = session(event), id = callId(event);
       if (toolName(event) !== 'subagent') {
         const run = existing(sid, event) ?? begin(sid, event);
-        const command = event?.input?.command ?? event?.data?.input?.command;
-        if (!run || !run.policy || typeof id !== 'string' || !id ||
-            typeof command !== 'string') return;
+        if (!run) return;
         const name = toolName(event);
-        const check = run.policy.required_checks.find(c => c.tool === name && c.command === command);
-        if (!check) return;
-        const cwd = event?.input?.cwd ?? event?.data?.input?.cwd;
-        if (cwd != null && normalized(cwd) !== directory) return;
+        if (!approvedTools.has(name)) return;
+        const input = event?.input ?? event?.data?.input ?? {};
+        const command = input.command;
+        // OpenCode Desktop v2.0.28 reports shell working directory as
+        // input.workdir, not input.cwd. Missing/foreign cwd is not evidence.
+        const cwd = input.workdir ?? input.cwd;
+        const check = run.policy && typeof command === 'string' &&
+          run.policy.required_checks.find(c => c.tool === name && c.command === command);
+        if (!check || typeof id !== 'string' || !id ||
+            normalized(cwd) !== directory) {
+          // An arbitrary shell command may edit files without an edit/write
+          // tool event. Conservatively expire all previous test evidence
+          // BEFORE executing it (even when it fails or throws).
+          run.invalidatedAt = ++run.tick;
+          write(run, { event: 'mutation' });
+          return;
+        }
+        // A repeated test with a missing exit code must not be allowed to
+        // reuse a previously successful result for this check ID.
+        run.checks.delete(check.id);
         run.pendingChecks.set(id, check.id);
         return;
       }
@@ -151,9 +165,10 @@ export default {
         const checkId = run.pendingChecks.get(id);
         run.pendingChecks.delete(id);
         if (!checkId) return;
-        const code = event?.result?.metadata?.exitCode ??
-          event?.result?.metadata?.exit_code ?? event?.result?.exitCode ??
-          event?.metadata?.exitCode;
+        const code = event?.result?.metadata?.exit ??
+          event?.result?.metadata?.exitCode ??
+          event?.result?.metadata?.exit_code ??
+          event?.result?.exitCode ?? event?.metadata?.exitCode;
         // Tool "completed" without an actual native integer exit code is NOT evidence.
         if (event.status !== 'completed' || !Number.isInteger(code)) return;
         run.checks.set(checkId, { passed: code === 0, tick: ++run.tick });
