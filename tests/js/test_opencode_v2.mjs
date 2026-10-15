@@ -250,3 +250,32 @@ test('V5 requires check to run after native child completion', async () => {
       ['start','check','agent-start','agent-stop','finish']);
   });
 });
+
+
+test('V5 policy changes during execution invalidate observed native checks', async () => {
+  await sandbox(async ({project,hooks,emit,read}) => {
+    enableGate(project);
+    await emit(lifecycle('session.execution.started','policy-change',project));
+    await hooks['execute.before'](testCommand('test1','policy-change'));
+    await hooks['execute.after'](testCommand('test1','policy-change'));
+    writeFileSync(join(project,'.auto-orchestrator','verification.json'),
+      JSON.stringify({version:1,auto_verify:true,required_checks:[
+        {id:'unit',tool:'bash',command:'python -m unittest discover -s tests'}
+      ]}));
+    await emit(lifecycle('session.execution.succeeded','policy-change',project));
+    assert.deepEqual(read()[0].map(e=>e.event),['start','check','finish']);
+  });
+});
+
+test('V5 failed edit tools also invalidate earlier passed checks', async () => {
+  await sandbox(async ({project,hooks,emit,read}) => {
+    enableGate(project);
+    await emit(lifecycle('session.execution.started','error-edit',project));
+    await hooks['execute.before'](testCommand('test1','error-edit'));
+    await hooks['execute.after'](testCommand('test1','error-edit'));
+    await hooks['execute.after']({id:'edit1',tool:'edit',status:'error',
+      data:{sessionID:'error-edit'}});
+    await emit(lifecycle('session.execution.succeeded','error-edit',project));
+    assert.deepEqual(read()[0].map(e=>e.event),['start','check','mutation','finish']);
+  });
+});
