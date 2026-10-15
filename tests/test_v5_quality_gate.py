@@ -28,8 +28,8 @@ class V5EvidenceGateTests(unittest.TestCase):
         self.event("start",1,platform="opencode")
         self.event("agent-start",2,agent_id="a")
         self.event("agent-start",2,agent_id="b")
-        self.event("agent-stop",5,agent_id="a")
-        self.event("agent-stop",5,agent_id="b")
+        self.event("agent-stop",6,agent_id="a")
+        self.event("agent-stop",6,agent_id="b")
 
     def check(self, time, code=0, policy_hash=None):
         self.event("check",time,check_id="tests",exit_code=code,source="native-tool",
@@ -37,7 +37,7 @@ class V5EvidenceGateTests(unittest.TestCase):
 
     def test_verified_after_finish_with_native_exit_evidence(self):
         self.start()
-        self.event("mutation",5.5)
+        self.event("mutation",6.2)
         self.check(7)
         self.event("finish",8,status="success")
         self.assertTrue(assess(self.history(),self.policy)["verified"])
@@ -48,7 +48,7 @@ class V5EvidenceGateTests(unittest.TestCase):
         self.assertTrue(result.verified)
         self.assertTrue(result.has_valid_estimate)
         self.assertEqual(result.elapsed_seconds,7)
-        self.assertEqual(result.estimated_parallelism_seconds,0 if result.summed_agent_seconds<result.elapsed_seconds else result.summed_agent_seconds-result.elapsed_seconds)
+        self.assertEqual(result.estimated_parallelism_seconds,1)
 
     def test_late_untrusted_verification_rejected(self):
         self.start()
