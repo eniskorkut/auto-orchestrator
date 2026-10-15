@@ -64,7 +64,7 @@ def assess(events, policy) -> dict:
         len([e for e in events[:end] if e.get("event") == "agent-start"]) !=
         len([e for e in events[:end] if e.get("event") == "agent-stop"])):
         return {"verified": False, "reason": "Unmatched native agent span"}
-    last_change = max((i for i, e in enumerate(events[:end]) if e.get("event") == "mutation"), default=-1)
+    last_change = max((i for i, e in enumerate(events[:end]) if e.get("event") in ("mutation", "agent-stop")), default=-1)
     good = set()
     for e in events[last_change + 1:end]:
         if e.get("event") == "check" and e.get("source") == "native-tool" and (not policy.get("_sha256") or e.get("policy_hash") == policy["_sha256"]) and isinstance(e.get("exit_code"), int) and not isinstance(e.get("exit_code"), bool):
