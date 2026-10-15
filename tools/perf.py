@@ -98,6 +98,16 @@ def append_event(root: Path, run_id: str, event: str, *, platform: str | None = 
     if event != 'start':
         existing=load_events(path)
         finished=next((x for x in existing if x['event']=='finish'),None)
+        # With V5 explicitly enabled, legacy manual flags must not bypass
+        # native evidence checks by claiming verification before finish.
+        if event in ('verified','finish'):
+            try:
+                from tools.quality_gate import load_policy
+            except ModuleNotFoundError:
+                from quality_gate import load_policy
+            if existing[0].get('platform')=='opencode' and load_policy(root) is not None:
+                if (event=='verified' and not finished) or (event=='finish' and verified):
+                    raise EventError('V5 requires native evidence validation after execution finish')
         if finished:
             if event!='verified' or source!='quality-gate' or finished.get('status')!='success':
                 raise EventError('Run already finished')
@@ -172,6 +182,8 @@ def analyze(run_id: str, events: list[dict], policy: dict | None = None) -> Summ
         else:
             issue='Unknown event'
     verified = bool(finished and (finished.get('verified') or verification_events))
+    if platform=='opencode' and policy is not None and finished and finished.get('verified'):
+        issue=issue or 'V5 policy rejects legacy unproven verification flags'
     for proof in verification_events:
         if proof.get('source') == 'quality-gate':
             try:
