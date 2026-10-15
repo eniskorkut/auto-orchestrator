@@ -117,15 +117,36 @@ export default {
       const sid = session(event), id = callId(event);
       if (toolName(event) !== 'subagent') {
         const run = existing(sid, event) ?? begin(sid, event);
-        const command = event?.input?.command ?? event?.data?.input?.command;
-        if (!run || !run.policy || typeof id !== 'string' || !id ||
-            typeof command !== 'string') return;
+        if (!run) return;
         const name = toolName(event);
-        const check = run.policy.required_checks.find(c => c.tool === name && c.command === command);
-        if (!check) return;
-        const cwd = event?.input?.cwd ?? event?.data?.input?.cwd;
-        if (cwd != null && normalized(cwd) !== directory) return;
-        run.pendingChecks.set(id, check.id);
+        if (!approvedTools.has(name)) return;
+        const input = event?.input ?? event?.data?.input ?? {};
+        const command = input.command;
+        // OpenCode Desktop v2.0.28 reports shell working directory as
+        // input.workdir, not input.cwd. Missing/foreign cwd is not evidence.
+        const cwd = input.workdir ?? input.cwd;
+        const check = run.policy && typeof command === 'string' &&
+          run.policy.required_checks.find(c => c.tool === name && c.command === command);
+        if (!check || typeof id !== 'string' || !id ||
+            normalized(cwd) !== directory) {
+          // An arbitrary shell command may edit files without an edit/write
+          // tool event. Conservatively expire all previous test evidence
+          // BEFORE executing it (even when it fails or throws).
+          run.invalidatedAt = ++run.tick;
+          write(run, { event: 'mutation' });
+          return;
+        }
+        // A repeated test with a missing exit code must not be allowed to
+        // reuse a previously successful result for this check ID.
+        if (run.checks.has(check.id) ||
+            [...run.pendingChecks.values()].some(c => c.checkId === check.id)) {
+          // Repeating a previously successful or still-running check means
+          // that older evidence cannot authorize a late CLI verification.
+          run.invalidatedAt = ++run.tick;
+          write(run, { event: 'mutation' });
+        }
+        run.checks.delete(check.id);
+        run.pendingChecks.set(id, {checkId: check.id, startedAt: ++run.tick});
         return;
       }
       if (typeof id !== 'string' || !id) return;
@@ -148,12 +169,14 @@ export default {
           write(run, { event: 'mutation' });
         }
         if (typeof id !== 'string' || !id || !run.policy) return;
-        const checkId = run.pendingChecks.get(id);
+        const pending = run.pendingChecks.get(id);
         run.pendingChecks.delete(id);
-        if (!checkId) return;
-        const code = event?.result?.metadata?.exitCode ??
-          event?.result?.metadata?.exit_code ?? event?.result?.exitCode ??
-          event?.metadata?.exitCode;
+        if (!pending || pending.startedAt <= run.invalidatedAt) return;
+        const checkId = pending.checkId;
+        const code = event?.result?.metadata?.exit ??
+          event?.result?.metadata?.exitCode ??
+          event?.result?.metadata?.exit_code ??
+          event?.result?.exitCode ?? event?.metadata?.exitCode;
         // Tool "completed" without an actual native integer exit code is NOT evidence.
         if (event.status !== 'completed' || !Number.isInteger(code)) return;
         run.checks.set(checkId, { passed: code === 0, tick: ++run.tick });

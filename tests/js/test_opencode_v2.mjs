@@ -169,7 +169,7 @@ const enableGate = project => {
 const testCommand = (id, sid, code=0, directory) => ({
   id, tool:'bash', status:'completed',
   ...(directory ? {location:{directory}} : {}),
-  data:{sessionID:sid},input:{command:'python -m pytest -q'},
+  data:{sessionID:sid},input:{command:'python -m pytest -q',workdir:directory},
   result:{metadata:{exitCode:code}},
 });
 
@@ -179,8 +179,8 @@ test('V5 auto verifies only after configured native tool exit and native agent c
     await emit(lifecycle('session.execution.started','verified-run',project));
     await hooks['execute.before'](subagent('agent-1','verified-run'));
     await hooks['execute.after'](subagent('agent-1','verified-run','completed'));
-    await hooks['execute.before'](testCommand('test-1','verified-run'));
-    await hooks['execute.after'](testCommand('test-1','verified-run'));
+    await hooks['execute.before'](testCommand('test-1','verified-run',0,project));
+    await hooks['execute.after'](testCommand('test-1','verified-run',0,project));
     await emit(lifecycle('session.execution.succeeded','verified-run',project));
     const events=read()[0];
     assert.deepEqual(events.map(e=>e.event), ['start','agent-start','agent-stop','check','finish','verified']);
@@ -197,8 +197,8 @@ test('V5 rejects failed native check even when execution succeeds', async () => 
   await sandbox(async ({project,hooks,emit,read}) => {
     enableGate(project);
     await emit(lifecycle('session.execution.started','failed-check',project));
-    await hooks['execute.before'](testCommand('test1','failed-check'));
-    await hooks['execute.after'](testCommand('test1','failed-check',1));
+    await hooks['execute.before'](testCommand('test1','failed-check',0,project));
+    await hooks['execute.after'](testCommand('test1','failed-check',1,project));
     await emit(lifecycle('session.execution.succeeded','failed-check',project));
     assert.deepEqual(read()[0].map(e=>e.event),['start','check','finish']);
   });
@@ -208,13 +208,13 @@ test('V5 missing exit code and later modifications fail closed', async () => {
   await sandbox(async ({project,hooks,emit,read}) => {
     enableGate(project);
     await emit(lifecycle('session.execution.started','unknown-exit',project));
-    await hooks['execute.before'](testCommand('test1','unknown-exit'));
-    await hooks['execute.after']({...testCommand('test1','unknown-exit'),result:{metadata:{}}});
+    await hooks['execute.before'](testCommand('test1','unknown-exit',0,project));
+    await hooks['execute.after']({...testCommand('test1','unknown-exit',0,project),result:{metadata:{}}});
     await emit(lifecycle('session.execution.succeeded','unknown-exit',project));
     assert.deepEqual(read()[0].map(e=>e.event),['start','finish']);
     await emit(lifecycle('session.execution.started','stale',project));
-    await hooks['execute.before'](testCommand('test2','stale'));
-    await hooks['execute.after'](testCommand('test2','stale'));
+    await hooks['execute.before'](testCommand('test2','stale',0,project));
+    await hooks['execute.after'](testCommand('test2','stale',0,project));
     await hooks['execute.after']({id:'edit1',tool:'edit',data:{sessionID:'stale'},status:'completed'});
     await emit(lifecycle('session.execution.succeeded','stale',project));
     const stale=read().find(es=>es.some(e=>e.event==='mutation'));
@@ -228,11 +228,11 @@ test('V5 foreign project and unapproved test command never add evidence', async 
     await emit(lifecycle('session.execution.started','local',project));
     await hooks['execute.before'](testCommand('foreign','local',0,foreignProject));
     await hooks['execute.after'](testCommand('foreign','local',0,foreignProject));
-    const invalid={...testCommand('wrong','local'),input:{command:'echo success'}};
+    const invalid={...testCommand('wrong','local',0,project),input:{command:'echo success'}};
     await hooks['execute.before'](invalid);
     await hooks['execute.after'](invalid);
     await emit(lifecycle('session.execution.succeeded','local',project));
-    assert.deepEqual(read()[0].map(e=>e.event),['start','finish']);
+    assert.deepEqual(read()[0].map(e=>e.event),['start','mutation','finish']);
     assert.equal(read(foreignProject).length,0);
   });
 });
@@ -241,8 +241,8 @@ test('V5 requires check to run after native child completion', async () => {
   await sandbox(async ({project,hooks,emit,read}) => {
     enableGate(project);
     await emit(lifecycle('session.execution.started','late-agent',project));
-    await hooks['execute.before'](testCommand('test1','late-agent'));
-    await hooks['execute.after'](testCommand('test1','late-agent'));
+    await hooks['execute.before'](testCommand('test1','late-agent',0,project));
+    await hooks['execute.after'](testCommand('test1','late-agent',0,project));
     await hooks['execute.before'](subagent('agent1','late-agent'));
     await hooks['execute.after'](subagent('agent1','late-agent','completed'));
     await emit(lifecycle('session.execution.succeeded','late-agent',project));
@@ -256,8 +256,8 @@ test('V5 policy changes during execution invalidate observed native checks', asy
   await sandbox(async ({project,hooks,emit,read}) => {
     enableGate(project);
     await emit(lifecycle('session.execution.started','policy-change',project));
-    await hooks['execute.before'](testCommand('test1','policy-change'));
-    await hooks['execute.after'](testCommand('test1','policy-change'));
+    await hooks['execute.before'](testCommand('test1','policy-change',0,project));
+    await hooks['execute.after'](testCommand('test1','policy-change',0,project));
     writeFileSync(join(project,'.auto-orchestrator','verification.json'),
       JSON.stringify({version:1,auto_verify:true,required_checks:[
         {id:'unit',tool:'bash',command:'python -m unittest discover -s tests'}
@@ -271,11 +271,135 @@ test('V5 failed edit tools also invalidate earlier passed checks', async () => {
   await sandbox(async ({project,hooks,emit,read}) => {
     enableGate(project);
     await emit(lifecycle('session.execution.started','error-edit',project));
-    await hooks['execute.before'](testCommand('test1','error-edit'));
-    await hooks['execute.after'](testCommand('test1','error-edit'));
+    await hooks['execute.before'](testCommand('test1','error-edit',0,project));
+    await hooks['execute.after'](testCommand('test1','error-edit',0,project));
     await hooks['execute.after']({id:'edit1',tool:'edit',status:'error',
       data:{sessionID:'error-edit'}});
     await emit(lifecycle('session.execution.succeeded','error-edit',project));
     assert.deepEqual(read()[0].map(e=>e.event),['start','check','mutation','finish']);
+  });
+});
+
+
+test('V5 real Desktop shell shape: result.metadata.exit and input.workdir', async () => {
+  await sandbox(async ({project,hooks,emit,read}) => {
+    enableGate(project);
+    await emit(lifecycle('session.execution.started','desktop-exit',project));
+    const real = {
+      id:'desktop-1', tool:'bash', data:{sessionID:'desktop-exit'},
+      input:{command:'python -m pytest -q',workdir:project},
+      status:'completed',
+      result:{output:'secret output must not be logged',content:[],
+        metadata:{status:'completed',truncated:false,exit:0}},
+    };
+    await hooks['execute.before'](real);
+    await hooks['execute.after'](real);
+    await emit(lifecycle('session.execution.succeeded','desktop-exit',project));
+    const events=read()[0];
+    assert.deepEqual(events.map(x=>x.event),['start','check','finish','verified']);
+    assert.equal(events[1].exit_code,0);
+    assert.doesNotMatch(JSON.stringify(events),/secret output|desktop-exit|python -m pytest/);
+  });
+});
+
+test('V5 rejects nonzero Desktop exit and foreign input.workdir even with matching location', async () => {
+  await sandbox(async ({project,foreignProject,hooks,emit,read}) => {
+    enableGate(project);
+    await emit(lifecycle('session.execution.started','desktop-failed',project));
+    const failed=testCommand('bad','desktop-failed',1,project);
+    failed.result.metadata={status:'completed',truncated:false,exit:1};
+    await hooks['execute.before'](failed);
+    await hooks['execute.after'](failed);
+    await emit(lifecycle('session.execution.succeeded','desktop-failed',project));
+
+    await emit(lifecycle('session.execution.started','foreign-cwd',project));
+    const foreign=testCommand('foreign-tool','foreign-cwd',0,foreignProject);
+    // The event's owning project is correct but shell actually runs elsewhere.
+    foreign.location={directory:project};
+    foreign.result.metadata={status:'completed',exit:0};
+    await hooks['execute.before'](foreign);
+    await hooks['execute.after'](foreign);
+    await emit(lifecycle('session.execution.succeeded','foreign-cwd',project));
+    const runs=read();
+    assert.equal(runs.length,2);
+    assert.deepEqual(runs.map(r=>r.some(e=>e.event==='verified')), [false,false]);
+    assert.ok(runs.some(r=>r.some(e=>e.event==='check'&&e.exit_code===1)));
+    assert.ok(runs.some(r=>r.some(e=>e.event==='mutation')));
+    assert.equal(read(foreignProject).length,0);
+  });
+});
+
+test('V5 shell file edits after a successful check revoke stale verification evidence', async () => {
+  await sandbox(async ({project,hooks,emit,read}) => {
+    enableGate(project);
+    await emit(lifecycle('session.execution.started','shell-edit',project));
+    const passed=testCommand('test-before','shell-edit',0,project);
+    passed.result.metadata={exit:0};
+    await hooks['execute.before'](passed);
+    await hooks['execute.after'](passed);
+    const mutation={
+      id:'shell-edit-command',tool:'bash',data:{sessionID:'shell-edit'},
+      input:{command:'node -e "require(\'fs\').writeFileSync(\'source.py\', \'changed\')"',workdir:project},
+      status:'completed',result:{metadata:{exit:0}},
+    };
+    await hooks['execute.before'](mutation);
+    await hooks['execute.after'](mutation);
+    await emit(lifecycle('session.execution.succeeded','shell-edit',project));
+    assert.deepEqual(read()[0].map(e=>e.event),
+      ['start','check','mutation','finish']);
+  });
+});
+
+test('V5 a new approved check after shell edits restores verification', async () => {
+  await sandbox(async ({project,hooks,emit,read}) => {
+    enableGate(project);
+    await emit(lifecycle('session.execution.started','recheck-shell',project));
+    const check1=testCommand('before-edit','recheck-shell',0,project);
+    await hooks['execute.before'](check1);
+    await hooks['execute.after'](check1);
+    await hooks['execute.before']({
+      id:'unapproved-shell',tool:'bash',data:{sessionID:'recheck-shell'},
+      input:{command:'Write-Output changed',workdir:project},
+    });
+    const check2=testCommand('after-edit','recheck-shell',0,project);
+    await hooks['execute.before'](check2);
+    await hooks['execute.after'](check2);
+    await emit(lifecycle('session.execution.succeeded','recheck-shell',project));
+    assert.deepEqual(read()[0].map(e=>e.event),
+      ['start','check','mutation','mutation','check','finish','verified']);
+  });
+});
+
+test('V5 a repeated native check with missing exit cannot inherit its previous pass', async () => {
+  await sandbox(async ({project,hooks,emit,read}) => {
+    enableGate(project);
+    await emit(lifecycle('session.execution.started','repeat-no-exit',project));
+    const first=testCommand('first','repeat-no-exit',0,project);
+    await hooks['execute.before'](first);
+    await hooks['execute.after'](first);
+    const second=testCommand('second','repeat-no-exit',0,project);
+    second.result={metadata:{status:'completed'}};
+    await hooks['execute.before'](second);
+    await hooks['execute.after'](second);
+    await emit(lifecycle('session.execution.succeeded','repeat-no-exit',project));
+    assert.deepEqual(read()[0].map(e=>e.event),['start','check','mutation','finish']);
+  });
+});
+
+
+test('V5 approved test cannot pass if an unapproved shell operation begins while it is running', async () => {
+  await sandbox(async ({project,hooks,emit,read}) => {
+    enableGate(project);
+    await emit(lifecycle('session.execution.started','overlap-shell',project));
+    const testEvent=testCommand('long-test','overlap-shell',0,project);
+    await hooks['execute.before'](testEvent);
+    // The test result arrives after an unrelated shell operation started.
+    await hooks['execute.before']({
+      id:'shell-during-test',tool:'bash',data:{sessionID:'overlap-shell'},
+      input:{command:'echo unrelated',workdir:project},
+    });
+    await hooks['execute.after'](testEvent);
+    await emit(lifecycle('session.execution.succeeded','overlap-shell',project));
+    assert.deepEqual(read()[0].map(e=>e.event),['start','mutation','finish']);
   });
 });
