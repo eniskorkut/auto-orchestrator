@@ -139,7 +139,7 @@ export default {
         // A repeated test with a missing exit code must not be allowed to
         // reuse a previously successful result for this check ID.
         run.checks.delete(check.id);
-        run.pendingChecks.set(id, check.id);
+        run.pendingChecks.set(id, {checkId: check.id, startedAt: ++run.tick});
         return;
       }
       if (typeof id !== 'string' || !id) return;
@@ -162,9 +162,10 @@ export default {
           write(run, { event: 'mutation' });
         }
         if (typeof id !== 'string' || !id || !run.policy) return;
-        const checkId = run.pendingChecks.get(id);
+        const pending = run.pendingChecks.get(id);
         run.pendingChecks.delete(id);
-        if (!checkId) return;
+        if (!pending || pending.startedAt <= run.invalidatedAt) return;
+        const checkId = pending.checkId;
         const code = event?.result?.metadata?.exit ??
           event?.result?.metadata?.exitCode ??
           event?.result?.metadata?.exit_code ??
