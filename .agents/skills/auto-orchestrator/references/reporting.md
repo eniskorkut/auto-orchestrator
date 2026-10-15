@@ -21,7 +21,7 @@ No extra footer for trivial jobs, failures, or uncertain timestamps. Never inclu
 - Codex: `UserPromptSubmit` creates a per-turn run, `SubagentStart/Stop` track actual runtime, `Stop` finalizes it. Hook trust is required via `/hooks`.
 - OpenCode classic: plugin tracks native `task` tool spans; `session.idle` finalizes the current run. OpenCode V2 captures native subagent and execution lifecycle; V5 adds an optional verified evidence gate.
 - Antigravity: `SessionStart/PreInvocation` and `Stop` capture a session scope. No native subagent-finish timing is inferred from `PostToolUse`.
-- For every platform, completion is not verification. Run `python tools/perf.py verified --latest` only after real tests pass, before the final response. If the hook fires earlier or timing is incomplete, omit the benefit.
+- For every platform, completion is not verification. V5 OpenCode with an explicit verification policy automatically records verified only with observed native check evidence; do not duplicate it manually. In other modes, use a specific `--run-id` and mark verified only after actual checks. Incomplete timing means no parallelism benefit.
 
 `python tools/perf.py report --latest` shows the last run. A missing/negative benefit does not justify a promotional footer.
 
