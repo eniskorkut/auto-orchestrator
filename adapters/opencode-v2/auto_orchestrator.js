@@ -138,6 +138,13 @@ export default {
         }
         // A repeated test with a missing exit code must not be allowed to
         // reuse a previously successful result for this check ID.
+        if (run.checks.has(check.id) ||
+            [...run.pendingChecks.values()].some(c => c.checkId === check.id)) {
+          // Repeating a previously successful or still-running check means
+          // that older evidence cannot authorize a late CLI verification.
+          run.invalidatedAt = ++run.tick;
+          write(run, { event: 'mutation' });
+        }
         run.checks.delete(check.id);
         run.pendingChecks.set(id, {checkId: check.id, startedAt: ++run.tick});
         return;
