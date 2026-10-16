@@ -492,3 +492,50 @@ test('V5 retains current opt-in policy for directly created parent with session.
     assert.deepEqual(read()[0].map(e=>e.event),['start','check','finish','verified']);
   }, sid => ({id:sid,location:{directory:owners.get(sid)}}));
 });
+
+
+test('V5 moving away and back does not reuse stale check evidence from the prior location epoch', async () => {
+  const owners = new Map();
+  await sandbox(async ({project,foreignProject,hooks,emit,read}) => {
+    owners.set('roundtrip-parent',project);
+    enableGate(project);
+    await emit(lifecycle('session.execution.started','roundtrip-parent',project));
+    const passed=testCommand('initial-test','roundtrip-parent',0,project);
+    await hooks['execute.before'](passed);
+    await hooks['execute.after'](passed);
+    owners.set('roundtrip-parent',foreignProject);
+    await emit(lifecycle('session.execution.started','roundtrip-parent',foreignProject));
+    owners.set('roundtrip-parent',project);
+    await emit(lifecycle('session.execution.started','roundtrip-parent',project));
+    await emit(lifecycle('session.execution.succeeded','roundtrip-parent',project));
+    const entries=read();
+    assert.equal(entries.length,2);
+    assert.ok(entries.some(events=>events.map(x=>x.event).join(',')==='start,check'));
+    assert.ok(entries.some(events=>events.map(x=>x.event).join(',')==='start,finish'));
+    assert.ok(entries.every(events=>!events.some(x=>x.event==='verified')));
+  }, sid => ({id:sid,location:{directory:owners.get(sid)}}));
+});
+
+test('V5 native session lookup error abandons old proof before recovery', async () => {
+  let broken=false;
+  let owner='';
+  await sandbox(async ({project,hooks,emit,read}) => {
+    owner=project;
+    enableGate(project);
+    await emit(lifecycle('session.execution.started','temporary-failure',project));
+    const passed=testCommand('old-proof','temporary-failure',0,project);
+    await hooks['execute.before'](passed);
+    await hooks['execute.after'](passed);
+    broken=true;
+    await hooks['execute.before'](subagent('unknown','temporary-failure'));
+    broken=false;
+    await emit(lifecycle('session.execution.started','temporary-failure',project));
+    await emit(lifecycle('session.execution.succeeded','temporary-failure',project));
+    const entries=read();
+    assert.equal(entries.length,2);
+    assert.ok(entries.every(x=>!x.some(e=>e.event==='verified')));
+  }, sid => {
+    if (broken) throw new Error('native lookup failed');
+    return {id:sid,location:{directory:owner}};
+  });
+});
