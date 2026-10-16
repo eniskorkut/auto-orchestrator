@@ -7,7 +7,7 @@ import plugin from '../../adapters/opencode-v2/auto_orchestrator.js';
 
 const tick = async () => { await new Promise(resolve => setImmediate(resolve)); await new Promise(resolve => setImmediate(resolve)); };
 
-async function sandbox(fn) {
+async function sandbox(fn, getSession = null) {
   const root = mkdtempSync(join(tmpdir(), 'orchestrator-v2-'));
   const project = join(root, 'project');
   const foreignProject = join(root, 'other-project');
@@ -16,7 +16,10 @@ async function sandbox(fn) {
   let release;
   const ctx = {
     location: { directory: project },
-    session: { hook: async (name, callback) => { hooks[name] = callback; } },
+    session: {
+      hook: async (name, callback) => { hooks[name] = callback; },
+      ...(getSession ? {get: async ({sessionID}) => getSession(sessionID)} : {}),
+    },
     tool: { hook: async (name, callback) => { hooks[name] = callback; } },
     event: { subscribe: ({ signal }) => ({
       async *[Symbol.asyncIterator]() {
@@ -401,5 +404,138 @@ test('V5 approved test cannot pass if an unapproved shell operation begins while
     await hooks['execute.after'](testEvent);
     await emit(lifecycle('session.execution.succeeded','overlap-shell',project));
     assert.deepEqual(read()[0].map(e=>e.event),['start','mutation','finish']);
+  });
+});
+
+
+test('V5 moved parent starts native run using authoritative session.location without event location', async () => {
+  const owners = new Map([['moved-parent', null]]);
+  await sandbox(async ({project,foreignProject,hooks,emit,read}) => {
+    owners.set('moved-parent', project);
+    enableGate(project);
+    // The native session was moved from a different project; its event still
+    // has the old location, but session.get returns the current canonical one.
+    await emit(lifecycle('session.execution.started','moved-parent',foreignProject));
+    const check = testCommand('moved-test','moved-parent',0,project);
+    delete check.location;
+    await hooks['execute.before'](check);
+    await hooks['execute.after'](check);
+    await emit(lifecycle('session.execution.succeeded','moved-parent'));
+    assert.deepEqual(read()[0].map(x=>x.event),['start','check','finish','verified']);
+    assert.equal(read(foreignProject).length,0);
+  }, sid => ({id:sid,location:{directory:owners.get(sid)}}));
+});
+
+test('V5 forged event location cannot replace authoritative foreign session ownership', async () => {
+  const owners = new Map();
+  await sandbox(async ({project,foreignProject,hooks,emit,read}) => {
+    owners.set('foreign', foreignProject);
+    await emit(lifecycle('session.execution.started','foreign',project));
+    await hooks['execute.before'](subagent('foreign-tool','foreign',undefined,project));
+    await hooks['execute.after'](subagent('foreign-tool','foreign','completed',project));
+    await emit(lifecycle('session.execution.succeeded','foreign',project));
+    assert.equal(read().length,0);
+    assert.equal(read(foreignProject).length,0);
+  }, sid => ({id:sid,location:{directory:owners.get(sid)}}));
+});
+
+test('V5 does not use shell workdir as a substitute for session ownership', async () => {
+  const owners = new Map();
+  await sandbox(async ({project,foreignProject,hooks,emit,read}) => {
+    owners.set('default-project-parent', foreignProject);
+    enableGate(project);
+    await emit(lifecycle('session.execution.started','default-project-parent',project));
+    const check = testCommand('other-cwd','default-project-parent',0,project);
+    await hooks['execute.before'](check);
+    await hooks['execute.after'](check);
+    await emit(lifecycle('session.execution.succeeded','default-project-parent',project));
+    assert.equal(read(project).length,0);
+    assert.equal(read(foreignProject).length,0);
+  }, sid => ({id:sid,location:{directory:owners.get(sid)}}));
+});
+
+test('V5 fail-closed when authoritative session lookup is missing or errors', async () => {
+  await sandbox(async ({project,hooks,emit,read}) => {
+    await emit(lifecycle('session.execution.started','missing-parent',project));
+    await hooks['execute.before'](subagent('tool','missing-parent',undefined,project));
+    await emit(lifecycle('session.execution.succeeded','missing-parent',project));
+    assert.equal(read().length,0);
+  }, async () => {throw new Error('unavailable')});
+});
+
+test('V5 ignores a moved-out session after a run started under this plugin scope', async () => {
+  const owners = new Map();
+  await sandbox(async ({project,foreignProject,hooks,emit,read}) => {
+    owners.set('moving',project);
+    enableGate(project);
+    await emit(lifecycle('session.execution.started','moving',project));
+    owners.set('moving',foreignProject);
+    const check=testCommand('wrong-after-move','moving',0,project);
+    await hooks['execute.before'](check);
+    await hooks['execute.after'](check);
+    await emit(lifecycle('session.execution.succeeded','moving',project));
+    assert.deepEqual(read()[0].map(e=>e.event),['start']);
+    assert.equal(read(foreignProject).length,0);
+  }, sid => ({id:sid,location:{directory:owners.get(sid)}}));
+});
+
+test('V5 retains current opt-in policy for directly created parent with session.get', async () => {
+  const owners = new Map();
+  await sandbox(async ({project,hooks,emit,read}) => {
+    owners.set('direct-parent',project);
+    enableGate(project);
+    await emit(lifecycle('session.execution.started','direct-parent'));
+    const cmd=testCommand('approved','direct-parent',0,project);
+    await hooks['execute.before'](cmd);
+    await hooks['execute.after'](cmd);
+    await emit(lifecycle('session.execution.succeeded','direct-parent'));
+    assert.deepEqual(read()[0].map(e=>e.event),['start','check','finish','verified']);
+  }, sid => ({id:sid,location:{directory:owners.get(sid)}}));
+});
+
+
+test('V5 moving away and back does not reuse stale check evidence from the prior location epoch', async () => {
+  const owners = new Map();
+  await sandbox(async ({project,foreignProject,hooks,emit,read}) => {
+    owners.set('roundtrip-parent',project);
+    enableGate(project);
+    await emit(lifecycle('session.execution.started','roundtrip-parent',project));
+    const passed=testCommand('initial-test','roundtrip-parent',0,project);
+    await hooks['execute.before'](passed);
+    await hooks['execute.after'](passed);
+    owners.set('roundtrip-parent',foreignProject);
+    await emit(lifecycle('session.execution.started','roundtrip-parent',foreignProject));
+    owners.set('roundtrip-parent',project);
+    await emit(lifecycle('session.execution.started','roundtrip-parent',project));
+    await emit(lifecycle('session.execution.succeeded','roundtrip-parent',project));
+    const entries=read();
+    assert.equal(entries.length,2);
+    assert.ok(entries.some(events=>events.map(x=>x.event).join(',')==='start,check'));
+    assert.ok(entries.some(events=>events.map(x=>x.event).join(',')==='start,finish'));
+    assert.ok(entries.every(events=>!events.some(x=>x.event==='verified')));
+  }, sid => ({id:sid,location:{directory:owners.get(sid)}}));
+});
+
+test('V5 native session lookup error abandons old proof before recovery', async () => {
+  let broken=false;
+  let owner='';
+  await sandbox(async ({project,hooks,emit,read}) => {
+    owner=project;
+    enableGate(project);
+    await emit(lifecycle('session.execution.started','temporary-failure',project));
+    const passed=testCommand('old-proof','temporary-failure',0,project);
+    await hooks['execute.before'](passed);
+    await hooks['execute.after'](passed);
+    broken=true;
+    await hooks['execute.before'](subagent('unknown','temporary-failure'));
+    broken=false;
+    await emit(lifecycle('session.execution.started','temporary-failure',project));
+    await emit(lifecycle('session.execution.succeeded','temporary-failure',project));
+    const entries=read();
+    assert.equal(entries.length,2);
+    assert.ok(entries.every(x=>!x.some(e=>e.event==='verified')));
+  }, sid => {
+    if (broken) throw new Error('native lookup failed');
+    return {id:sid,location:{directory:owner}};
   });
 });

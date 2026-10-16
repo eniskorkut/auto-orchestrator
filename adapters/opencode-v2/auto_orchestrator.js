@@ -53,7 +53,42 @@ export default {
       event?.location?.directory ?? event?.data?.location?.directory ??
       (typeof event?.location === 'string' ? event.location : null);
     const own = (event) => !!directory && normalized(location(event)) === directory;
-    const foreign = (event) => !!location(event) && !own(event);
+    // A location transition or unavailable session lookup invalidates prior
+    // evidence. The abandoned run remains incomplete (no fabricated finish).
+    const abandon = (sid) => {
+      const run = runs.get(sid);
+      if (!run || run.done) return;
+      run.done = true;
+      run.tasks.clear();
+      run.pendingChecks.clear();
+      run.checks.clear();
+    };
+    // ctx.location belongs to the plugin instance, NOT necessarily to the
+    // session that emitted a globally visible event. OpenCode V2 exposes an
+    // authoritative session lookup, including session_move updates.
+    // Never derive ownership from mutable shell input.workdir.
+    const ownsSession = async (sid, event) => {
+      if (!directory || typeof sid !== 'string' || !sid) return false;
+      if (typeof ctx.session.get !== 'function') {
+        // Older clients have no authoritative lookup. Keep the prior V4
+        // contract: only an explicitly matching location may BEGIN a run;
+        // location-less callbacks may CONTINUE an already owned active run.
+        const active = runs.get(sid);
+        return own(event) || (!location(event) && !!active && !active.done);
+      }
+      try {
+        const response = await ctx.session.get({ sessionID: sid });
+        const info = response?.data ?? response;
+        const matched = normalized(info?.location?.directory) === directory;
+        if (!matched) abandon(sid);
+        return matched;
+      } catch {
+        // Fail closed, including for moved/unknown sessions. Never fall back
+        // to an event, a tool cwd, process.cwd(), or a default project.
+        abandon(sid);
+        return false;
+      }
+    };
     const data = (event) => event?.data ?? event?.properties ?? event ?? {};
     const session = (event) => data(event).sessionID ??
       data(event).session?.id ?? event?.sessionID ?? null;
@@ -74,8 +109,9 @@ export default {
         // Telemetry is optional; never interrupt agent work or capture secrets.
       }
     };
-    const begin = (sid, event) => {
-      if (typeof sid !== 'string' || !sid || !own(event)) return null;
+    const begin = (sid) => {
+      // Callers must first pass ownsSession with a fresh session lookup.
+      if (typeof sid !== 'string' || !sid) return null;
       const old = runs.get(sid);
       if (old && !old.done) return old;
       const run = { id: hash('opencode-v2|' + sid + '|' + randomUUID()),
@@ -85,13 +121,14 @@ export default {
       write(run, { event: 'start', platform: 'opencode' });
       return run;
     };
-    const existing = (sid, event) => {
-      if (typeof sid !== 'string' || !sid || foreign(event)) return null;
+    const existing = (sid) => {
+      // Callers must first pass ownsSession; do not reuse a run after move.
+      if (typeof sid !== 'string' || !sid) return null;
       const run = runs.get(sid);
       return run && !run.done ? run : null;
     };
-    const finish = (sid, status, event) => {
-      const run = existing(sid, event);
+    const finish = (sid, status) => {
+      const run = existing(sid);
       if (!run) return;
       write(run, { event: 'finish', status, verified: false });
       const currentPolicy = policyForRun();
@@ -113,10 +150,11 @@ export default {
       if (event.agent?.startsWith('auto_')) return;
       event.system.push({ type: 'text', text: POLICY });
     });
-    await ctx.tool.hook('execute.before', (event) => {
+    await ctx.tool.hook('execute.before', async (event) => {
       const sid = session(event), id = callId(event);
+      if (!(await ownsSession(sid, event))) return;
       if (toolName(event) !== 'subagent') {
-        const run = existing(sid, event) ?? begin(sid, event);
+        const run = existing(sid) ?? begin(sid);
         if (!run) return;
         const name = toolName(event);
         if (!approvedTools.has(name)) return;
@@ -152,17 +190,18 @@ export default {
       if (typeof id !== 'string' || !id) return;
       // Hook callbacks may omit location. Only trust them after this
       // session was explicitly associated with our own location.
-      const run = existing(sid, event) ?? begin(sid, event);
+      const run = existing(sid) ?? begin(sid);
       if (!run) return;
       const agent = hash(id);
       if (run.tasks.has(agent)) return;
       run.tasks.add(agent);
       write(run, { event: 'agent-start', agent_id: agent });
     });
-    await ctx.tool.hook('execute.after', (event) => {
+    await ctx.tool.hook('execute.after', async (event) => {
       const sid = session(event), id = callId(event);
+      if (!(await ownsSession(sid, event))) return;
       if (toolName(event) !== 'subagent') {
-        const run = existing(sid, event);
+        const run = existing(sid);
         if (!run) return;
         if (mutatingTools.has(toolName(event))) {
           run.invalidatedAt = ++run.tick;
@@ -185,7 +224,7 @@ export default {
         return;
       }
       if (typeof id !== 'string' || !id) return;
-      const run = existing(sid, event);
+      const run = existing(sid);
       if (!run) return;
       const agent = hash(id);
       if (!run.tasks.has(agent)) return;
@@ -200,16 +239,16 @@ export default {
       try {
         for await (const event of ctx.event.subscribe({ signal: controller.signal })) {
           const sid = session(event);
-          if (!sid || foreign(event)) continue;
+          if (!(await ownsSession(sid, event))) continue;
           if (event.type === 'session.execution.started' || event.type === 'session.created') {
             // Never open a run in another project (or from location-less events).
-            begin(sid, event);
+            begin(sid);
           } else if (event.type === 'session.execution.succeeded') {
-            finish(sid, 'success', event);
+            finish(sid, 'success');
           } else if (event.type === 'session.execution.failed') {
-            finish(sid, 'failed', event);
+            finish(sid, 'failed');
           } else if (event.type === 'session.execution.interrupted') {
-            finish(sid, 'cancelled', event);
+            finish(sid, 'cancelled');
           }
         }
       } catch {
