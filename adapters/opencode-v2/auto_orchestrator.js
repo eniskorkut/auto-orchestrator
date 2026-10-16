@@ -60,9 +60,11 @@ export default {
     const ownsSession = async (sid, event) => {
       if (!directory || typeof sid !== 'string' || !sid) return false;
       if (typeof ctx.session.get !== 'function') {
-        // Compatibility for older clients that cannot resolve a session:
-        // only explicit, matching event locations can authorize a run.
-        return own(event);
+        // Older clients have no authoritative lookup. Keep the prior V4
+        // contract: only an explicitly matching location may BEGIN a run;
+        // location-less callbacks may CONTINUE an already owned active run.
+        const active = runs.get(sid);
+        return own(event) || (!location(event) && !!active && !active.done);
       }
       try {
         const response = await ctx.session.get({ sessionID: sid });
