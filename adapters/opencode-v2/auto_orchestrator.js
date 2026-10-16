@@ -53,6 +53,16 @@ export default {
       event?.location?.directory ?? event?.data?.location?.directory ??
       (typeof event?.location === 'string' ? event.location : null);
     const own = (event) => !!directory && normalized(location(event)) === directory;
+    // A location transition or unavailable session lookup invalidates prior
+    // evidence. The abandoned run remains incomplete (no fabricated finish).
+    const abandon = (sid) => {
+      const run = runs.get(sid);
+      if (!run || run.done) return;
+      run.done = true;
+      run.tasks.clear();
+      run.pendingChecks.clear();
+      run.checks.clear();
+    };
     // ctx.location belongs to the plugin instance, NOT necessarily to the
     // session that emitted a globally visible event. OpenCode V2 exposes an
     // authoritative session lookup, including session_move updates.
@@ -69,10 +79,13 @@ export default {
       try {
         const response = await ctx.session.get({ sessionID: sid });
         const info = response?.data ?? response;
-        return normalized(info?.location?.directory) === directory;
+        const matched = normalized(info?.location?.directory) === directory;
+        if (!matched) abandon(sid);
+        return matched;
       } catch {
         // Fail closed, including for moved/unknown sessions. Never fall back
         // to an event, a tool cwd, process.cwd(), or a default project.
+        abandon(sid);
         return false;
       }
     };
