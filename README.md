@@ -1,4 +1,4 @@
-# Auto-Orchestrator (V4)
+# Auto-Orchestrator (V6 — Supervisor Native Evidence)
 
 Portable, opt-in native-subagent orchestration for **Codex**, **OpenCode**, and **Google Antigravity**.
 
@@ -200,3 +200,24 @@ python tools/perf.py --root /path/to/project report --latest --json
 Use --run-id instead of --latest for concurrent sessions. If a successful run has recorded trustworthy check evidence but no verified event, run: python tools/perf.py --root /path/to/project verified --run-id ID. This independently checks the policy and evidence before allowing post-finish verification. Legacy V4 JSONL logs remain readable.
 
 **Limitations:** Native tool status without integer exit code is not verification. Configured test success does not prove full task correctness. Unknown edits and background child modifications can invalidate evidence; review diffs where warranted. Global installs do not automatically update individual projects' Git ignore settings. Ignore .auto-orchestrator/ if desired. Estimated overlap is not benchmarked serial speedup.
+
+
+## V6 — Opt-in Supervisor native evidence and Cursor support
+
+V6 adds a **real correlation mechanism** between Supervisor's SQLite attempts and observed native subagent events. It is not an independent LLM process launcher. The native IDE remains the only entity authorized to spawn or cancel its own agents; the Supervisor handles plan dependencies, write scopes, active leases and retries. Native lifecycle observations now strengthen evidence instead of silently completing tasks.
+
+Create a scoped plan with `"native_supervision": true` (see `examples/v6-native-plan.json`). Use `python tools/supervisor.py --root PROJECT init --run-id RUN --plan PLAN.json`, then `claim --run-id RUN`. Dispatch each claimed task through a native IDE subagent. **After obtaining the actual native agent ID**, bind the attempt:
+
+~~~sh
+python tools/supervisor.py --root PROJECT bind-native --run-id RUN --task-id backend --lease REAL_LEASE --platform codex --native-id REAL_NATIVE_AGENT_ID
+~~~
+
+With a compatible trusted **Codex** `SubagentStop` hook, the matching native stop is observed and stored as a SHA-256-derived ID. For Cursor, the documented `subagentStart` hook includes `subagent_id` but `subagentStop` currently does **not guarantee an ID**. No task-completion or lease-release claim is made without an exact stop identity. Antigravity's documented `PostToolUse` is a tool-dispatch event, **not** an authoritative subagent-stop event. OpenCode V2 background spawn callbacks are also not trustworthy child termination proofs. For these unsupported/ambiguous cases, the scope stays locked until valid native completion evidence is available; do not use fabricated CLI events.
+
+Once the native stop is observed, the main agent must still validate actual changes and tests and explicitly call `completed --run-id RUN --task-id TASK --lease REAL_LEASE --result RESULT.json`. Failed/timeout/cancelled tasks do not free write scopes merely due to expiration; retry budget and native cancellation acknowledgement stay in force. A run with no native supervision opt-in retains existing V4 semantics. This is a trust and correctness control, not a cryptographic security boundary against processes with the same OS user's SQLite write permissions.
+
+**Cursor:** Use project-local `python tools/install.py --target PROJECT --platform cursor --dry-run`, then install if the files do not conflict. This creates `.cursor/hooks.json` and `.cursor/agents/*.md` with native Cursor hook schemas and model inheritance. Global `python tools/install_global.py --platform cursor` safely installs skills/agents **without global hooks**, because Cursor user-level hooks execute in `~/.cursor` and their documented payload does not attest a project directory. For runtime instrumentation, opt into project-local hooks in the actual workspace. Existing Cursor hook config is never overwritten silently.
+
+**Cross-platform status:** OpenCode V2 has prior Windows Desktop field testing for delegation and Quality Gate; the new V6 native ownership/stop integrations remain untested on installed IDEs. Codex, Cursor and Antigravity hook event contracts are covered by deterministic simulated tests only. Cursor subagentStop and Antigravity tool dispatch must not be advertised as proven per-agent durations. `doctor` verifies files, not runtime hooks. A serial-vs-parallel real-work benchmark remains deferred.
+
+See [V6 supervision notes](docs/V6_NATIVE_SUPERVISION.md) for the native evidence contract, fallbacks and remaining gaps. 
