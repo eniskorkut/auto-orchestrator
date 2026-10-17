@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "command": "python tools/hook_bridge.py cursor sessionStart --root ."
+      }
+    ],
+    "sessionEnd": [
+      {
+        "command": "python tools/hook_bridge.py cursor sessionEnd --root ."
+      }
+    ],
+    "subagentStart": [
+      {
+        "command": "python tools/hook_bridge.py cursor subagentStart --root ."
+      }
+    ],
+    "subagentStop": [
+      {
+        "command": "python tools/hook_bridge.py cursor subagentStop --root ."
+      }
+    ]
+  }
+}
