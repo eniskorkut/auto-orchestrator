@@ -48,6 +48,24 @@ def record(root: Path, run_id: str, event: str, **kwargs) -> None:
     append_event(root,run_id,event,**kwargs)
 
 
+def observe_supervised(root: Path, platform: str, native_id: object, event: str) -> None:
+    """Only pre-existing Supervisor DBs; no implicit run, claim or completion."""
+    db=root/'.auto-orchestrator'/'supervisor.sqlite3'
+    if not db.is_file() or db.is_symlink() or not isinstance(native_id,str):
+        return
+    try:
+        try:
+            from tools.supervisor import Supervisor, SupervisorError
+        except ModuleNotFoundError:
+            from supervisor import Supervisor, SupervisorError
+        supervisor=Supervisor(root)
+        try:
+            supervisor.observe_native(platform,native_id,event)
+        finally:
+            supervisor.close()
+    except (SupervisorError,OSError,ValueError):
+        pass  # Hooks are advisory; do not interrupt native IDE operations.
+
 def handle_codex(payload: dict, root: Path) -> dict:
     event=payload.get('hook_event_name')
     session=payload.get('session_id')
@@ -64,6 +82,7 @@ def handle_codex(payload: dict, root: Path) -> dict:
     agent=payload.get('agent_id')
     if event in ('SubagentStart','SubagentStop') and agent:
         record(root,run,'agent-start' if event=='SubagentStart' else 'agent-stop',agent_id=opaque(agent))
+        observe_supervised(root,'codex',agent,'start' if event=='SubagentStart' else 'stop')
     elif event=='Stop':
         record(root,run,'finish',status='success')  # Verified only with explicit CLI event.
     return {}
@@ -89,6 +108,37 @@ def handle_antigravity(payload: dict, root: Path, event: str) -> dict:
     return {}
 
 
+def handle_cursor(payload: dict, root: Path, event: str) -> dict:
+    """Cursor project-scoped hook bridge, strictly observation-only."""
+    sid=payload.get('session_id') or payload.get('parent_conversation_id')
+    if not isinstance(sid,str) or not sid:
+        return {'permission':'allow'} if event=='subagentStart' else {}
+    run=opaque('cursor',sid)
+    if event=='sessionStart':
+        record(root,run,'start',platform='cursor')
+        return {'additional_context':POLICY}
+    if event=='subagentStart':
+        # Cursor's docs expose an ID here, but its subagentStop schema does
+        # not promise one. Only link authoritative, identical IDs.
+        native=payload.get('subagent_id')
+        if isinstance(native,str) and native:
+            record(root,run,'agent-start',agent_id=opaque(native))
+            observe_supervised(root,'cursor',native,'start')
+        return {'permission':'allow'}
+    if event=='subagentStop':
+        native=payload.get('subagent_id')
+        if isinstance(native,str) and native:
+            record(root,run,'agent-stop',agent_id=opaque(native))
+            observe_supervised(root,'cursor',native,'stop')
+        # Do NOT assume task text/type or transcript path identifies the agent.
+        return {}
+    if event=='sessionEnd':
+        reason=payload.get('reason')
+        status={'completed':'success','aborted':'cancelled','error':'failed',
+                'window_close':'cancelled','user_close':'cancelled'}.get(reason,'failed')
+        record(root,run,'finish',status=status)
+    return {}
+
 def root_for_payload(payload: dict, platform: str) -> Path:
     # Native hooks may run from the IDE process directory rather than a
     # workspace directory. Prefer the caller-reported active workspace.
@@ -106,7 +156,7 @@ def root_for_payload(payload: dict, platform: str) -> Path:
 
 def main(argv=None) -> int:
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('platform',choices=['codex','antigravity'])
+    parser.add_argument('platform',choices=['codex','antigravity','cursor'])
     parser.add_argument('event',nargs='?',default='')
     parser.add_argument('--root',type=Path,default=None)
     args=parser.parse_args(argv)
@@ -114,8 +164,13 @@ def main(argv=None) -> int:
         payload=json.load(sys.stdin)
         if not isinstance(payload,dict):
             return 0
+        if args.platform=='cursor' and args.root is None:
+            # Global Cursor hooks execute in ~/.cursor, not the workspace.
+            # Only project-local installs may authorize telemetry.
+            return 0
         root=args.root if args.root is not None else root_for_payload(payload,args.platform)
         result=(handle_codex(payload,root) if args.platform=='codex' else
+                handle_cursor(payload,root,args.event) if args.platform=='cursor' else
                 handle_antigravity(payload,root,args.event))
         if result:
             print(json.dumps(result,separators=(',',':')))
