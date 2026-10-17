@@ -80,6 +80,18 @@ class NativeSupervisionTests(unittest.TestCase):
         self.s.change("run","alpha",b["lease"],"completed",result=RESULT)
         self.assertFalse(self.s.observe_native("codex","native-attempt-2","stop")["matched"])
 
+    def test_malformed_result_rejected_without_crashing_cli(self):
+        self.s.init("run",{"native_supervision":True,"tasks":[sample("alpha")]})
+        lease=self.s.claim("run")["claimed"][0]
+        self.s.bind_native("run","alpha",lease["lease"],"codex","result-validation-agent")
+        self.s.observe_native("codex","result-validation-agent","stop")
+        for bad_tests in ([42],["passed"],[None],[{"status":"passed"}]):
+            with self.subTest(bad_tests=bad_tests),self.assertRaises(SupervisorError):
+                self.s.change("run","alpha",lease["lease"],"completed",
+                              result={"summary":"invalid","changed_files":[],
+                                      "tests":bad_tests,"findings":[]})
+        self.assertEqual(self.s.status("run")["tasks"][0]["state"],"running")
+
     def test_old_run_without_opt_in_remains_usable(self):
         self.s.init("run",{"tasks":[sample("alpha")]})
         a=self.s.claim("run")["claimed"][0]
