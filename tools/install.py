@@ -45,7 +45,7 @@ def shell_arg(value:Path)->str:
 
 def rendered(source:Path, target:Path)->str:
     content=source.read_text(encoding='utf-8')
-    if source in (ROOT/'.codex/hooks.json', ROOT/'.agents/hooks.json'):
+    if source in (ROOT/'.codex/hooks.json', ROOT/'.agents/hooks.json', ROOT/'.cursor/hooks.json'):
         command=shell_arg(Path(sys.executable))+' '+shell_arg((target/'tools/hook_bridge.py').resolve())
         content=content.replace('python tools/hook_bridge.py',json.dumps(command)[1:-1])
     return content
@@ -105,7 +105,7 @@ def install(target: Path, platform: str, codex_model: str, dry_run: bool, force_
         raise Conflict(f'Target project directory does not exist: {target}')
     if (target / 'tools' / 'install.py').resolve() == Path(__file__).resolve():
         raise Conflict('Install into a separate target project (do not self-install).')
-    selected = {'codex','opencode','antigravity'} if platform == 'all' else {platform}
+    selected = {'codex','opencode','antigravity','cursor'} if platform == 'all' else {platform}
     def destination(source: Path) -> Path:
         if source == ROOT/'adapters/opencode-v2/auto_orchestrator.js':
             return target/'.opencode/plugins/auto_orchestrator.js'
@@ -123,6 +123,9 @@ def install(target: Path, platform: str, codex_model: str, dry_run: bool, force_
     if 'antigravity' in selected:
         sources.extend(sorted((ROOT/'.agents/agents').glob('*.md')))
         sources.append(ROOT/'.agents/hooks.json')
+    if 'cursor' in selected:
+        sources.extend(sorted((ROOT/'.cursor/agents').glob('*.md')))
+        sources.append(ROOT/'.cursor/hooks.json')
     # Preflight all non-managed destinations, so no partial install on conflict.
     for source in sources:
         dest = destination(source)
@@ -157,7 +160,7 @@ def install(target: Path, platform: str, codex_model: str, dry_run: bool, force_
 def main(argv=None):
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--target',required=True,type=Path)
-    p.add_argument('--platform',choices=['all','codex','opencode','antigravity'],default='all')
+    p.add_argument('--platform',choices=['all','codex','opencode','antigravity','cursor'],default='all')
     p.add_argument('--codex-model',choices=['inherit','luna-max'],default='inherit')
     p.add_argument('--opencode-version',choices=['v1','v2'],default='v2')
     p.add_argument('--dry-run',action='store_true')

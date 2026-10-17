@@ -6,7 +6,8 @@ from pathlib import Path
 CHECKS={
 'codex':['.codex/skills/auto-orchestrator/SKILL.md','.codex/AGENTS.md','.codex/agents/auto_explorer.toml'],
 'opencode':['.config/opencode/skills/auto-orchestrator/SKILL.md','.config/opencode/AGENTS.md','.config/opencode/plugins/auto_orchestrator.js'],
-'antigravity':['.gemini/config/skills/auto-orchestrator/SKILL.md','.gemini/config/rules/auto-orchestrator.md']}
+'antigravity':['.gemini/config/skills/auto-orchestrator/SKILL.md','.gemini/config/rules/auto-orchestrator.md'],
+'cursor':['.cursor/skills/auto-orchestrator/SKILL.md','.cursor/agents/auto_explorer.md']}
 def check(home,platform):
     selected=CHECKS if platform=='all' else {platform:CHECKS[platform]}
     return {p:{item:(home/item).is_file() for item in paths} for p,paths in selected.items()}

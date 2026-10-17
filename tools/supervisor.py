@@ -7,6 +7,7 @@ import json
 import re
 import secrets
 import sqlite3
+import hashlib
 import os
 import time
 from pathlib import Path
@@ -102,11 +103,11 @@ def validate_result(value):
             raise SupervisorError(f"Result requires {key} array")
     for name in value["changed_files"]:
         scope(name)
-    if any(x.get("status")=="failed" for x in value["tests"]):
-        raise SupervisorError("Cannot complete a task with failing tests")
     if not all(isinstance(x,dict) and isinstance(x.get("name"),str) and
                x.get("status") in ("passed","failed","skipped") for x in value["tests"]):
         raise SupervisorError("Tests need name and passed/failed/skipped status")
+    if any(x["status"]=="failed" for x in value["tests"]):
+        raise SupervisorError("Cannot complete a task with failing tests")
     if not all(isinstance(x,str) and len(x)<=1000 for x in value["findings"]):
         raise SupervisorError("Findings must be short strings")
     return value
@@ -134,6 +135,17 @@ class Supervisor:
           termination_confirmed INTEGER NOT NULL DEFAULT 0, result TEXT, reason TEXT,
           PRIMARY KEY(run_id,id), FOREIGN KEY(run_id) REFERENCES runs(id));
         """)
+        # Preserve existing V4 SQLite data in place.
+        columns={row["name"] for row in self.conn.execute("PRAGMA table_info(runs)")}
+        if "native_supervision" not in columns:
+            self.conn.execute("ALTER TABLE runs ADD COLUMN native_supervision INTEGER NOT NULL DEFAULT 0")
+        self.conn.executescript("""
+        CREATE TABLE IF NOT EXISTS native_bindings (
+          run_id TEXT NOT NULL, task_id TEXT NOT NULL, attempt INTEGER NOT NULL,
+          platform TEXT NOT NULL, native_hash TEXT NOT NULL, stopped INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY(run_id,task_id,attempt),
+          UNIQUE(platform,native_hash));
+        """)
     def close(self):
         self.conn.close()
 
@@ -148,9 +160,13 @@ class Supervisor:
             raise
     def init(self, run, plan):
         identifier(run)
+        native_supervision=plan.get("native_supervision", False) if isinstance(plan,dict) else False
+        if type(native_supervision) is not bool:
+            raise SupervisorError("native_supervision must be a boolean")
         tasks, limit=validate_plan(plan)
         def op():
-            self.conn.execute("INSERT INTO runs VALUES (?,?,?)",(run,time.time(),limit))
+            self.conn.execute("INSERT INTO runs (id,created,max_parallel,native_supervision) VALUES (?,?,?,?)",
+                              (run,time.time(),limit,int(native_supervision)))
             for item in tasks.values():
                 self.conn.execute("""INSERT INTO tasks
                   (run_id,id,role,objective,dependencies,read_scope,write_scope,timeout_seconds,max_retries)
@@ -222,6 +238,15 @@ class Supervisor:
                                    (file_path==base or file_path.startswith(base+"/")) for base in allowed)
                        for file_path in result["changed_files"]):
                     raise SupervisorError("Changed files exceed assigned write scope")
+            supervised=bool(self.conn.execute(
+                "SELECT native_supervision FROM runs WHERE id=?",(run,)).fetchone()[0])
+            if supervised:
+                binding=self.conn.execute("""
+                    SELECT stopped FROM native_bindings
+                    WHERE run_id=? AND task_id=? AND attempt=?
+                """,(run,task_id,task["attempts"])).fetchone()
+                if not binding or not binding["stopped"]:
+                    raise SupervisorError("Native termination evidence required for supervised task transition")
             if task["lease"]!=lease or not lease:
                 raise SupervisorError("Stale or invalid attempt lease")
             if action in ("completed","failed"):
@@ -237,6 +262,68 @@ class Supervisor:
               (action,now,json.dumps(result) if result is not None else None,reason,run,task_id))
             return {"id":task_id,"state":action,"attempt":task["attempts"]}
         return self.transaction(op)
+    @staticmethod
+    def native_hash(platform,native_id):
+        if platform not in ("codex","cursor","opencode") or not isinstance(native_id,str) or not 4 <= len(native_id) <= 256:
+            raise SupervisorError("Unsupported native platform or native ID")
+        if any(ord(ch) < 33 or ord(ch) > 126 for ch in native_id):
+            raise SupervisorError("Invalid native ID")
+        return hashlib.sha256((platform+"|"+native_id).encode()).hexdigest()
+
+    def bind_native(self,run,task_id,lease,platform,native_id):
+        """Bind a claimed attempt to the real native ID returned by the client."""
+        digest=self.native_hash(platform,native_id)
+        identifier(task_id)
+        def op():
+            rows=self._tasks(run)
+            item=rows.get(task_id)
+            if not item or item["state"]!="running" or not lease or item["lease"]!=lease:
+                raise SupervisorError("Native binding requires a valid active task lease")
+            supervised=self.conn.execute(
+                "SELECT native_supervision FROM runs WHERE id=?",(run,)).fetchone()[0]
+            if not supervised:
+                raise SupervisorError("Enable native_supervision in the run plan first")
+            prior=self.conn.execute("""
+                SELECT platform,native_hash FROM native_bindings
+                WHERE run_id=? AND task_id=? AND attempt=?
+            """,(run,task_id,item["attempts"])).fetchone()
+            if prior:
+                if prior["platform"]!=platform or prior["native_hash"]!=digest:
+                    raise SupervisorError("Attempt already bound to a different native agent")
+                return {"bound":True,"idempotent":True,"task_id":task_id,"attempt":item["attempts"]}
+            try:
+                self.conn.execute("""
+                INSERT INTO native_bindings (run_id,task_id,attempt,platform,native_hash)
+                VALUES (?,?,?,?,?)
+                """,(run,task_id,item["attempts"],platform,digest))
+            except sqlite3.IntegrityError as exc:
+                raise SupervisorError("Native agent already bound to another attempt") from exc
+            return {"bound":True,"idempotent":False,"task_id":task_id,"attempt":item["attempts"]}
+        return self.transaction(op)
+
+    def observe_native(self,platform,native_id,event):
+        """A trusted hook records a stop; it NEVER marks the task completed."""
+        digest=self.native_hash(platform,native_id)
+        if event not in ("start","stop"):
+            raise SupervisorError("Unknown native observation")
+        def op():
+            binding=self.conn.execute("""
+              SELECT b.run_id,b.task_id,b.attempt,b.stopped,t.attempts,t.state
+              FROM native_bindings b JOIN tasks t ON
+                t.run_id=b.run_id AND t.id=b.task_id
+              WHERE b.platform=? AND b.native_hash=?
+            """,(platform,digest)).fetchone()
+            if not binding or binding["attempt"]!=binding["attempts"] or binding["state"] not in ACTIVE:
+                return {"matched":False}
+            if event=="stop" and not binding["stopped"]:
+                self.conn.execute("""
+                  UPDATE native_bindings SET stopped=1
+                  WHERE run_id=? AND task_id=? AND attempt=?
+                """,(binding["run_id"],binding["task_id"],binding["attempt"]))
+            return {"matched":True,"task_id":binding["task_id"],
+                    "native_stop_observed":bool(binding["stopped"] or event=="stop")}
+        return self.transaction(op)
+
     def cancel(self,run,task_id):
         identifier(task_id)
         def op():
@@ -271,7 +358,12 @@ class Supervisor:
         return self.transaction(op)
     def status(self,run):
         rows=self._tasks(run)
-        return {"run_id":run,"tasks":[{"id":t["id"],"state":t["state"],"role":t["role"],
+        supervised=bool(self.conn.execute(
+            "SELECT native_supervision FROM runs WHERE id=?",(run,)).fetchone()[0])
+        bindings={(row["task_id"],row["attempt"]):bool(row["stopped"]) for row in
+                  self.conn.execute("SELECT task_id,attempt,stopped FROM native_bindings WHERE run_id=?",(run,))}
+        return {"run_id":run,"native_supervision":supervised,"tasks":[{"id":t["id"],"state":t["state"],"role":t["role"],
+                 "native_stop_observed":(t["state"]!="pending" and bindings.get((t["id"],t["attempts"]),False)),
                  "attempts":t["attempts"],"max_retries":t["max_retries"],"reason":t["reason"],
                  "result":json.loads(t["result"]) if t["result"] else None} for t in rows.values()],
                 "complete":all(t["state"]=="completed" for t in rows.values()),
@@ -287,6 +379,11 @@ def main(argv=None):
     for name in ("completed","failed","cancelled"):
         q=sub.add_parser(name);q.add_argument("--run-id",required=True);q.add_argument("--task-id",required=True)
         q.add_argument("--lease",required=True);q.add_argument("--result");q.add_argument("--reason")
+    bind=sub.add_parser("bind-native");bind.add_argument("--run-id",required=True)
+    bind.add_argument("--task-id",required=True);bind.add_argument("--lease",required=True)
+    bind.add_argument("--platform",required=True);bind.add_argument("--native-id",required=True)
+    observe=sub.add_parser("observe-native");observe.add_argument("--platform",required=True)
+    observe.add_argument("--native-id",required=True);observe.add_argument("--event",choices=["start","stop"],required=True)
     cancel=sub.add_parser("cancel");cancel.add_argument("--run-id",required=True);cancel.add_argument("--task-id",required=True)
     retry=sub.add_parser("retry");retry.add_argument("--run-id",required=True);retry.add_argument("--task-id",required=True)
     retry.add_argument("--reason",required=True)
@@ -296,6 +393,8 @@ def main(argv=None):
         if a.command=="init": result=s.init(a.run_id,json.loads(Path(a.plan).read_text(encoding="utf-8")))
         elif a.command=="claim": result=s.claim(a.run_id)
         elif a.command=="status": result=s.status(a.run_id)
+        elif a.command=="bind-native": result=s.bind_native(a.run_id,a.task_id,a.lease,a.platform,a.native_id)
+        elif a.command=="observe-native": result=s.observe_native(a.platform,a.native_id,a.event)
         elif a.command=="cancel": result=s.cancel(a.run_id,a.task_id)
         elif a.command=="retry": result=s.retry(a.run_id,a.task_id,a.reason)
         else:

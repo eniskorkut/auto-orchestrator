@@ -121,6 +121,15 @@ def installed_map(home:Path,platforms:set[str],opencode_version:str,codex_model:
                             h['command']=h['command'].replace('python tools/hook_bridge.py',shell_arg(Path(sys.executable))+' '+shell_arg(bridge))
             files[hooks_path]=(json.dumps(hooks,indent=2)+'\n').encode('utf-8')
         files[gemini/'config/rules/auto-orchestrator.md']=('# Auto-Orchestrator\n'+GUIDANCE.replace(BEGIN,'').replace(END,'').strip()+'\n').encode()
+    if 'cursor' in platforms:
+        # Cursor user-level hooks execute under ~/.cursor and their stdin
+        # does not attest the workspace. Never enable global telemetry hooks.
+        cursor=home/'.cursor'
+        skills_at(cursor/'skills/auto-orchestrator')
+        for source in (ROOT/'.cursor/agents').glob('*.md'):
+            files[cursor/'agents'/source.name]=source.read_bytes()
+        for name in ('supervisor.py','router.py','worktree.py','quality_gate.py','perf.py','hook_bridge.py'):
+            files[cursor/'auto-orchestrator/tools'/name]=(ROOT/'tools'/name).read_bytes()
     return files
 
 def native_hook_fragment(home: Path, platform: str) -> dict:
@@ -286,13 +295,13 @@ def execute(home:Path,platforms:set[str],opencode_version:str='v2',codex_model:s
 def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--home',type=Path,default=Path.home())
-    parser.add_argument('--platform',choices=['all','codex','opencode','antigravity'],default='all')
+    parser.add_argument('--platform',choices=['all','codex','opencode','antigravity','cursor'],default='all')
     parser.add_argument('--opencode-version',choices=['v1','v2'],default='v2')
     parser.add_argument('--codex-model',choices=['inherit','luna-max'],default='inherit')
     parser.add_argument('--dry-run',action='store_true')
     parser.add_argument('--uninstall',action='store_true')
     args=parser.parse_args(argv)
-    platforms={'codex','opencode','antigravity'} if args.platform=='all' else {args.platform}
+    platforms={'codex','opencode','antigravity','cursor'} if args.platform=='all' else {args.platform}
     try:print('\n'.join(execute(args.home,platforms,args.opencode_version,args.codex_model,args.dry_run,args.uninstall)))
     except (InstallError,HookIntegrationError,OSError,ValueError) as exc:
         print('INSTALL ERROR: '+str(exc),file=sys.stderr)

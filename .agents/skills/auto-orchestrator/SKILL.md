@@ -25,7 +25,8 @@ Read this skill whenever a coding task is non-trivial, spans components, needs i
 
 - **Codex:** `spawn_agent`, `wait` and supported native delegation. Use agent definitions `.codex/agents/`; model is inherited unless target `.codex/config.toml` explicitly selects `gpt-6-luna` + `max`. Explicit model override may take precedence; check actual availability.
 - **OpenCode:** delegate to `.opencode/agents/*` through native task/subagent tool; no model key in profiles so model inherits from calling agent. Respect the installed OpenCode version.
-- **Antigravity 2.0/CLI:** use `invoke_subagent` and `.agents/agents/*`. Profiles use `model: inherit`. Prefer isolated `branch` workspace for parallel writers. IDE may not expose the same native subagent function.
+- **Antigravity 2.0/CLI:** use `invoke_subagent` and `.agents/agents/*` where actually supported. Profiles use `model: inherit`. The official lifecycle hooks do not attest each subagent's stop; do not unlock supervised leases from tool dispatch alone.
+- **Cursor:** use native subagents in `.cursor/agents/*` and project-local `.cursor/hooks.json`. The documented `subagentStart` hook has `subagent_id`, but `subagentStop` does not guarantee it; never infer a matching agent from task text.
 
 ## Instrumentation
 
@@ -54,3 +55,10 @@ For full details see `references/delegation.md`, `references/verification.md`, `
 ## V5 opt-in automatic verification
 
 OpenCode V2 optionally observes checks configured in the project owner's .auto-orchestrator/verification.json. It does not launch test commands. Execute approved checks when appropriate; never claim tests passed on tool completion without an authoritative process exit code. Finish and verification are distinct: if the evidence gate cannot validate all checks after the final edit/subagent completion, the run remains unverified. The resulting performance estimate is overlap only, not benchmarked time saved. See references/reporting.md and examples/v5-verification.json in the source repository.
+
+
+## V6 — opt-in Supervisor native evidence
+
+For complex tasks where task leases and file ownership matter, initialize the plan with `"native_supervision": true`. Claim each scheduled task in SQLite **before** dispatch. After a native IDE subagent has actually started and supplied a concrete native ID, bind that ID with `supervisor.py bind-native --run-id ID --task-id TASK --lease LEASE --platform codex|cursor|opencode --native-id NATIVE_ID`. Do not guess an ID or pretend this binding spawned an agent. The Codex hook observes matching native SubagentStop; Cursor hook only marks stop when a verifiable matching `subagent_id` is present. OpenCode V2 background tool-return is not proof that the child finished. Antigravity has no documented authoritative per-child stop ID.
+
+Supervisor refuses completion, failure or cancellation acknowledgement on supervised tasks until a bound native stop was observed. **Even after native stop**, the main agent must supply verified structured result and its own live lease to move the task to completed. Dependencies and overlapping write scopes remain blocked until then. Never use a synthetic stop event to free a lease. Runs without `native_supervision` continue supporting the V4 behavior for compatibility. See `references/supervision.md`.

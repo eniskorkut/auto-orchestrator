@@ -64,8 +64,8 @@ def append_event(root: Path, run_id: str, event: str, *, platform: str | None = 
         raise EventError('Invalid timestamp')
     payload = {'event':event,'time':now}
     if event == 'start':
-        if platform not in ('codex','opencode','antigravity'):
-            raise EventError('Platform must be codex, opencode, or antigravity')
+        if platform not in ('codex','opencode','antigravity','cursor'):
+            raise EventError('Platform must be codex, opencode, antigravity, or cursor')
         payload['platform'] = platform
     elif event in ('agent-start','agent-stop'):
         if not agent_id:
