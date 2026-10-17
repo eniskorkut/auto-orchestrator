@@ -106,6 +106,23 @@ class NativePlatformSimulationTests(unittest.TestCase):
         self.assertEqual([x["event"] for x in events],["start","finish"])
         self.assertEqual(events[-1]["status"],"failed")
 
+    def test_antigravity_invoke_dispatch_never_unlocks_supervised_child(self):
+        lease=self.claim()
+        with self.assertRaises(SupervisorError):
+            self.supervisor.bind_native("run","backend",lease["lease"],
+                                        "antigravity","invoke-subagent-id")
+        payload={"conversationId":"private","workspacePaths":[str(self.root)],
+                 "toolCall":{"name":"invoke_subagent","args":{"agent":"reviewer"}},
+                 "fullyIdle":False,"terminationReason":"model_stop"}
+        handle_antigravity(payload,self.root,"SessionStart")
+        handle_antigravity(payload,self.root,"PreToolUse")
+        handle_antigravity(payload,self.root,"PostToolUse")
+        handle_antigravity(payload,self.root,"Stop")
+        with self.assertRaises(SupervisorError):
+            self.supervisor.change("run","backend",lease["lease"],
+                                   "completed",result=RESULT)
+        self.assertFalse(self.supervisor.status("run")["tasks"][0]["native_stop_observed"])
+
     def test_root_fail_closed_for_ambiguous_workspaces(self):
         self.assertIsNone(root_for_payload({"workspacePaths":[str(self.root),"/other"]},"antigravity"))
         self.assertIsNone(root_for_payload({},"codex"))
