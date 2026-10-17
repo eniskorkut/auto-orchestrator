@@ -103,11 +103,11 @@ def validate_result(value):
             raise SupervisorError(f"Result requires {key} array")
     for name in value["changed_files"]:
         scope(name)
-    if any(x.get("status")=="failed" for x in value["tests"]):
-        raise SupervisorError("Cannot complete a task with failing tests")
     if not all(isinstance(x,dict) and isinstance(x.get("name"),str) and
                x.get("status") in ("passed","failed","skipped") for x in value["tests"]):
         raise SupervisorError("Tests need name and passed/failed/skipped status")
+    if any(x["status"]=="failed" for x in value["tests"]):
+        raise SupervisorError("Cannot complete a task with failing tests")
     if not all(isinstance(x,str) and len(x)<=1000 for x in value["findings"]):
         raise SupervisorError("Findings must be short strings")
     return value
