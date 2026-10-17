@@ -363,7 +363,7 @@ class Supervisor:
         bindings={(row["task_id"],row["attempt"]):bool(row["stopped"]) for row in
                   self.conn.execute("SELECT task_id,attempt,stopped FROM native_bindings WHERE run_id=?",(run,))}
         return {"run_id":run,"native_supervision":supervised,"tasks":[{"id":t["id"],"state":t["state"],"role":t["role"],
-                 "native_stop_observed":bindings.get((t["id"],t["attempts"]),False),
+                 "native_stop_observed":(t["state"] in ACTIVE and bindings.get((t["id"],t["attempts"]),False)),
                  "attempts":t["attempts"],"max_retries":t["max_retries"],"reason":t["reason"],
                  "result":json.loads(t["result"]) if t["result"] else None} for t in rows.values()],
                 "complete":all(t["state"]=="completed" for t in rows.values()),
