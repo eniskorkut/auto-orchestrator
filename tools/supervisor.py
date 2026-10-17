@@ -142,10 +142,17 @@ class Supervisor:
         self.conn.executescript("""
         CREATE TABLE IF NOT EXISTS native_bindings (
           run_id TEXT NOT NULL, task_id TEXT NOT NULL, attempt INTEGER NOT NULL,
-          platform TEXT NOT NULL, native_hash TEXT NOT NULL, stopped INTEGER NOT NULL DEFAULT 0,
+          platform TEXT NOT NULL, native_hash TEXT NOT NULL,
+          started INTEGER NOT NULL DEFAULT 0, stopped INTEGER NOT NULL DEFAULT 0,
           PRIMARY KEY(run_id,task_id,attempt),
           UNIQUE(platform,native_hash));
         """)
+        native_cols={row["name"] for row in self.conn.execute("PRAGMA table_info(native_bindings)")}
+        if "started" not in native_cols:
+            # Existing V6 bindings are not trustworthy start/stop evidence.
+            # Old rows remain bound but must see fresh native start before stop.
+            self.conn.execute("ALTER TABLE native_bindings ADD COLUMN started INTEGER NOT NULL DEFAULT 0")
+            self.conn.execute("UPDATE native_bindings SET stopped=0")
     def close(self):
         self.conn.close()
 
@@ -308,20 +315,27 @@ class Supervisor:
             raise SupervisorError("Unknown native observation")
         def op():
             binding=self.conn.execute("""
-              SELECT b.run_id,b.task_id,b.attempt,b.stopped,t.attempts,t.state
+              SELECT b.run_id,b.task_id,b.attempt,b.started,b.stopped,t.attempts,t.state
               FROM native_bindings b JOIN tasks t ON
                 t.run_id=b.run_id AND t.id=b.task_id
               WHERE b.platform=? AND b.native_hash=?
             """,(platform,digest)).fetchone()
             if not binding or binding["attempt"]!=binding["attempts"] or binding["state"] not in ACTIVE:
                 return {"matched":False}
-            if event=="stop" and not binding["stopped"]:
+            if event=="start" and not binding["started"]:
+                self.conn.execute("""
+                  UPDATE native_bindings SET started=1
+                  WHERE run_id=? AND task_id=? AND attempt=?
+                """,(binding["run_id"],binding["task_id"],binding["attempt"]))
+            if event=="stop" and binding["started"] and not binding["stopped"]:
                 self.conn.execute("""
                   UPDATE native_bindings SET stopped=1
                   WHERE run_id=? AND task_id=? AND attempt=?
                 """,(binding["run_id"],binding["task_id"],binding["attempt"]))
-            return {"matched":True,"task_id":binding["task_id"],
-                    "native_stop_observed":bool(binding["stopped"] or event=="stop")}
+            accepted=bool(binding["started"] or event=="start")
+            return {"matched":accepted,"task_id":binding["task_id"],
+                    "native_start_observed":accepted,
+                    "native_stop_observed":bool(binding["stopped"] or (event=="stop" and binding["started"]))}
         return self.transaction(op)
 
     def cancel(self,run,task_id):
