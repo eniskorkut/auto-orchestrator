@@ -134,7 +134,9 @@ def handle_cursor(payload: dict, root: Path, event: str) -> dict:
             # Start is observable, but Cursor's documented stop payload does
             # not include the same ID. Do not create unmatched perf spans.
             observe_supervised(root,'cursor',native,'start')
-        return {}  # Never auto-approve or bypass the IDE's permission chain.
+        # Cursor requires schema-valid permission output for subagentStart.
+        # Other policy hooks still win on deny; this observes, never denies.
+        return {'permission':'allow'}
     if event=='subagentStop':
         native=payload.get('subagent_id')
         if isinstance(native,str) and native:
