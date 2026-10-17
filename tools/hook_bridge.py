@@ -121,7 +121,9 @@ def handle_cursor(payload: dict, root: Path, event: str) -> dict:
     """Cursor project-scoped hook bridge, strictly observation-only."""
     sid=payload.get('session_id') or payload.get('parent_conversation_id')
     if not isinstance(sid,str) or not sid:
-        return {}
+        # Invalid/missing identity means no telemetry, but do not block an
+        # otherwise authorized native subagent because of a logging failure.
+        return {'permission':'allow'} if event=='subagentStart' else {}
     run=opaque('cursor',sid)
     if event=='sessionStart':
         record(root,run,'start',platform='cursor')
