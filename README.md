@@ -1,6 +1,6 @@
-# Auto-Orchestrator (V6 — Supervisor Native Evidence)
+# Auto-Orchestrator — Native Multi-Agent Coordination (V6)
 
-Portable, opt-in native-subagent orchestration for **Codex**, **OpenCode**, and **Google Antigravity**.
+Portable, opt-in native-subagent coordination for **OpenCode**, **Codex**, **Cursor**, and **Google Antigravity**. Platform-native runtime capabilities and proof strength differ.
 
 The project uses **one common skill and per-platform agent definitions**. It does not host its own LLM or promise to force models to delegate. It instructs native agents to delegate when beneficial, and provides an evidence-based time-reporting CLI.
 
@@ -221,3 +221,10 @@ Once the native stop is observed, the main agent must still validate actual chan
 **Cross-platform status:** OpenCode V2 has prior Windows Desktop field testing for delegation and Quality Gate; the new V6 native ownership/stop integrations remain untested on installed IDEs. Codex, Cursor and Antigravity hook event contracts are covered by deterministic simulated tests only. Cursor subagentStop and Antigravity tool dispatch must not be advertised as proven per-agent durations. `doctor` verifies files, not runtime hooks. A serial-vs-parallel real-work benchmark remains deferred.
 
 See [V6 supervision notes](docs/V6_NATIVE_SUPERVISION.md) for the native evidence contract, fallbacks and remaining gaps. 
+
+
+## V6 — Native Supervisor integrity and platform verification
+
+Native supervision is opt-in through `native_supervision: true` in a task plan. The SQLite Supervisor manages claims, scoped concurrency, leases, dependencies and retry/cancel states. It **does not launch IDE agents**. A native agent's observed start and matching stop are required before a bound task's structured completion can release dependencies. This rule also holds when the start callback precedes `bind-native`: short-lived native hook start evidence is buffered and matched against the existing claim. A stop-only callback never authorizes completion.
+
+Cursor project installations now register both `subagentStart` and `subagentStop`, but native Cursor stop payloads may omit the child ID and some versions do not emit background stops. Those tasks must remain blocked, not be guessed complete. Antigravity currently cannot prove per-child stop via its documented session/invocation hooks. OpenCode V2 background dispatch completion is not child completion. See [Native Supervisor platform matrix](docs/NATIVE_SUPERVISOR_PLATFORM_MATRIX.md) for platform contracts, gaps, and disposable-workspace smoke procedures. CI exercises simulated hooks and state transitions; a passing job is not a substitute for a native IDE run.
