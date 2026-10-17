@@ -7,7 +7,7 @@ A claim is only a lease reservation. It is NOT a spawned native agent. Initializ
 1. Main agent initializes the run and claims eligible tasks. It must respect the returned dependencies/read-write scopes.
 2. It dispatches through its IDE's real native subagent tool; no dummy process is launched by Supervisor.
 3. When the native IDE returns a real agent ID, bind with `supervisor.py --root PROJECT bind-native --run-id RUN --task-id TASK --lease LEASE --platform codex|cursor|opencode --native-id NATIVE_ID`. Each attempt has one immutable native ID mapping; collision, stale lease and duplicate mapping are rejected. No raw native ID is written to SQLite; only SHA-256 is persisted.
-4. On a **matching authenticated native stop event** the hook records `native_stop_observed=true`. This is termination evidence, not proof that tests passed. Native stop does not mark `completed` or free dependency/write-scope reservations.
+4. On a **matching trusted native hook stop event** the hook records `native_stop_observed=true`. This is termination evidence, not proof that tests passed. Native stop does not mark `completed` or free dependency/write-scope reservations.
 5. The main agent reviews actual changes and tests, then supplies a bounded structured result and its attempt lease to the Supervisor's existing `completed` command. A supervised transition fails unless that attempt has a bound observed native stop. Failure/cancel acknowledgement likewise needs a trustworthy stop.
 6. A timeout only marks `timed_out`, and cancellation still requires native acknowledgement; retry limits remain enforced. `pending` tasks after retry cannot inherit a previous attempt's stop evidence.
 
@@ -24,7 +24,7 @@ This mechanism requires trusted hook installation and native events. It does not
 | OpenCode V2 | Native subagent tool events and child sessions | Not automatically linked to SQLite in V6 | Background tool completion is only spawn acknowledgement. |
 | Antigravity | `SessionStart`, `PreToolUse`, `PostToolUse`, `Stop` | No authoritative per-child stop | Tool dispatch/fullyIdle are not proof of which child terminated. |
 
-Cursor global install is **skills/agent profiles only**, intentionally no `~/.cursor/hooks.json` edits. Project-level hooks are needed for scoped telemetry; hook user permissions are never auto-approved. For Cursor IDE/CLI/Cloud feature coverage see the official documentation and test installed client behavior separately.
+Cursor project hooks intentionally do not install `subagentStart` because that is a permission-intercepting hook and the orchestrator must never auto-approve native subagents. Cursor global install is **skills/agent profiles only**, intentionally no `~/.cursor/hooks.json` edits. Project-level hooks are needed for scoped telemetry; hook user permissions are never auto-approved. For Cursor IDE/CLI/Cloud feature coverage see the official documentation and test installed client behavior separately.
 
 ## Security and quality checks
 
