@@ -13,7 +13,7 @@ class CursorInstallerTests(unittest.TestCase):
             install(root,"cursor","inherit",False,False)
             cfg=json.loads((root/".cursor/hooks.json").read_text(encoding="utf-8"))
             self.assertEqual(cfg["version"],1)
-            self.assertEqual(set(cfg["hooks"]),{"sessionStart","sessionEnd","subagentStop"})
+            self.assertEqual(set(cfg["hooks"]),{"sessionStart","sessionEnd","subagentStart","subagentStop"})
             for entries in cfg["hooks"].values():
                 self.assertEqual(len(entries),1)
                 self.assertIn("--root .",entries[0]["command"])
