@@ -73,6 +73,11 @@ def handle_codex(payload: dict, root: Path) -> dict:
     turn=payload.get('turn_id')
     if not session or not isinstance(session,str):
         return {}
+    agent=payload.get('agent_id')
+    if event in ('SubagentStart','SubagentStop') and agent:
+        # Supervisor identity matching does not depend on turn-specific
+        # performance bookkeeping. Some client hook payloads lack turn_id.
+        observe_supervised(root,'codex',agent,'start' if event=='SubagentStart' else 'stop')
     if event=='UserPromptSubmit' and turn:
         run=opaque('codex',session,turn)
         record(root,run,'start',platform='codex')
@@ -83,7 +88,6 @@ def handle_codex(payload: dict, root: Path) -> dict:
     agent=payload.get('agent_id')
     if event in ('SubagentStart','SubagentStop') and agent:
         record(root,run,'agent-start' if event=='SubagentStart' else 'agent-stop',agent_id=opaque(agent))
-        observe_supervised(root,'codex',agent,'start' if event=='SubagentStart' else 'stop')
     elif event=='Stop':
         record(root,run,'finish',status='success')  # Verified only with explicit CLI event.
     return {}
