@@ -71,8 +71,12 @@ def handle_codex(payload: dict, root: Path) -> dict:
     event=payload.get('hook_event_name')
     session=payload.get('session_id')
     turn=payload.get('turn_id')
+    # Codex Stop/SubagentStop require a JSON stdout document on successful
+    # exit. Keep the hook observational: explicitly continue without
+    # requesting more model work or auto-approving any permissions.
+    neutral={'continue':True} if event in ('SubagentStop','Stop') else {}
     if not session or not isinstance(session,str):
-        return {}
+        return neutral
     agent=payload.get('agent_id')
     if event in ('SubagentStart','SubagentStop') and agent:
         # Supervisor identity matching does not depend on turn-specific
@@ -83,14 +87,14 @@ def handle_codex(payload: dict, root: Path) -> dict:
         record(root,run,'start',platform='codex')
         return {'hookSpecificOutput':{'hookEventName':'UserPromptSubmit','additionalContext':POLICY}}
     if not turn:
-        return {}
+        return neutral
     run=opaque('codex',session,turn)
     agent=payload.get('agent_id')
     if event in ('SubagentStart','SubagentStop') and agent:
         record(root,run,'agent-start' if event=='SubagentStart' else 'agent-stop',agent_id=opaque(agent))
     elif event=='Stop':
         record(root,run,'finish',status='success')  # Verified only with explicit CLI event.
-    return {}
+    return neutral
 
 
 def handle_antigravity(payload: dict, root: Path, event: str) -> dict:
@@ -117,7 +121,9 @@ def handle_cursor(payload: dict, root: Path, event: str) -> dict:
     """Cursor project-scoped hook bridge, strictly observation-only."""
     sid=payload.get('session_id') or payload.get('parent_conversation_id')
     if not isinstance(sid,str) or not sid:
-        return {}
+        # Invalid/missing identity means no telemetry, but do not block an
+        # otherwise authorized native subagent because of a logging failure.
+        return {'permission':'allow'} if event=='subagentStart' else {}
     run=opaque('cursor',sid)
     if event=='sessionStart':
         record(root,run,'start',platform='cursor')
@@ -130,7 +136,9 @@ def handle_cursor(payload: dict, root: Path, event: str) -> dict:
             # Start is observable, but Cursor's documented stop payload does
             # not include the same ID. Do not create unmatched perf spans.
             observe_supervised(root,'cursor',native,'start')
-        return {}  # Never auto-approve or bypass the IDE's permission chain.
+        # Cursor requires schema-valid permission output for subagentStart.
+        # Other policy hooks still win on deny; this observes, never denies.
+        return {'permission':'allow'}
     if event=='subagentStop':
         native=payload.get('subagent_id')
         if isinstance(native,str) and native:

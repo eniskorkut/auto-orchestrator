@@ -44,6 +44,22 @@ class HookTests(unittest.TestCase):
         self.assertTrue(summary.verified)
         self.assertEqual(summary.status,'success')
 
+    def test_codex_native_stop_hooks_always_emit_safe_json(self):
+        base={'session_id':'session-id','turn_id':'turn-id'}
+        self.send('codex','',{**base,'hook_event_name':'UserPromptSubmit'})
+        for event in ('SubagentStop','Stop'):
+            result=self.send('codex','',{**base,'hook_event_name':event,
+                                        'agent_id':'native-agent-id',
+                                        'last_assistant_message':'SECRET'})
+            self.assertEqual(result,{'continue':True})
+            self.assertNotIn('SECRET',json.dumps(result))
+        # SubagentStop may arrive without a turn_id; this is still a JSON
+        # output contract, and can record native start/stop separately.
+        result=self.send('codex','',{'session_id':'s','hook_event_name':'SubagentStop',
+                                   'agent_id':'native-agent-id'})
+        self.assertEqual(result,{'continue':True})
+        self.assertEqual(self.send('codex','',{'hook_event_name':'Stop'}),{'continue':True})
+
     def test_codex_unverified_never_claims(self):
         base={'session_id':'s','turn_id':'t'}
         for e in ('UserPromptSubmit','Stop'):
@@ -51,6 +67,19 @@ class HookTests(unittest.TestCase):
         run=opaque('codex','s','t')
         summary=analyze(run,load_events(path_for(self.project,run)))
         self.assertFalse(summary.has_valid_estimate)
+
+    def test_cursor_native_permission_output_contract(self):
+        response=self.send('cursor','subagentStart',{
+            'parent_conversation_id':'cursor-parent',
+            'subagent_id':'cursor-tool-native-id',
+            'task':'SENSITIVE_PROMPT_DO_NOT_PERSIST'})
+        self.assertEqual(response,{'permission':'allow'})
+        self.assertNotIn('SENSITIVE_PROMPT',json.dumps(response))
+        response=self.send('cursor','subagentStop',{
+            'parent_conversation_id':'cursor-parent',
+            'status':'completed',
+            'task':'SENSITIVE_PROMPT_DO_NOT_PERSIST'})
+        self.assertEqual(response,{})
 
     def test_antigravity_stop_respects_background(self):
         base={'conversationId':'conversation-123'}

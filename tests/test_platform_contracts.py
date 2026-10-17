@@ -60,7 +60,7 @@ class NativePlatformSimulationTests(unittest.TestCase):
         self.assertIn("additional_context",first)
         self.assertEqual(handle_cursor({"parent_conversation_id":"cursor-parent",
             "subagent_id":"cursor-agent-1","task":"SENSITIVE"},self.root,"subagentStart"),
-            {})
+            {"permission":"allow"})
         handle_cursor({"parent_conversation_id":"cursor-parent","status":"completed",
             "subagent_type":"generalPurpose","task":"SENSITIVE","summary":"secret data"},self.root,"subagentStop")
         self.assertFalse(self.supervisor.status("run")["tasks"][0]["native_stop_observed"])
@@ -72,6 +72,13 @@ class NativePlatformSimulationTests(unittest.TestCase):
         self.assertEqual([e["event"] for e in events],["start","finish"])
         self.assertEqual(events[-1]["status"],"success")
         self.assertNotIn("SENSITIVE",json.dumps(events))
+
+    def test_cursor_subagent_start_never_outputs_prompt_or_identity(self):
+        reply=handle_cursor({"parent_conversation_id":"cursor-parent",
+            "subagent_id":"cursor-agent-guarded","task":"SECRET API_KEY=123"},self.root,"subagentStart")
+        self.assertEqual(reply,{"permission":"allow"})
+        self.assertNotIn("API_KEY",json.dumps(reply))
+        self.assertNotIn("cursor-agent-guarded",json.dumps(reply))
 
     def test_cursor_optional_id_on_stop_only_if_exact(self):
         lease=self.claim()
@@ -98,6 +105,23 @@ class NativePlatformSimulationTests(unittest.TestCase):
         events=load_events(next((self.root/'.auto-orchestrator/runs').glob('*.jsonl')))
         self.assertEqual([x["event"] for x in events],["start","finish"])
         self.assertEqual(events[-1]["status"],"failed")
+
+    def test_antigravity_invoke_dispatch_never_unlocks_supervised_child(self):
+        lease=self.claim()
+        with self.assertRaises(SupervisorError):
+            self.supervisor.bind_native("run","backend",lease["lease"],
+                                        "antigravity","invoke-subagent-id")
+        payload={"conversationId":"private","workspacePaths":[str(self.root)],
+                 "toolCall":{"name":"invoke_subagent","args":{"agent":"reviewer"}},
+                 "fullyIdle":False,"terminationReason":"model_stop"}
+        handle_antigravity(payload,self.root,"SessionStart")
+        handle_antigravity(payload,self.root,"PreToolUse")
+        handle_antigravity(payload,self.root,"PostToolUse")
+        handle_antigravity(payload,self.root,"Stop")
+        with self.assertRaises(SupervisorError):
+            self.supervisor.change("run","backend",lease["lease"],
+                                   "completed",result=RESULT)
+        self.assertFalse(self.supervisor.status("run")["tasks"][0]["native_stop_observed"])
 
     def test_root_fail_closed_for_ambiguous_workspaces(self):
         self.assertIsNone(root_for_payload({"workspacePaths":[str(self.root),"/other"]},"antigravity"))
