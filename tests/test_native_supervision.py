@@ -121,6 +121,27 @@ class NativeSupervisionTests(unittest.TestCase):
         self.s.conn.execute("UPDATE native_bindings SET stopped=0,started=0")
         self.assertFalse(self.s.observe_native("codex","old-binding","stop")["matched"])
 
+    def test_native_start_before_binding_is_safely_reconciled(self):
+        self.s.init("run",{"native_supervision":True,"tasks":[sample("alpha")]})
+        claim=self.s.claim("run")["claimed"][0]
+        self.assertFalse(self.s.observe_native("codex","early-native-agent","start")["matched"])
+        self.s.bind_native("run","alpha",claim["lease"],"codex","early-native-agent")
+        self.assertFalse(self.s.status("run")["tasks"][0]["native_stop_observed"])
+        self.assertTrue(self.s.observe_native("codex","early-native-agent","stop")["matched"])
+        self.s.change("run","alpha",claim["lease"],"completed",result=RESULT)
+
+    def test_unbound_stop_does_not_count_as_a_future_start(self):
+        self.s.init("run",{"native_supervision":True,"tasks":[sample("alpha")]})
+        claim=self.s.claim("run")["claimed"][0]
+        self.assertFalse(self.s.observe_native("codex","early-stop-agent","stop")["matched"])
+        self.s.bind_native("run","alpha",claim["lease"],"codex","early-stop-agent")
+        with self.assertRaises(SupervisorError):
+            self.s.change("run","alpha",claim["lease"],"completed",result=RESULT)
+        self.assertFalse(self.s.observe_native("codex","early-stop-agent","stop")["matched"])
+        self.s.observe_native("codex","early-stop-agent","start")
+        self.s.observe_native("codex","early-stop-agent","stop")
+        self.s.change("run","alpha",claim["lease"],"completed",result=RESULT)
+
     def test_old_run_without_opt_in_remains_usable(self):
         self.s.init("run",{"tasks":[sample("alpha")]})
         a=self.s.claim("run")["claimed"][0]
