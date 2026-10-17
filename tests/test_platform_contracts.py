@@ -45,6 +45,11 @@ class NativePlatformSimulationTests(unittest.TestCase):
         self.supervisor.bind_native("run","backend",lease["lease"],"codex","agent-without-turn")
         handle_codex({"hook_event_name":"SubagentStop","session_id":"parent-session",
                       "agent_id":"agent-without-turn"},self.root)
+        self.assertFalse(self.supervisor.status("run")["tasks"][0]["native_stop_observed"])
+        handle_codex({"hook_event_name":"SubagentStart","session_id":"parent-session",
+                      "agent_id":"agent-without-turn"},self.root)
+        handle_codex({"hook_event_name":"SubagentStop","session_id":"parent-session",
+                      "agent_id":"agent-without-turn"},self.root)
         self.assertTrue(self.supervisor.status("run")["tasks"][0]["native_stop_observed"])
         self.assertFalse((self.root/'.auto-orchestrator/runs').exists())
 
@@ -74,6 +79,11 @@ class NativePlatformSimulationTests(unittest.TestCase):
         handle_cursor({"parent_conversation_id":"cursor-parent","subagent_id":"other-agent",
                        "status":"completed"},self.root,"subagentStop")
         self.assertFalse(self.supervisor.status("run")["tasks"][0]["native_stop_observed"])
+        handle_cursor({"parent_conversation_id":"cursor-parent","subagent_id":"cursor-agent-2",
+                       "status":"completed"},self.root,"subagentStop")
+        self.assertFalse(self.supervisor.status("run")["tasks"][0]["native_stop_observed"])
+        handle_cursor({"parent_conversation_id":"cursor-parent","subagent_id":"cursor-agent-2"},
+                      self.root,"subagentStart")
         handle_cursor({"parent_conversation_id":"cursor-parent","subagent_id":"cursor-agent-2",
                        "status":"completed"},self.root,"subagentStop")
         self.assertTrue(self.supervisor.status("run")["tasks"][0]["native_stop_observed"])
