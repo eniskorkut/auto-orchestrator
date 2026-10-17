@@ -122,13 +122,15 @@ def handle_cursor(payload: dict, root: Path, event: str) -> dict:
         # not promise one. Only link authoritative, identical IDs.
         native=payload.get('subagent_id')
         if isinstance(native,str) and native:
-            record(root,run,'agent-start',agent_id=opaque(native))
+            # Start is observable, but Cursor's documented stop payload does
+            # not include the same ID. Do not create unmatched perf spans.
             observe_supervised(root,'cursor',native,'start')
         return {'permission':'allow'}
     if event=='subagentStop':
         native=payload.get('subagent_id')
         if isinstance(native,str) and native:
-            record(root,run,'agent-stop',agent_id=opaque(native))
+            # Some versions may provide an ID as an extension; only then may
+            # Supervisor match and release evidence. No guessing from task text.
             observe_supervised(root,'cursor',native,'stop')
         # Do NOT assume task text/type or transcript path identifies the agent.
         return {}
