@@ -59,6 +59,7 @@ class NativeSupervisionTests(unittest.TestCase):
         self.assertFalse(result["claimed"])
         with self.assertRaises(SupervisorError):
             self.s.change("run","alpha",a["lease"],"cancelled")
+        self.s.observe_native("codex","native-timeout","start")
         self.s.observe_native("codex","native-timeout","stop")
         self.s.change("run","alpha",a["lease"],"cancelled")
         self.s.retry("run","alpha","real retry")
@@ -68,6 +69,7 @@ class NativeSupervisionTests(unittest.TestCase):
         self.s.init("run",{"native_supervision":True,"tasks":[sample("alpha")]})
         a=self.s.claim("run")["claimed"][0]
         self.s.bind_native("run","alpha",a["lease"],"codex","native-attempt-1")
+        self.s.observe_native("codex","native-attempt-1","start")
         self.s.observe_native("codex","native-attempt-1","stop")
         self.s.change("run","alpha",a["lease"],"failed",reason="observed failure")
         self.s.retry("run","alpha","retry with evidence")
@@ -76,6 +78,7 @@ class NativeSupervisionTests(unittest.TestCase):
         with self.assertRaises(SupervisorError):
             self.s.bind_native("run","alpha",a["lease"],"codex","native-attempt-2")
         self.s.bind_native("run","alpha",b["lease"],"codex","native-attempt-2")
+        self.s.observe_native("codex","native-attempt-2","start")
         self.s.observe_native("codex","native-attempt-2","stop")
         self.s.change("run","alpha",b["lease"],"completed",result=RESULT)
         self.assertFalse(self.s.observe_native("codex","native-attempt-2","stop")["matched"])
@@ -84,6 +87,7 @@ class NativeSupervisionTests(unittest.TestCase):
         self.s.init("run",{"native_supervision":True,"tasks":[sample("alpha")]})
         lease=self.s.claim("run")["claimed"][0]
         self.s.bind_native("run","alpha",lease["lease"],"codex","result-validation-agent")
+        self.s.observe_native("codex","result-validation-agent","start")
         self.s.observe_native("codex","result-validation-agent","stop")
         for bad_tests in ([42],["passed"],[None],[{"status":"passed"}]):
             with self.subTest(bad_tests=bad_tests),self.assertRaises(SupervisorError):
@@ -91,6 +95,31 @@ class NativeSupervisionTests(unittest.TestCase):
                               result={"summary":"invalid","changed_files":[],
                                       "tests":bad_tests,"findings":[]})
         self.assertEqual(self.s.status("run")["tasks"][0]["state"],"running")
+
+    def test_stop_without_start_does_not_unlock_supervised_task(self):
+        self.s.init("run",{"native_supervision":True,"tasks":[sample("alpha")]})
+        claim=self.s.claim("run")["claimed"][0]
+        self.s.bind_native("run","alpha",claim["lease"],"codex","stop-only-agent")
+        result=self.s.observe_native("codex","stop-only-agent","stop")
+        self.assertFalse(result["matched"])
+        self.assertFalse(result["native_stop_observed"])
+        with self.assertRaises(SupervisorError):
+            self.s.change("run","alpha",claim["lease"],"completed",result=RESULT)
+        self.s.observe_native("codex","stop-only-agent","start")
+        self.assertFalse(self.s.status("run")["tasks"][0]["native_stop_observed"])
+        self.s.observe_native("codex","stop-only-agent","stop")
+        self.s.change("run","alpha",claim["lease"],"completed",result=RESULT)
+        self.assertTrue(self.s.status("run")["complete"])
+
+    def test_existing_binding_schema_migrates_without_fabricating_start(self):
+        self.s.init("run",{"native_supervision":True,"tasks":[sample("alpha")]})
+        claim=self.s.claim("run")["claimed"][0]
+        self.s.bind_native("run","alpha",claim["lease"],"codex","old-binding")
+        self.s.conn.execute("UPDATE native_bindings SET stopped=1")
+        # Previously captured stop evidence is preserved only if a fresh start
+        # has been observed; old-format rows cannot promote themselves.
+        self.s.conn.execute("UPDATE native_bindings SET stopped=0,started=0")
+        self.assertFalse(self.s.observe_native("codex","old-binding","stop")["matched"])
 
     def test_old_run_without_opt_in_remains_usable(self):
         self.s.init("run",{"tasks":[sample("alpha")]})
