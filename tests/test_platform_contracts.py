@@ -40,6 +40,14 @@ class NativePlatformSimulationTests(unittest.TestCase):
         self.assertNotIn("agent-1234",content)
         self.assertNotIn("session-id",content)
 
+    def test_codex_native_stop_without_turn_id_still_acknowledges_bound_supervisor(self):
+        lease=self.claim()
+        self.supervisor.bind_native("run","backend",lease["lease"],"codex","agent-without-turn")
+        handle_codex({"hook_event_name":"SubagentStop","session_id":"parent-session",
+                      "agent_id":"agent-without-turn"},self.root)
+        self.assertTrue(self.supervisor.status("run")["tasks"][0]["native_stop_observed"])
+        self.assertFalse((self.root/'.auto-orchestrator/runs').exists())
+
     def test_cursor_documented_stop_has_no_id_and_cannot_unlock_supervisor(self):
         lease=self.claim()
         self.supervisor.bind_native("run","backend",lease["lease"],"cursor","cursor-agent-1")
