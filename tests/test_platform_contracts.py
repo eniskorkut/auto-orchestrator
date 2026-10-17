@@ -43,17 +43,17 @@ class NativePlatformSimulationTests(unittest.TestCase):
     def test_cursor_documented_stop_has_no_id_and_cannot_unlock_supervisor(self):
         lease=self.claim()
         self.supervisor.bind_native("run","backend",lease["lease"],"cursor","cursor-agent-1")
-        first=handle_cursor({"session_id":"cursor-parent"},""+str(self.root),"sessionStart")
+        first=handle_cursor({"session_id":"cursor-parent"},self.root,"sessionStart")
         self.assertIn("additional_context",first)
         self.assertEqual(handle_cursor({"parent_conversation_id":"cursor-parent",
-            "subagent_id":"cursor-agent-1","task":"SENSITIVE"},""+str(self.root),"subagentStart"),
+            "subagent_id":"cursor-agent-1","task":"SENSITIVE"},self.root,"subagentStart"),
             {"permission":"allow"})
         handle_cursor({"parent_conversation_id":"cursor-parent","status":"completed",
-            "subagent_type":"generalPurpose","task":"SENSITIVE","summary":"secret data"},""+str(self.root),"subagentStop")
+            "subagent_type":"generalPurpose","task":"SENSITIVE","summary":"secret data"},self.root,"subagentStop")
         self.assertFalse(self.supervisor.status("run")["tasks"][0]["native_stop_observed"])
         with self.assertRaises(SupervisorError):
             self.supervisor.change("run","backend",lease["lease"],"completed",result=RESULT)
-        handle_cursor({"session_id":"cursor-parent","reason":"completed"},""+str(self.root),"sessionEnd")
+        handle_cursor({"session_id":"cursor-parent","reason":"completed"},self.root,"sessionEnd")
         events=load_events(path_for(self.root,next(p.stem for p in
            (self.root/'.auto-orchestrator/runs').glob('*.jsonl'))))
         self.assertEqual([e["event"] for e in events],["start","finish"])
