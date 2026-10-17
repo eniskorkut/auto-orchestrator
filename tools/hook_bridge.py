@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import sqlite3
 import sys
 from pathlib import Path
 try:
@@ -63,7 +64,7 @@ def observe_supervised(root: Path, platform: str, native_id: object, event: str)
             supervisor.observe_native(platform,native_id,event)
         finally:
             supervisor.close()
-    except (SupervisorError,OSError,ValueError):
+    except (SupervisorError,OSError,ValueError,sqlite3.Error):
         pass  # Hooks are advisory; do not interrupt native IDE operations.
 
 def handle_codex(payload: dict, root: Path) -> dict:
@@ -154,7 +155,9 @@ def root_for_payload(payload: dict, platform: str) -> Path:
             candidate=Path(paths[0])
             if candidate.is_dir():
                 return candidate.resolve()
-    return Path.cwd()
+    # User-level hooks may execute from the IDE/global configuration folder.
+    # Missing/ambiguous workspace does not authorize telemetry in process.cwd().
+    return None
 
 def main(argv=None) -> int:
     parser=argparse.ArgumentParser(description=__doc__)
@@ -171,6 +174,8 @@ def main(argv=None) -> int:
             # Only project-local installs may authorize telemetry.
             return 0
         root=args.root if args.root is not None else root_for_payload(payload,args.platform)
+        if root is None:
+            return 0
         result=(handle_codex(payload,root) if args.platform=='codex' else
                 handle_cursor(payload,root,args.event) if args.platform=='cursor' else
                 handle_antigravity(payload,root,args.event))
