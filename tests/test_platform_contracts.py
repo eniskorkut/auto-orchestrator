@@ -47,7 +47,7 @@ class NativePlatformSimulationTests(unittest.TestCase):
         self.assertIn("additional_context",first)
         self.assertEqual(handle_cursor({"parent_conversation_id":"cursor-parent",
             "subagent_id":"cursor-agent-1","task":"SENSITIVE"},self.root,"subagentStart"),
-            {"permission":"allow"})
+            {})
         handle_cursor({"parent_conversation_id":"cursor-parent","status":"completed",
             "subagent_type":"generalPurpose","task":"SENSITIVE","summary":"secret data"},self.root,"subagentStop")
         self.assertFalse(self.supervisor.status("run")["tasks"][0]["native_stop_observed"])
