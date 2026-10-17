@@ -1,0 +1,35 @@
+{
+  "native_supervision": true,
+  "max_parallel": 3,
+  "tasks": [
+    {
+      "id": "backend",
+      "role": "implementer",
+      "objective": "Implement backend changes in the scoped package and report exact test results.",
+      "depends_on": [],
+      "read_scope": [
+        "tests"
+      ],
+      "write_scope": [
+        "backend"
+      ],
+      "timeout_seconds": 900,
+      "max_retries": 2
+    },
+    {
+      "id": "verification",
+      "role": "tester",
+      "objective": "Validate completed backend changes without modifying implementation.",
+      "depends_on": [
+        "backend"
+      ],
+      "read_scope": [
+        "backend",
+        "tests"
+      ],
+      "write_scope": [],
+      "timeout_seconds": 600,
+      "max_retries": 1
+    }
+  ]
+}
