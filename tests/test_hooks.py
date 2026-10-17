@@ -68,6 +68,19 @@ class HookTests(unittest.TestCase):
         summary=analyze(run,load_events(path_for(self.project,run)))
         self.assertFalse(summary.has_valid_estimate)
 
+    def test_cursor_native_permission_output_contract(self):
+        response=self.send('cursor','subagentStart',{
+            'parent_conversation_id':'cursor-parent',
+            'subagent_id':'cursor-tool-native-id',
+            'task':'SENSITIVE_PROMPT_DO_NOT_PERSIST'})
+        self.assertEqual(response,{'permission':'allow'})
+        self.assertNotIn('SENSITIVE_PROMPT',json.dumps(response))
+        response=self.send('cursor','subagentStop',{
+            'parent_conversation_id':'cursor-parent',
+            'status':'completed',
+            'task':'SENSITIVE_PROMPT_DO_NOT_PERSIST'})
+        self.assertEqual(response,{})
+
     def test_antigravity_stop_respects_background(self):
         base={'conversationId':'conversation-123'}
         r=self.send('antigravity','SessionStart',base)
