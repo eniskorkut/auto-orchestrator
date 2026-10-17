@@ -15,6 +15,11 @@
       {
         "command": "python tools/hook_bridge.py cursor subagentStop --root ."
       }
+    ],
+    "subagentStart": [
+      {
+        "command": "python tools/hook_bridge.py cursor subagentStart --root ."
+      }
     ]
   }
 }
