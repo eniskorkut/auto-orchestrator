@@ -10,6 +10,27 @@ import { join, resolve } from 'node:path';
 export const POLICY = 'Auto-Orchestrator: For non-trivial coding tasks read the auto-orchestrator skill and delegate independent work to native subagents automatically; max three concurrent. Verify results and never invent timings or human time savings. Trivial tasks use one agent.';
 
 const hash = (value) => createHash('sha256').update(String(value)).digest('hex').slice(0, 24);
+
+/**
+ * Overlap among observed native *tool-call* spans only. The OpenCode
+ * background subagent spawn span is not the child's true runtime.
+ * Never describe this as elapsed time saved or model/token cost savings.
+ */
+export const observedOverlapMs = (spans) => {
+  if (!Array.isArray(spans) || spans.length < 2) return 0;
+  const sorted = spans.map(([a, b]) => [Number(a), Number(b)])
+    .filter(([a, b]) => Number.isFinite(a) && Number.isFinite(b) && b >= a)
+    .sort((a, b) => a[0] - b[0]);
+  if (sorted.length < 2) return 0;
+  let summed = 0, union = 0, begin = sorted[0][0], end = sorted[0][1];
+  for (const [a, b] of sorted) {
+    summed += b - a;
+    if (a > end) { union += end - begin; begin = a; end = b; }
+    else end = Math.max(end, b);
+  }
+  union += end - begin;
+  return Math.max(0, summed - union);
+};
 const normalized = (path) => {
   if (typeof path !== 'string' || !path.trim()) return null;
   const result = resolve(path);
@@ -60,6 +81,7 @@ export default {
       if (!run || run.done) return;
       run.done = true;
       run.tasks.clear();
+      run.toolStarts.clear();
       run.pendingChecks.clear();
       run.checks.clear();
     };
@@ -116,6 +138,7 @@ export default {
       if (old && !old.done) return old;
       const run = { id: hash('opencode-v2|' + sid + '|' + randomUUID()),
         done: false, tasks: new Set(), pendingChecks: new Map(), checks: new Map(),
+        toolStarts: new Map(), toolSpans: [], nativeSpanComplete: true,
         tick: 0, invalidatedAt: 0, policy: policyForRun() };
       runs.set(sid, run);
       write(run, { event: 'start', platform: 'opencode' });
@@ -127,10 +150,11 @@ export default {
       const run = runs.get(sid);
       return run && !run.done ? run : null;
     };
-    const finish = (sid, status) => {
+    const finish = async (sid, status) => {
       const run = existing(sid);
       if (!run) return;
       write(run, { event: 'finish', status, verified: false });
+      let verified = false;
       const currentPolicy = policyForRun();
       if (status === 'success' && run.policy && currentPolicy &&
           currentPolicy.hash === run.policy.hash && run.tasks.size === 0 &&
@@ -140,10 +164,23 @@ export default {
             run.checks.get(check.id)?.tick > run.invalidatedAt)) {
         write(run, { event: 'verified', source: 'quality-gate',
           check_ids: run.policy.required_checks.map(c => c.id).sort() });
+        verified = true;
       }
       run.done = true;
       run.tasks.clear();
+      run.toolStarts.clear();
       run.pendingChecks.clear();
+      // Only verified, completed runs qualify for a positive overlap label.
+      // Toast is ephemeral and best-effort; all persisted events stay private.
+      if (verified && typeof ctx.tui?.showToast === 'function') {
+        const overlap = run.nativeSpanComplete && run.toolSpans.length >= 2
+          ? observedOverlapMs(run.toolSpans) : 0;
+        const message = overlap > 0
+          ? `Auto-Orchestrator: doğrulandı · ${run.toolSpans.length} native tool span · ${(overlap/1000).toFixed(1)} sn örtüşme (tasarruf değil)`
+          : 'Auto-Orchestrator: testler doğrulandı · ölçülebilir paralel örtüşme yok';
+        try { await ctx.tui.showToast({body:{message,variant:'success'}}); }
+        catch { /* Unsupported TUI methods must never block IDE work. */ }
+      }
     };
 
     await ctx.session.hook('context', (event) => {
@@ -195,6 +232,7 @@ export default {
       const agent = hash(id);
       if (run.tasks.has(agent)) return;
       run.tasks.add(agent);
+      run.toolStarts.set(agent, Date.now());
       write(run, { event: 'agent-start', agent_id: agent });
     });
     await ctx.tool.hook('execute.after', async (event) => {
@@ -229,6 +267,11 @@ export default {
       const agent = hash(id);
       if (!run.tasks.has(agent)) return;
       run.tasks.delete(agent);
+      const started = run.toolStarts.get(agent);
+      run.toolStarts.delete(agent);
+      if (event.status === 'completed' && Number.isFinite(started)) {
+        run.toolSpans.push([started, Date.now()]);
+      } else run.nativeSpanComplete = false;
       run.invalidatedAt = ++run.tick; // Test results must follow native agent completion.
       // A background task tool ends when the spawn request completes.
       // Its span is NOT proof of the child's total execution time.
@@ -244,11 +287,11 @@ export default {
             // Never open a run in another project (or from location-less events).
             begin(sid);
           } else if (event.type === 'session.execution.succeeded') {
-            finish(sid, 'success');
+            await finish(sid, 'success');
           } else if (event.type === 'session.execution.failed') {
-            finish(sid, 'failed');
+            await finish(sid, 'failed');
           } else if (event.type === 'session.execution.interrupted') {
-            finish(sid, 'cancelled');
+            await finish(sid, 'cancelled');
           }
         }
       } catch {
