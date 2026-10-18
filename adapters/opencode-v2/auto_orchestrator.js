@@ -82,6 +82,7 @@ export default {
       run.done = true;
       run.tasks.clear();
       run.toolStarts.clear();
+      run.backgroundDispatches.clear();
       run.pendingChecks.clear();
       run.checks.clear();
     };
@@ -141,6 +142,7 @@ export default {
       const run = { id: hash('opencode-v2|' + sid + '|' + randomUUID()),
         done: false, tasks: new Set(), pendingChecks: new Map(), checks: new Map(),
         toolStarts: new Map(), toolSpans: [], nativeSpanComplete: true,
+        backgroundDispatches: new Set(),
         tick: 0, invalidatedAt: 0, policy: policyForRun() };
       runs.set(sid, run);
       write(run, { event: 'start', platform: 'opencode' });
@@ -159,7 +161,8 @@ export default {
       let verified = false;
       const currentPolicy = policyForRun();
       if (finishRecorded && status === 'success' && run.policy && currentPolicy &&
-          currentPolicy.hash === run.policy.hash && run.tasks.size === 0 &&
+          currentPolicy.hash === run.policy.hash && run.nativeSpanComplete &&
+          run.tasks.size === 0 &&
           run.pendingChecks.size === 0 &&
           run.policy.required_checks.every(check =>
             run.checks.get(check.id)?.passed === true &&
@@ -170,6 +173,7 @@ export default {
       run.done = true;
       run.tasks.clear();
       run.toolStarts.clear();
+      run.backgroundDispatches.clear();
       run.pendingChecks.clear();
       // Only verified, completed runs qualify for a positive overlap label.
       // Toast is ephemeral and best-effort; all persisted events stay private.
@@ -234,6 +238,14 @@ export default {
       if (run.tasks.has(agent)) return;
       run.tasks.add(agent);
       run.toolStarts.set(agent, Date.now());
+      const input = event?.input ?? event?.data?.input ?? {};
+      if (input.background === true) {
+        // A successful background dispatch is NOT a child completion.
+        // Unless a future native API provides an authoritative matching
+        // child-stop, leave the agent span open and block auto-verification.
+        run.backgroundDispatches.add(agent);
+        run.nativeSpanComplete = false;
+      }
       write(run, { event: 'agent-start', agent_id: agent });
     });
     await ctx.tool.hook('execute.after', async (event) => {
@@ -267,6 +279,13 @@ export default {
       if (!run) return;
       const agent = hash(id);
       if (!run.tasks.has(agent)) return;
+      if (run.backgroundDispatches.has(agent) ||
+          (event?.input ?? event?.data?.input)?.background === true) {
+        // Tool-return only proves dispatch. A separate child's session finish
+        // has no safe matching native tool-call ID in this adapter.
+        run.invalidatedAt = ++run.tick;
+        return;
+      }
       run.tasks.delete(agent);
       const started = run.toolStarts.get(agent);
       run.toolStarts.delete(agent);
