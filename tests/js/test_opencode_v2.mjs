@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, readdirSync, rmSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import plugin from '../../adapters/opencode-v2/auto_orchestrator.js';
+import plugin, { observedOverlapMs } from '../../adapters/opencode-v2/auto_orchestrator.js';
 
 const tick = async () => { await new Promise(resolve => setImmediate(resolve)); await new Promise(resolve => setImmediate(resolve)); };
 
@@ -12,10 +12,12 @@ async function sandbox(fn, getSession = null) {
   const project = join(root, 'project');
   const foreignProject = join(root, 'other-project');
   const hooks = {};
+  const toasts = [];
   const pending = [];
   let release;
   const ctx = {
     location: { directory: project },
+    tui: { showToast: async value => { toasts.push(value); return true; } },
     session: {
       hook: async (name, callback) => { hooks[name] = callback; },
       ...(getSession ? {get: async ({sessionID}) => getSession(sessionID)} : {}),
@@ -42,7 +44,7 @@ async function sandbox(fn, getSession = null) {
   };
   try {
     const dispose = await plugin.setup(ctx);
-    try { await fn({ project, foreignProject, hooks, emit, read }); }
+    try { await fn({ project, foreignProject, hooks, emit, read, toasts }); }
     finally { dispose(); }
   } finally { rmSync(root, { recursive: true, force: true }); }
 }
@@ -537,5 +539,61 @@ test('V5 native session lookup error abandons old proof before recovery', async 
   }, sid => {
     if (broken) throw new Error('native lookup failed');
     return {id:sid,location:{directory:owner}};
+  });
+});
+
+
+test('IDE measured overlap uses union of intervals, not wall-time savings', () => {
+  assert.equal(observedOverlapMs([[0,100],[50,180],[220,250]]),50);
+  assert.equal(observedOverlapMs([[0,100],[0,100],[0,100]]),200);
+  assert.equal(observedOverlapMs([[0,100],[100,200]]),0);
+  assert.equal(observedOverlapMs([[200,100],[1,2]]),0);
+  assert.equal(observedOverlapMs([[1,Infinity],[1,2]]),0);
+  assert.equal(observedOverlapMs([]),0);
+});
+
+test('IDE toast is emitted once only after automatic verified evidence', async () => {
+  await sandbox(async ({ project, hooks, emit, read, toasts }) => {
+    enableGate(project);
+    await emit(lifecycle('session.execution.started','toast-success',project));
+    for (const id of ['one','two']) {
+      await hooks['execute.before'](subagent(id,'toast-success'));
+      await hooks['execute.after'](subagent(id,'toast-success','completed'));
+    }
+    const check=testCommand('test','toast-success',0,project);
+    await hooks['execute.before'](check);
+    await hooks['execute.after'](check);
+    await emit(lifecycle('session.execution.succeeded','toast-success',project));
+    assert.equal(read()[0].at(-1).event,'verified');
+    assert.equal(toasts.length,1);
+    assert.match(toasts[0].body.message,/doğrulandı/);
+    assert.doesNotMatch(JSON.stringify(toasts),/toast-success|test-1|SENSITIVE-PROMPT|tasarruf edildi/);
+  });
+});
+
+test('IDE never reports overlap on failed, absent or rejected verification', async () => {
+  await sandbox(async ({ project, hooks, emit, toasts }) => {
+    enableGate(project);
+    await emit(lifecycle('session.execution.started','toast-no',project));
+    await hooks['execute.before'](subagent('one','toast-no'));
+    await hooks['execute.after'](subagent('one','toast-no','completed'));
+    await emit(lifecycle('session.execution.succeeded','toast-no',project));
+    await emit(lifecycle('session.execution.started','toast-failed',project));
+    await emit(lifecycle('session.execution.failed','toast-failed',project));
+    assert.equal(toasts.length,0);
+  });
+});
+
+test('IDE toast unavailable or failing never breaks verified native run', async () => {
+  // Most non-GUI OpenCode V2 installations may not expose a TUI at all.
+  await sandbox(async ({project,hooks,emit,read,toasts}) => {
+    enableGate(project);
+    await emit(lifecycle('session.execution.started','toast-safe',project));
+    const check=testCommand('native','toast-safe',0,project);
+    await hooks['execute.before'](check);
+    await hooks['execute.after'](check);
+    await emit(lifecycle('session.execution.succeeded','toast-safe',project));
+    assert.equal(read()[0].at(-1).event,'verified');
+    assert.equal(toasts.length,1);
   });
 });
