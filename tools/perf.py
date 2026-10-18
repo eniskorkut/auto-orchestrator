@@ -29,6 +29,9 @@ class Summary:
     estimated_parallelism_seconds: float | None
     has_valid_estimate: bool
     reason: str
+    # Observed native tool span overlap, not saved wall-clock time. Background
+    # tool-return spans might not represent the native child's full lifetime.
+    observed_overlap_seconds: float | None = None
 
 
 def checked_id(value: str) -> str:
@@ -132,6 +135,23 @@ def append_event(root: Path, run_id: str, event: str, *, platform: str | None = 
         os.close(fd)
 
 
+def observed_overlap(spans: list[tuple[str,float,float]]) -> float:
+    """Duration counted more than once across overlapping native tool spans."""
+    if len(spans) < 2:
+        return 0.0
+    intervals=sorted((start,end) for _,start,end in spans)
+    started,ended=intervals[0]
+    union=0.0
+    for a,b in intervals[1:]:
+        if a>ended:
+            union+=ended-started
+            started,ended=a,b
+        else:
+            ended=max(ended,b)
+    union+=ended-started
+    return max(0.0,sum(b-a for _,a,b in spans)-union)
+
+
 def analyze(run_id: str, events: list[dict], policy: dict | None = None) -> Summary:
     checked_id(run_id)
     if not events or events[0].get('event')!='start' or sum(x.get('event')=='start' for x in events)!=1:
@@ -214,11 +234,16 @@ def analyze(run_id: str, events: list[dict], policy: dict | None = None) -> Summ
         issue=issue or 'Run not successful and verified'
     if not finished:
         issue=issue or 'Run not finished'
+    # Overlap is a separate descriptive measure: it may be positive even when
+    # sum(agent durations) - entire parent duration is zero/negative.
+    # Never compute it for unverified, malformed, or unfinished executions.
+    observed = observed_overlap(spans) if issue is None and len(spans)>=2 else None
     est=max(0.0,summed-elapsed) if issue is None and summed is not None and elapsed is not None else None
     if est is not None and est<=0:
         issue='No positive estimated parallelism benefit'
     return Summary(run_id, platform, status, verified, elapsed, len(spans), summed, est,
-                   issue is None, issue or 'Estimate based on agent overlaps; not a benchmark')
+                   issue is None, issue or 'Estimate based on agent overlaps; not a benchmark',
+                   observed)
 
 
 def fmt_seconds(seconds: float | None) -> str:
@@ -229,6 +254,8 @@ def fmt_seconds(seconds: float | None) -> str:
 def display(summary: Summary) -> str:
     base=f'Run: {summary.run_id} | {summary.platform} | {summary.status} | verified={summary.verified}\n'
     base+=f'Elapsed: {fmt_seconds(summary.elapsed_seconds)} | completed subagents: {summary.subagents}\n'
+    if summary.observed_overlap_seconds is not None:
+        base+=f'Observed native tool span overlap: {fmt_seconds(summary.observed_overlap_seconds)} (NOT actual time saved)\n'
     if summary.has_valid_estimate:
         return base+(f'Estimated parallelism benefit: {fmt_seconds(summary.estimated_parallelism_seconds)} '
             '(not benchmarked human time saved)')

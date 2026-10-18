@@ -2,7 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from tools.perf import EventError, append_event, analyze, load_events, path_for
+from tools.perf import EventError, append_event, analyze, load_events, path_for, observed_overlap, display
 
 
 class PerformanceTests(unittest.TestCase):
@@ -62,6 +62,34 @@ class PerformanceTests(unittest.TestCase):
         self.emit('agent-stop',109,agent_id='b')
         self.emit('finish',130,status='success',verified=True)
         self.assertFalse(self.get().has_valid_estimate)
+
+    def test_observed_overlap_is_independent_of_long_parent_wall_time(self):
+        self.emit('start',100,platform='codex')
+        self.emit('agent-start',110,agent_id='a')
+        self.emit('agent-start',112,agent_id='b')
+        self.emit('agent-stop',125,agent_id='b')
+        self.emit('agent-stop',130,agent_id='a')
+        self.emit('finish',200,status='success',verified=True)
+        summary=self.get()
+        self.assertEqual(summary.observed_overlap_seconds,13)
+        self.assertFalse(summary.has_valid_estimate)
+        self.assertIn('Observed native tool span overlap: 13.0 sec',display(summary))
+        self.assertIn('NOT actual time saved',display(summary))
+
+    def test_observed_overlap_requires_verified_execution(self):
+        self.emit('start',100,platform='opencode')
+        self.emit('agent-start',101,agent_id='a')
+        self.emit('agent-start',101,agent_id='b')
+        self.emit('agent-stop',110,agent_id='a')
+        self.emit('agent-stop',110,agent_id='b')
+        self.emit('finish',112,status='success')
+        self.assertIsNone(self.get().observed_overlap_seconds)
+        self.assertNotIn('Observed native tool span overlap',display(self.get()))
+
+    def test_overlap_intervals_do_not_confuse_disjoint_spans_with_parallel_work(self):
+        self.assertEqual(observed_overlap([('a',100,110),('b',110,120)]),0)
+        self.assertEqual(observed_overlap([('a',100,120),('b',110,130)]),10)
+        self.assertEqual(observed_overlap([('a',100,120),('b',100,120),('c',100,120)]),40)
 
     def test_path_traversal_rejected(self):
         with self.assertRaises(EventError): path_for(self.root,'../evil')
