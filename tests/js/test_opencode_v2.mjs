@@ -597,3 +597,54 @@ test('IDE toast unavailable or failing never breaks verified native run', async 
     assert.equal(toasts.length,1);
   });
 });
+
+
+test('V6 background subagent tool completion cannot verify while child lifetime unproven', async () => {
+  await sandbox(async ({project,hooks,emit,read,toasts}) => {
+    enableGate(project);
+    await emit(lifecycle('session.execution.started','background-open',project));
+    const request={...subagent('background-spawn','background-open'), input:{background:true}};
+    await hooks['execute.before'](request);
+    await hooks['execute.after']({...request,status:'completed',result:{metadata:{status:'completed'}}});
+    const check=testCommand('approved','background-open',0,project);
+    await hooks['execute.before'](check);
+    await hooks['execute.after'](check);
+    await emit(lifecycle('session.execution.succeeded','background-open',project));
+    const events=read()[0];
+    assert.deepEqual(events.map(e=>e.event),['start','agent-start','check','finish']);
+    assert.ok(!events.some(e=>e.event==='agent-stop' || e.event==='verified'));
+    assert.equal(toasts.length,0);
+  });
+});
+
+test('V6 native failed subagent tool cannot be followed by a verified parent', async () => {
+  await sandbox(async ({project,hooks,emit,read,toasts}) => {
+    enableGate(project);
+    await emit(lifecycle('session.execution.started','native-failed',project));
+    await hooks['execute.before'](subagent('bad-dispatch','native-failed'));
+    await hooks['execute.after'](subagent('bad-dispatch','native-failed','error'));
+    const check=testCommand('after-failure','native-failed',0,project);
+    await hooks['execute.before'](check);
+    await hooks['execute.after'](check);
+    await emit(lifecycle('session.execution.succeeded','native-failed',project));
+    const events=read()[0];
+    assert.deepEqual(events.map(e=>e.event),['start','agent-start','check','finish']);
+    assert.equal(toasts.length,0);
+  });
+});
+
+test('V6 foreground native subagent tool still permits quality-gated verification', async () => {
+  await sandbox(async ({project,hooks,emit,read}) => {
+    enableGate(project);
+    await emit(lifecycle('session.execution.started','foreground-fine',project));
+    const foreground={...subagent('fg-agent','foreground-fine'),input:{background:false}};
+    await hooks['execute.before'](foreground);
+    await hooks['execute.after']({...foreground,status:'completed'});
+    const check=testCommand('ok','foreground-fine',0,project);
+    await hooks['execute.before'](check);
+    await hooks['execute.after'](check);
+    await emit(lifecycle('session.execution.succeeded','foreground-fine',project));
+    assert.deepEqual(read()[0].map(e=>e.event),
+      ['start','agent-start','agent-stop','check','finish','verified']);
+  });
+});
