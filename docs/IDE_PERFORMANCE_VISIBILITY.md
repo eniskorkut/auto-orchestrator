@@ -35,3 +35,10 @@ Real saved wall time requires matched comparable single-agent and orchestrated r
 - Cursor, Codex and Antigravity are currently served by terminal-readable reports, not proven inline IDE notifications.
 
 A real OpenCode Desktop smoke test must confirm `ctx.tui.showToast` exists in the installed release. Simulated hook tests and SDK documentation do not prove toast rendering in that Desktop build.
+
+
+## Background delegation — fail-closed
+
+In OpenCode V2 the native `subagent` tool invoked with `background: true` can return `status=completed` when the **spawn request** is finished while its child session continues. That return is *not* proof of native child completion. The adapter retains an unmatched native `agent-start` span rather than manufacturing `agent-stop`; the parent may finish but cannot be automatically `verified`. Such runs do not show a verified performance toast or claim measured child duration. Tests that pass after spawn do not change this restriction. A future native, authoritative per-child termination event with an exact matching identity would be required to support verified background delegation safely.
+
+A failed foreground native subagent tool also cannot authorize verified parent completion. Only completed foreground native tool spans permit Quality Gate verification. This may result in more conservative unverified runs; use a foreground native delegation when the workflow requires automatically verified performance metrics.
