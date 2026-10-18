@@ -118,7 +118,7 @@ export default {
     const callId = (event) => event?.id ?? event?.callID ?? data(event)?.callID ?? null;
 
     const write = (run, event) => {
-      if (!base || !run || run.done) return;
+      if (!base || !run || run.done) return false;
       try {
         mkdirSync(base, { recursive: true });
         const file = join(base, run.id + '.jsonl');
@@ -127,8 +127,10 @@ export default {
           closeSync(fd);
         }
         appendFileSync(file, JSON.stringify({ ...event, time: Date.now() / 1000 }) + '\n');
+        return true;
       } catch {
         // Telemetry is optional; never interrupt agent work or capture secrets.
+        return false;
       }
     };
     const begin = (sid) => {
@@ -153,18 +155,17 @@ export default {
     const finish = async (sid, status) => {
       const run = existing(sid);
       if (!run) return;
-      write(run, { event: 'finish', status, verified: false });
+      const finishRecorded = write(run, { event: 'finish', status, verified: false });
       let verified = false;
       const currentPolicy = policyForRun();
-      if (status === 'success' && run.policy && currentPolicy &&
+      if (finishRecorded && status === 'success' && run.policy && currentPolicy &&
           currentPolicy.hash === run.policy.hash && run.tasks.size === 0 &&
           run.pendingChecks.size === 0 &&
           run.policy.required_checks.every(check =>
             run.checks.get(check.id)?.passed === true &&
             run.checks.get(check.id)?.tick > run.invalidatedAt)) {
-        write(run, { event: 'verified', source: 'quality-gate',
+        verified = write(run, { event: 'verified', source: 'quality-gate',
           check_ids: run.policy.required_checks.map(c => c.id).sort() });
-        verified = true;
       }
       run.done = true;
       run.tasks.clear();
