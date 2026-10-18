@@ -60,10 +60,26 @@ def assess(events, policy) -> dict:
     end = next((i for i, e in enumerate(events) if e.get("event") == "finish"), None)
     if end is None or events[end].get("status") != "success":
         return {"verified": False, "reason": "Run not successfully completed"}
-    if any(e.get("event") == "agent-start" for e in events[:end]) and (
-        len([e for e in events[:end] if e.get("event") == "agent-start"]) !=
-        len([e for e in events[:end] if e.get("event") == "agent-stop"])):
-        return {"verified": False, "reason": "Unmatched native agent span"}
+    # Count equality is insufficient: agent-start(A) + agent-stop(B) must not
+    # be interpreted as a completed native child. Require exact opaque IDs,
+    # unique starts, and chronologically matched stops before verification.
+    active = set()
+    seen = set()
+    for event in events[:end]:
+        kind = event.get("event")
+        if kind == "agent-start":
+            native = event.get("agent_id")
+            if not isinstance(native, str) or not ID.fullmatch(native) or native in seen:
+                return {"verified": False, "reason": "Invalid or duplicated native agent start"}
+            seen.add(native)
+            active.add(native)
+        elif kind == "agent-stop":
+            native = event.get("agent_id")
+            if native not in active:
+                return {"verified": False, "reason": "Unmatched native agent stop"}
+            active.remove(native)
+    if active:
+        return {"verified": False, "reason": "Incomplete native agent spans"}
     last_change = max((i for i, e in enumerate(events[:end]) if e.get("event") in ("mutation", "agent-stop")), default=-1)
     good = set()
     for e in events[last_change + 1:end]:
