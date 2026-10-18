@@ -279,7 +279,8 @@ export default {
       if (!run) return;
       const agent = hash(id);
       if (!run.tasks.has(agent)) return;
-      if (run.backgroundDispatches.has(agent)) {
+      if (run.backgroundDispatches.has(agent) ||
+          (event?.input ?? event?.data?.input)?.background === true) {
         // Tool-return only proves dispatch. A separate child's session finish
         // has no safe matching native tool-call ID in this adapter.
         run.invalidatedAt = ++run.tick;
