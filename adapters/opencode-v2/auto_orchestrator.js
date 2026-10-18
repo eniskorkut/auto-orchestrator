@@ -161,7 +161,8 @@ export default {
       let verified = false;
       const currentPolicy = policyForRun();
       if (finishRecorded && status === 'success' && run.policy && currentPolicy &&
-          currentPolicy.hash === run.policy.hash && run.tasks.size === 0 &&
+          currentPolicy.hash === run.policy.hash && run.nativeSpanComplete &&
+          run.tasks.size === 0 &&
           run.pendingChecks.size === 0 &&
           run.policy.required_checks.every(check =>
             run.checks.get(check.id)?.passed === true &&
