@@ -101,6 +101,40 @@ class V5EvidenceGateTests(unittest.TestCase):
         self.event("finish",8,status="success")
         with self.assertRaises(EventError):self.event("verified",9,source="quality-gate")
 
+    def test_equal_counts_but_mismatched_native_ids_do_not_verify(self):
+        self.event("start",1,platform="opencode")
+        self.event("agent-start",2,agent_id="actual-child")
+        self.event("agent-stop",3,agent_id="different-child")
+        self.check(6)
+        self.event("finish",8,status="success")
+        decision=assess(self.history(),self.policy)
+        self.assertFalse(decision["verified"])
+        self.assertIn("Unmatched native agent stop",decision["reason"])
+        with self.assertRaises(EventError):
+            self.event("verified",9,source="quality-gate")
+
+    def test_duplicate_native_start_ids_cannot_reuse_one_stop_for_verification(self):
+        self.event("start",1,platform="opencode")
+        self.event("agent-start",2,agent_id="same-id")
+        self.event("agent-start",3,agent_id="same-id")
+        self.event("agent-stop",4,agent_id="same-id")
+        self.event("agent-stop",5,agent_id="same-id")
+        self.check(6)
+        self.event("finish",8,status="success")
+        self.assertFalse(assess(self.history(),self.policy)["verified"])
+        with self.assertRaises(EventError):
+            self.event("verified",9,source="quality-gate")
+
+    def test_stop_before_start_never_proves_native_child_lifetime(self):
+        self.event("start",1,platform="opencode")
+        self.event("agent-stop",2,agent_id="child")
+        self.event("agent-start",3,agent_id="child")
+        self.check(6)
+        self.event("finish",8,status="success")
+        self.assertFalse(assess(self.history(),self.policy)["verified"])
+        with self.assertRaises(EventError):
+            self.event("verified",9,source="quality-gate")
+
     def test_manual_verification_cannot_bypass_explicit_v5_policy(self):
         self.start()
         with self.assertRaises(EventError):
