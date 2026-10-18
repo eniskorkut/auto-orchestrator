@@ -7,7 +7,7 @@ import plugin, { observedOverlapMs } from '../../adapters/opencode-v2/auto_orche
 
 const tick = async () => { await new Promise(resolve => setImmediate(resolve)); await new Promise(resolve => setImmediate(resolve)); };
 
-async function sandbox(fn, getSession = null) {
+async function sandbox(fn, getSession = null, options = {}) {
   const root = mkdtempSync(join(tmpdir(), 'orchestrator-v2-'));
   const project = join(root, 'project');
   const foreignProject = join(root, 'other-project');
@@ -17,7 +17,13 @@ async function sandbox(fn, getSession = null) {
   let release;
   const ctx = {
     location: { directory: project },
-    tui: { showToast: async value => { toasts.push(value); return true; } },
+    tui: options.tuiMissing ? undefined : {
+      showToast: async value => {
+        if (options.tuiThrows) throw new Error('TUI not connected');
+        toasts.push(value);
+        return true;
+      },
+    },
     session: {
       hook: async (name, callback) => { hooks[name] = callback; },
       ...(getSession ? {get: async ({sessionID}) => getSession(sessionID)} : {}),
@@ -594,8 +600,18 @@ test('IDE toast unavailable or failing never breaks verified native run', async 
     await hooks['execute.after'](check);
     await emit(lifecycle('session.execution.succeeded','toast-safe',project));
     assert.equal(read()[0].at(-1).event,'verified');
-    assert.equal(toasts.length,1);
-  });
+    assert.equal(toasts.length,0);
+  }, null, {tuiMissing:true});
+  await sandbox(async ({project,hooks,emit,read,toasts}) => {
+    enableGate(project);
+    await emit(lifecycle('session.execution.started','toast-throw',project));
+    const check=testCommand('native','toast-throw',0,project);
+    await hooks['execute.before'](check);
+    await hooks['execute.after'](check);
+    await emit(lifecycle('session.execution.succeeded','toast-throw',project));
+    assert.equal(read()[0].at(-1).event,'verified');
+    assert.equal(toasts.length,0);
+  }, null, {tuiThrows:true});
 });
 
 
