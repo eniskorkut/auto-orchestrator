@@ -11,6 +11,10 @@ import hashlib
 import os
 import time
 from pathlib import Path
+try:
+    from tools.review_gate import ReviewError, validate_review
+except ModuleNotFoundError:
+    from review_gate import ReviewError, validate_review
 
 ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$")
 ROLES = {"explorer", "implementer", "tester", "reviewer"}
@@ -44,6 +48,8 @@ def conflicts(a, b):
 def validate_plan(plan):
     if not isinstance(plan, dict) or not isinstance(plan.get("tasks"), list) or not 1 <= len(plan["tasks"]) <= 64:
         raise SupervisorError("Plan requires 1..64 tasks")
+    if type(plan.get("require_review", False)) is not bool:
+        raise SupervisorError("require_review must be a boolean")
     max_parallel = plan.get("max_parallel", 3)
     if type(max_parallel) is not int or not 1 <= max_parallel <= 3:
         raise SupervisorError("max_parallel must be 1..3")
@@ -139,6 +145,8 @@ class Supervisor:
         columns={row["name"] for row in self.conn.execute("PRAGMA table_info(runs)")}
         if "native_supervision" not in columns:
             self.conn.execute("ALTER TABLE runs ADD COLUMN native_supervision INTEGER NOT NULL DEFAULT 0")
+        if "require_review" not in columns:
+            self.conn.execute("ALTER TABLE runs ADD COLUMN require_review INTEGER NOT NULL DEFAULT 0")
         self.conn.executescript("""
         CREATE TABLE IF NOT EXISTS native_bindings (
           run_id TEXT NOT NULL, task_id TEXT NOT NULL, attempt INTEGER NOT NULL,
@@ -177,9 +185,11 @@ class Supervisor:
         if type(native_supervision) is not bool:
             raise SupervisorError("native_supervision must be a boolean")
         tasks, limit=validate_plan(plan)
+        require_review=plan.get("require_review", False)
         def op():
-            self.conn.execute("INSERT INTO runs (id,created,max_parallel,native_supervision) VALUES (?,?,?,?)",
-                              (run,time.time(),limit,int(native_supervision)))
+            self.conn.execute("""INSERT INTO runs
+              (id,created,max_parallel,native_supervision,require_review) VALUES (?,?,?,?,?)""",
+              (run,time.time(),limit,int(native_supervision),int(require_review)))
             for item in tasks.values():
                 self.conn.execute("""INSERT INTO tasks
                   (run_id,id,role,objective,dependencies,read_scope,write_scope,timeout_seconds,max_retries)
@@ -235,7 +245,7 @@ class Supervisor:
             return {"claimed":selected,"timed_out":timed_out,
                     "native_cancellation_required":timed_out}
         return self.transaction(op)
-    def change(self,run,task_id,lease,action,now=None,result=None,reason=None):
+    def change(self,run,task_id,lease,action,now=None,result=None,reason=None,review=None):
         now=time.time() if now is None else now
         identifier(task_id)
         if action=="completed":
@@ -251,8 +261,14 @@ class Supervisor:
                                    (file_path==base or file_path.startswith(base+"/")) for base in allowed)
                        for file_path in result["changed_files"]):
                     raise SupervisorError("Changed files exceed assigned write scope")
-            supervised=bool(self.conn.execute(
-                "SELECT native_supervision FROM runs WHERE id=?",(run,)).fetchone()[0])
+            settings=self.conn.execute(
+                "SELECT native_supervision,require_review FROM runs WHERE id=?",(run,)).fetchone()
+            supervised=bool(settings["native_supervision"])
+            if action=="completed" and settings["require_review"]:
+                try:
+                    validate_review(review,task_id=task_id,attempt=task["attempts"],result=result)
+                except ReviewError as exc:
+                    raise SupervisorError("Quality review rejected: "+str(exc)) from exc
             if supervised:
                 binding=self.conn.execute("""
                     SELECT stopped FROM native_bindings
@@ -444,11 +460,13 @@ class Supervisor:
         return self.transaction(op)
     def status(self,run):
         rows=self._tasks(run)
-        supervised=bool(self.conn.execute(
-            "SELECT native_supervision FROM runs WHERE id=?",(run,)).fetchone()[0])
+        settings=self.conn.execute(
+            "SELECT native_supervision,require_review FROM runs WHERE id=?",(run,)).fetchone()
+        supervised=bool(settings["native_supervision"])
+        review_required=bool(settings["require_review"])
         bindings={(row["task_id"],row["attempt"]):bool(row["stopped"]) for row in
                   self.conn.execute("SELECT task_id,attempt,stopped FROM native_bindings WHERE run_id=?",(run,))}
-        return {"run_id":run,"native_supervision":supervised,"tasks":[{"id":t["id"],"state":t["state"],"role":t["role"],
+        return {"run_id":run,"native_supervision":supervised,"require_review":review_required,"tasks":[{"id":t["id"],"state":t["state"],"role":t["role"],
                  "native_stop_observed":(t["state"]!="pending" and bindings.get((t["id"],t["attempts"]),False)),
                  "attempts":t["attempts"],"max_retries":t["max_retries"],"reason":t["reason"],
                  "result":json.loads(t["result"]) if t["result"] else None} for t in rows.values()],
@@ -465,6 +483,7 @@ def main(argv=None):
     for name in ("completed","failed","cancelled"):
         q=sub.add_parser(name);q.add_argument("--run-id",required=True);q.add_argument("--task-id",required=True)
         q.add_argument("--lease",required=True);q.add_argument("--result");q.add_argument("--reason")
+        if name=="completed": q.add_argument("--review",help="V6.2 structured review JSON (opt-in)")
     bind=sub.add_parser("bind-native");bind.add_argument("--run-id",required=True)
     bind.add_argument("--task-id",required=True);bind.add_argument("--lease",required=True)
     bind.add_argument("--platform",required=True)
@@ -491,7 +510,8 @@ def main(argv=None):
         elif a.command=="retry": result=s.retry(a.run_id,a.task_id,a.reason)
         else:
             payload=json.loads(Path(a.result).read_text(encoding="utf-8")) if a.result else None
-            result=s.change(a.run_id,a.task_id,a.lease,a.command,result=payload,reason=a.reason)
+            review=json.loads(Path(a.review).read_text(encoding="utf-8")) if getattr(a,"review",None) else None
+            result=s.change(a.run_id,a.task_id,a.lease,a.command,result=payload,reason=a.reason,review=review)
         print(json.dumps(result,indent=2))
     except (SupervisorError,OSError,ValueError,sqlite3.Error) as exc:
         p.exit(1,"SUPERVISOR ERROR: "+str(exc)+"\n")
