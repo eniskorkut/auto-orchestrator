@@ -258,3 +258,21 @@ Read [V6.2 routing and review](docs/V62_ROUTING_REVIEW.md) for examples and limi
 The OpenCode V2 global plugin now tries to select relevant skills **automatically at native prompt admission**, without asking the user to invoke `router.py`. It reads the native skill catalog and executes the installed local Python Router via stdin, never writing raw prompt text into telemetry. Explicit user-pinned skills are left intact, unknown prompts may select no skills, and unverified sessions fail closed. Router also gives conservative **advisory** one-agent vs possible-parallel guidance. This does not compel native subagent dispatch or prove time saved.
 
 See [V6.3 native routing](docs/V63_NATIVE_PROMPT_ROUTING.md) for implementation, safety limits and real-IDE validation.
+
+## V6.4 — Native lifecycle stabilization and measurable routing
+
+OpenCode V2 now retries an unexpectedly closed native event stream, retaining
+incomplete execution records instead of inventing a finished or verified run.
+Use `python tools/perf.py --root PROJECT audit --json` to categorize missing
+finish evidence. `perf.py report --latest --json` now separately shows
+routing advice, observed native subagent starts/concurrency and prompt-routing
+latency. Comparison reports treat unfinished attempts as incomplete rather
+than dropping them from apparent speedup calculations.
+
+Quality Gate permits only explicitly declared literal `alternates` for
+allowed test commands; there is no fuzzy shell command normalization. Router
+adds a small, conservative long-tail domain ontology and
+`tools/router_eval.py` reports split-level accuracy, coverage and unrelated
+skill selection rates. None of this proves live IDE reliability or speedup
+until matched native runs are repeated. See
+[execution reliability](docs/V64_RELIABILITY.md).
