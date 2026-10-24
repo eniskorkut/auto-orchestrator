@@ -839,7 +839,7 @@ test('V6.3 native prompt admission auto-selects OpenCode skill IDs and advises s
       await hooks.prompt({sessionID:'child',prompt:children});
       assert.equal(children.skills,undefined);
 
-      const parallel = {text:'Independent modules can run in parallel:\\n1. Build backend API\\n2. Write UI\\n3. Write tests'};
+      const parallel = {text:'Independent modules can run in parallel:\n1. Build backend API\n2. Write UI\n3. Write tests'};
       await hooks.prompt({sessionID:'multi',prompt:parallel});
       const parallelContext = {sessionID:'multi',system:[],agent:'build'};
       await hooks.context(parallelContext);
