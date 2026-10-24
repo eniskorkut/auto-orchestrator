@@ -244,3 +244,11 @@ Cursor project installations now register both `subagentStart` and `subagentStop
 The OpenCode V2 plugin can show a **brief IDE toast** after the project's opt-in Quality Gate has actually persisted a successful `finish → verified`. A completed run with two or more overlapping native tool spans may show **observed tool-span overlap**; this is **not experimentally measured time saved**. Background subagent dispatch is not a confirmed child stop and cannot authorize a verified run. A Desktop build without a compatible TUI API silently retains local JSONL and CLI reporting instead of interrupting agent work.
 
 For a persistent result, use the installed `tools/perf.py --root <project-path> report --latest --json` CLI in the IDE terminal and inspect `observed_overlap_seconds`, `estimated_parallelism_seconds`, `has_valid_estimate` and `verified`. The separate `observed_overlap_seconds` value uses measured tool-span union, **not a matched single-agent benchmark**. Read [IDE Performance Visibility](docs/IDE_PERFORMANCE_VISIBILITY.md) for exact requirements, Windows example, and limitations. Future matched baseline benchmarks remain postponed.
+
+## V6.2 — conservative skill routing and opt-in task review
+
+V6.2 reduces false-positive Router selections using objective-derived task domains and minimum relevance evidence. A backend API task no longer gets a UI/animation skill solely from generic overlapping terms. `router.py brief` may legitimately return no skills. The classifier is deterministic and does not spawn native subagents or load full skill contents.
+
+Plans may set `"require_review": true` (off by default). This adds a pre-completion structured review artifact, bound to the current task attempt and an exact digest of the submitted result. It rejects missing/failed/skipped tests or unresolved blocker/high findings. Existing native termination, lease and write-scope protections remain unchanged. Caller-created review records are **not** authenticated evidence of independent agent review or actual test execution.
+
+Read [V6.2 routing and review](docs/V62_ROUTING_REVIEW.md) for examples and limitations. Hosted tests cover deterministic contracts; real IDE selection quality and reviewer independence require separate live evidence.

@@ -744,6 +744,8 @@ test('V6 OpenCode plugin forwards hashed native lifecycle to SQLite even if bind
     copyFileSync(new URL('../../adapters/opencode-v2/auto_orchestrator.js',import.meta.url),installed);
     const script = join(helpers,'supervisor.py');
     copyFileSync(new URL('../../tools/supervisor.py',import.meta.url),script);
+    copyFileSync(new URL('../../tools/review_gate.py',import.meta.url),
+      join(helpers,'review_gate.py'));
     const installedPlugin = (await import(pathToFileURL(installed).href)).default;
     let owner;
     await sandbox(async ({project,hooks,emit,read}) => {

@@ -11,13 +11,55 @@ try:
 except ModuleNotFoundError:
     from supervisor import validate_plan, SupervisorError
 
-WORDS=re.compile(r"[a-z0-9][a-z0-9_.+-]{2,}",re.I)
-STOP={"agent","skill","skills","task","code","file","files","implement","review","this",
-      "with","from","must","and","the","for","test","tests","using","should","work"}
+# Skill selection must be conservative: a single incidental description word
+# must not route backend work to an animation/UI skill.
+WORDS=re.compile(r"[^\W_]+",re.UNICODE)
+STOP={"agent","agents","skill","skills","task","tasks","code","coding","file","files",
+      "implement","implementation","review","reviews","this","that","those","these",
+      "with","from","must","and","the","for","using","should","work","works",
+      "create","build","make","change","update","new","add","fix","check","best",
+      "support","help","manage","process","project","projects","tool","tools",
+      "system","systems","feature","features","general","complex","simple"}
+# These are domain vetoes, not an exhaustive ontology. No LLM is required.
+DOMAIN_TERMS={
+    "backend":{"backend","api","endpoint","endpoints","fastapi","django","flask",
+               "server","servers","database","databases","postgres","postgresql",
+               "mysql","redis","rest","graphql","orm","microservice"},
+    "frontend":{"frontend","ui","ux","react","vue","angular","css","html",
+                "animation","animations","motion","layout","navbar","component",
+                "components","tailwind","figma","responsive","interface"},
+    "security":{"security","secure","vulnerability","vulnerabilities","xss",
+                "csrf","auth","authentication","authorization","secrets","owasp",
+                "threat","injection","permissions","masking"},
+    "testing":{"pytest","unittest","vitest","jest","playwright","cypress",
+               "e2e","coverage","testing","test","tests","regression"},
+    "devops":{"docker","kubernetes","k8s","ci","cd","deployment","deploy",
+              "terraform","helm","pipeline","pipelines","observability"},
+    "data":{"pandas","analytics","dataset","datasets","dataframe","dataframes",
+            "statistics","visualization","csv","etl","warehouse"},
+    "docs":{"documentation","docs","readme","manual","changelog","tutorial"},
+    "research":{"research","investigate","explore","survey","benchmark","literature"},
+}
+# Small controlled translation map for common Turkish task objectives.
+ALIASES={"arayüz":"ui","arayüzü":"ui","animasyon":"animation",
+         "sunucu":"server","veritabanı":"database",
+         "güvenlik":"security","yetkilendirme":"authorization",
+         "kimlik":"authentication","dağıtım":"deployment",
+         "dokümantasyon":"documentation","belgelendirme":"documentation",
+         "testler":"tests","testleri":"tests","araştırma":"research"}
 MAX_SKILL_BYTES=64*1024
 
 def tokens(value):
-    return set(w.lower() for w in WORDS.findall(value) if w.lower() not in STOP)
+    if not isinstance(value,str):
+        return set()
+    # CamelCase, slash paths, and hyphenated skill names are split into words.
+    value=re.sub(r"([a-z0-9])([A-Z])",r"\1 \2",value)
+    value=re.sub(r"[/_.+\-]", " ", value)
+    return {ALIASES.get(w.lower(),w.lower()) for w in WORDS.findall(value)
+            if w.lower() not in STOP and len(w)>=2}
+
+def domains(words):
+    return {domain for domain,terms in DOMAIN_TERMS.items() if words & terms}
 
 def skill_roots(project:Path, home:Path|None=None):
     home=home or Path.home()
@@ -48,21 +90,60 @@ def discover(project:Path, home:Path|None=None):
             found[name]={"name":name,"description":description[:300],"path":str(path.resolve())}
     return sorted(found.values(),key=lambda x:x["name"])
 
+def suggest_role(objective:str)->str:
+    """Advisory only; an explicitly assigned Supervisor role is never changed."""
+    words=set(w.lower() for w in WORDS.findall(objective))
+    if words & {"audit","review","reviewer","inspect"}:
+        return "reviewer"
+    if words & {"test","tests","pytest","unittest","regression","coverage","e2e"}:
+        return "tester"
+    if words & {"research","investigate","explore","survey","benchmark","araştırma"}:
+        return "explorer"
+    return "implementer"
+
+
 def route(task:dict, skills:list[dict], max_skills:int=2):
-    if not 0<=max_skills<=5:
+    """Deterministic, abstaining router; metadata is data, never instructions."""
+    if type(max_skills) is not int or not 0<=max_skills<=5:
         raise SupervisorError("max_skills out of range")
-    query=tokens(task["objective"]+" "+task["role"]+" "+" ".join(task.get("read",[])+task.get("write",[])))
+    if max_skills==0:
+        return []
+    objective=tokens(task.get("objective",""))
+    scopes=tokens(" ".join(task.get("read",[])+task.get("write",[])))
+    query=objective | scopes
+    task_domains=domains(objective)  # User objective, not arbitrary filenames.
+    explicit=task.get("skills",[])
+    if not isinstance(explicit,list) or any(not isinstance(x,str) for x in explicit):
+        raise SupervisorError("Explicit skills must be a list of names")
+    selected=set(explicit)
     ranked=[]
-    explicit=set(task.get("skills",[]))
     for item in skills:
         name=item["name"]
-        description=item["description"]
-        name_tokens=tokens(name.replace("-"," "))
-        score=5 if name in explicit else 0
-        score += 3*len(query & name_tokens)
-        score += len(query & tokens(description))
-        if score:
-            ranked.append((score,item))
+        name_words=tokens(name)
+        description_words=tokens(item.get("description",""))
+        name_domains=domains(name_words)
+        skill_domains=domains(name_words|description_words)
+        manual=name in selected
+        # Name-derived domain is more reliable than incidental descriptor
+        # terms. A UI-named skill mentioning tests is not a backend testing
+        # skill merely because the task also asks for tests.
+        if not manual and task_domains and name_domains and not (task_domains & name_domains):
+            continue
+        if not manual and task_domains and skill_domains and not (task_domains & skill_domains):
+            continue
+        name_hits=objective & name_words
+        desc_hits=objective & description_words
+        scope_hits=scopes & (name_words|description_words)
+        # No match is a valid result. Require name evidence or multiple
+        # descriptor hits; a domain-specific singleton also qualifies.
+        strong=bool(name_hits) or len(desc_hits)>=2 or (
+            bool(desc_hits) and bool(task_domains & skill_domains))
+        if not manual and not strong:
+            continue
+        score=(100 if manual else 0)+6*len(name_hits)+2*len(desc_hits)+len(scope_hits)
+        if task_domains & skill_domains:
+            score+=3
+        ranked.append((score,item))
     ranked.sort(key=lambda x:(-x[0],x[1]["name"]))
     return [entry for _,entry in ranked[:max_skills]]
 
@@ -75,6 +156,9 @@ def brief(project:Path,plan:dict,task_id:str,home:Path|None=None,max_skills:int=
     skills=route(task|{"skills":original.get("skills",[])},discover(project,home),max_skills)
     return {
         "task_id":task_id,"role":task["role"],"objective":task["objective"],
+        "routing":{"version":2,"domains":sorted(domains(tokens(task["objective"]))),
+                   "suggested_role":suggest_role(task["objective"]),
+                   "abstained":not bool(skills)},
         "depends_on":task["depends_on"],"read_scope":task["read"],"write_scope":task["write"],
         "selected_skills":[{"name":s["name"],"path":s["path"]} for s in skills],
         "required_result":{
