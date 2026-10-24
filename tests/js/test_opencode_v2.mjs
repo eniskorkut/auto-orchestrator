@@ -17,6 +17,7 @@ async function sandbox(fn, getSession = null, options = {}) {
   const toasts = [];
   const pending = [];
   let release;
+  let subscriptions = 0;
   const ctx = {
     location: { directory: project },
     tui: options.tuiMissing ? undefined : {
@@ -32,17 +33,24 @@ async function sandbox(fn, getSession = null, options = {}) {
     },
     skill: { list: async () => ({ data: options.skillList ?? [] }) },
     tool: { hook: async (name, callback) => { hooks[name] = callback; } },
-    event: { subscribe: ({ signal }) => ({
-      async *[Symbol.asyncIterator]() {
-        while (!signal.aborted) {
-          if (pending.length) yield pending.shift();
-          else await new Promise(resolve => {
-            release = resolve;
-            signal.addEventListener('abort', resolve, { once: true });
-          });
-        }
-      },
-    }) },
+    event: { subscribe: ({ signal }) => {
+      const attempt = ++subscriptions;
+      return {
+        async *[Symbol.asyncIterator]() {
+          while (!signal.aborted) {
+            if (pending.length) {
+              yield pending.shift();
+              if (options.disconnectOnce && attempt === 1) {
+                throw new Error('SENSITIVE-STREAM-ERROR-MUST-NOT-LOG');
+              }
+            } else await new Promise(resolve => {
+              release = resolve;
+              signal.addEventListener('abort', resolve, { once: true });
+            });
+          }
+        },
+      };
+    } },
   };
   const emit = async event => { pending.push(event); release?.(); await tick(); };
   const read = (folder = project) => {
@@ -872,4 +880,50 @@ test('V6.3 prompt admission never modifies explicit skills, missing-helper or un
     assert.deepEqual(read(),[]);
   },()=>({location:{directory:'/foreign'}}),{skillList:[
     {id:'backend',name:'backend-api',description:'FastAPI backend API'}]});
+});
+
+test('V6.4 event subscription reconnect preserves unfinished state and logs only diagnostics',async()=>{
+  await sandbox(async({project,hooks,emit,read})=>{
+    await emit(lifecycle('session.execution.started','transient',project));
+    const before=read()[0].map(x=>x.event);
+    assert.deepEqual(before,['start','diagnostic']);
+    assert.equal(read()[0][1].reason,'event_stream_error');
+    assert.doesNotMatch(JSON.stringify(read()),/SENSITIVE-STREAM-ERROR/);
+    await new Promise(resolve=>setTimeout(resolve,320));
+    await emit(lifecycle('session.execution.succeeded','transient',project));
+    assert.deepEqual(read()[0].map(x=>x.event),['start','diagnostic','finish']);
+    assert.equal(read()[0].at(-1).verified,false);
+  },()=>({location:{directory:undefined}}),{disconnectOnce:true});
+});
+
+test('V6.4 native shell accepts only explicit policy alternates',async()=>{
+  let owner;
+  await sandbox(async({project,hooks,emit,read})=>{
+    owner=project;
+    enableGate(project);
+    writeFileSync(join(project,'.auto-orchestrator','verification.json'),JSON.stringify({
+      version:1,auto_verify:true,
+      required_checks:[{id:'unit',tool:'shell',command:'python -m unittest -q',
+        alternates:['python -m unittest -q .']}],
+    }));
+    await emit(lifecycle('session.execution.started','alias-ok',project));
+    const event={id:'alias-1',tool:'shell',data:{sessionID:'alias-ok'},
+      input:{command:'python -m unittest -q .'},result:{metadata:{exit:0}}};
+    await hooks['execute.before'](event);
+    await hooks['execute.after'](event);
+    await emit(lifecycle('session.execution.succeeded','alias-ok',project));
+    const events=read()[0];
+    assert.equal(events.find(e=>e.event==='check').exit_code,0);
+    assert.equal(events.at(-1).event,'verified');
+
+    await emit(lifecycle('session.execution.started','alias-denied',project));
+    const unexpected={id:'alias-2',tool:'shell',data:{sessionID:'alias-denied'},
+      input:{command:'python -m unittest -q ./other'},result:{metadata:{exit:0}}};
+    await hooks['execute.before'](unexpected);
+    await hooks['execute.after'](unexpected);
+    await emit(lifecycle('session.execution.succeeded','alias-denied',project));
+    const rejected=read().find(ev=>ev.some(e=>e.event==='mutation'));
+    assert.ok(rejected);
+    assert.equal(rejected.some(e=>e.event==='verified'),false);
+  },()=>({location:{directory:owner}}));
 });
