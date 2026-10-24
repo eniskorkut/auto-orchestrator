@@ -30,6 +30,7 @@ async function sandbox(fn, getSession = null, options = {}) {
       hook: async (name, callback) => { hooks[name] = callback; },
       ...(getSession ? {get: async ({sessionID}) => getSession(sessionID)} : {}),
     },
+    skill: { list: async () => ({ data: options.skillList ?? [] }) },
     tool: { hook: async (name, callback) => { hooks[name] = callback; } },
     event: { subscribe: ({ signal }) => ({
       async *[Symbol.asyncIterator]() {
@@ -780,4 +781,86 @@ test('V6 OpenCode plugin forwards hashed native lifecycle to SQLite even if bind
         '--lease',lease,'--result',resultFile).state,'completed');
     },()=>({location:{directory:owner}}),{pluginImpl:installedPlugin});
   } finally {rmSync(root,{recursive:true,force:true});}
+});
+
+
+test('V6.3 native prompt admission auto-selects OpenCode skill IDs and advises single agent', async (t) => {
+  const python = process.env.AUTO_ORCHESTRATOR_PYTHON || 'python3';
+  if (process.platform === 'win32' || spawnSync(python,['--version']).status !== 0) {
+    t.skip('POSIX Python integration fixture required');
+    return;
+  }
+  const root = mkdtempSync(join(tmpdir(),'ao-v63-native-'));
+  try {
+    const plugins = join(root,'plugins');
+    const helpers = join(root,'auto-orchestrator','tools');
+    mkdirSync(plugins,{recursive:true});
+    mkdirSync(helpers,{recursive:true});
+    writeFileSync(join(root,'package.json'),'{"type":"module"}');
+    copyFileSync(new URL('../../adapters/opencode-v2/auto_orchestrator.js',import.meta.url),
+      join(plugins,'auto_orchestrator.js'));
+    for (const f of ['router.py','supervisor.py','review_gate.py']) {
+      copyFileSync(new URL('../../tools/'+f,import.meta.url),join(helpers,f));
+    }
+    const installedPlugin = (await import(pathToFileURL(join(plugins,'auto_orchestrator.js')).href)).default;
+    let owned;
+    const skills = [
+      {id:'skill-backend',name:'backend-api',description:'Build FastAPI backend API endpoints'},
+      {id:'skill-motion',name:'ui-animation',description:'Animate frontend UI transitions'},
+      {id:'skill-tests',name:'test-automation',description:'Automate pytest regression tests'},
+    ];
+    await sandbox(async ({project,foreignProject,hooks,read,emit}) => {
+      owned = project;
+      const prompt = {text:'Implement FastAPI backend API endpoint. SENSITIVE_CREDENTIAL_TEXT'};
+      await hooks.prompt({sessionID:'routed-one',prompt});
+      assert.deepEqual(prompt.skills,[{id:'skill-backend'}]);
+      const context = {sessionID:'routed-one',system:[],agent:'build'};
+      await hooks.context(context);
+      assert.match(context.system.at(-1).text,/Prefer one agent/);
+      assert.equal(read().length,1);
+      assert.deepEqual(read()[0].map(e=>e.event),['start','route']);
+      assert.equal(read()[0][1].selected_count,1);
+      assert.doesNotMatch(JSON.stringify(read()),/SENSITIVE_CREDENTIAL_TEXT|backend-api|routed-one/);
+
+      const manual = {text:'Implement FastAPI backend API endpoint',
+        skills:[{id:'skill-motion'}]};
+      await hooks.prompt({sessionID:'manual',prompt:manual});
+      assert.deepEqual(manual.skills,[{id:'skill-motion'}]);
+      assert.equal(read().length,1);
+
+      owned = foreignProject;
+      const foreign = {text:'Implement FastAPI backend API endpoint'};
+      await hooks.prompt({sessionID:'foreign',prompt:foreign});
+      assert.equal(foreign.skills,undefined);
+      assert.equal(read().length,1);
+      owned = project;
+
+      const children = {text:'Implement FastAPI backend API endpoint'};
+      await hooks.prompt({sessionID:'child',prompt:children});
+      assert.equal(children.skills,undefined);
+
+      const parallel = {text:'Independent modules can run in parallel:\\n1. Build backend API\\n2. Write UI\\n3. Write tests'};
+      await hooks.prompt({sessionID:'multi',prompt:parallel});
+      const parallelContext = {sessionID:'multi',system:[],agent:'build'};
+      await hooks.context(parallelContext);
+      assert.match(parallelContext.system.at(-1).text,/at most 3/);
+      assert.equal(read().length,2);
+    },(sessionID)=>({
+      location:{directory:owned},
+      ...(sessionID==='child' ? {parentID:'routed-one'} : {}),
+    }),{pluginImpl:installedPlugin,skillList:skills});
+  } finally { rmSync(root,{recursive:true,force:true}); }
+});
+
+test('V6.3 prompt admission never modifies explicit skills, missing-helper or untrusted sessions',async()=>{
+  await sandbox(async ({project,hooks,read})=>{
+    const manual={text:'Implement backend API',skills:[{id:'original'}]};
+    await hooks.prompt({sessionID:'manual',prompt:manual});
+    assert.deepEqual(manual.skills,[{id:'original'}]);
+    const missing={text:'Implement backend API'};
+    await hooks.prompt({sessionID:'router-missing',prompt:missing});
+    assert.equal(missing.skills,undefined);
+    assert.deepEqual(read(),[]);
+  },()=>({location:{directory:'/foreign'}}),{skillList:[
+    {id:'backend',name:'backend-api',description:'FastAPI backend API'}]});
 });
