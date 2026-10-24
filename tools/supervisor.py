@@ -147,6 +147,11 @@ class Supervisor:
             self.conn.execute("ALTER TABLE runs ADD COLUMN native_supervision INTEGER NOT NULL DEFAULT 0")
         if "require_review" not in columns:
             self.conn.execute("ALTER TABLE runs ADD COLUMN require_review INTEGER NOT NULL DEFAULT 0")
+        task_columns={r["name"] for r in self.conn.execute("PRAGMA table_info(tasks)")}
+        if "reviewed" not in task_columns:
+            self.conn.execute("ALTER TABLE tasks ADD COLUMN reviewed INTEGER NOT NULL DEFAULT 0")
+        if "review_digest" not in task_columns:
+            self.conn.execute("ALTER TABLE tasks ADD COLUMN review_digest TEXT")
         self.conn.executescript("""
         CREATE TABLE IF NOT EXISTS native_bindings (
           run_id TEXT NOT NULL, task_id TEXT NOT NULL, attempt INTEGER NOT NULL,
@@ -264,9 +269,11 @@ class Supervisor:
             settings=self.conn.execute(
                 "SELECT native_supervision,require_review FROM runs WHERE id=?",(run,)).fetchone()
             supervised=bool(settings["native_supervision"])
+            review_proof=None
             if action=="completed" and settings["require_review"]:
                 try:
-                    validate_review(review,task_id=task_id,attempt=task["attempts"],result=result)
+                    review_proof=validate_review(review,task_id=task_id,
+                        attempt=task["attempts"],result=result)
                 except ReviewError as exc:
                     raise SupervisorError("Quality review rejected: "+str(exc)) from exc
             if supervised:
@@ -287,8 +294,10 @@ class Supervisor:
             else:
                 raise SupervisorError("Invalid transition")
             self.conn.execute("""UPDATE tasks SET state=?, finished=?, termination_confirmed=1,
-              result=?, reason=? WHERE run_id=? AND id=?""",
-              (action,now,json.dumps(result) if result is not None else None,reason,run,task_id))
+              result=?, reason=?, reviewed=?, review_digest=? WHERE run_id=? AND id=?""",
+              (action,now,json.dumps(result) if result is not None else None,reason,
+               int(review_proof is not None),
+               review_proof["result_sha256"] if review_proof else None,run,task_id))
             return {"id":task_id,"state":action,"attempt":task["attempts"]}
         return self.transaction(op)
     @staticmethod
@@ -455,7 +464,7 @@ class Supervisor:
             if task["attempts"]>=task["max_retries"]+1:
                 raise SupervisorError("Retry limit reached")
             self.conn.execute("""UPDATE tasks SET state='pending', lease=NULL, started=NULL, finished=NULL,
-              result=NULL, reason=?, termination_confirmed=0 WHERE run_id=? AND id=?""",(reason,run,task_id))
+              result=NULL, reason=?, termination_confirmed=0, reviewed=0, review_digest=NULL WHERE run_id=? AND id=?""",(reason,run,task_id))
             return {"id":task_id,"state":"pending","attempts_used":task["attempts"]}
         return self.transaction(op)
     def status(self,run):
@@ -468,7 +477,9 @@ class Supervisor:
                   self.conn.execute("SELECT task_id,attempt,stopped FROM native_bindings WHERE run_id=?",(run,))}
         return {"run_id":run,"native_supervision":supervised,"require_review":review_required,"tasks":[{"id":t["id"],"state":t["state"],"role":t["role"],
                  "native_stop_observed":(t["state"]!="pending" and bindings.get((t["id"],t["attempts"]),False)),
-                 "attempts":t["attempts"],"max_retries":t["max_retries"],"reason":t["reason"],
+                 "attempts":t["attempts"],"max_retries":t["max_retries"],
+                 "review_attested":bool(t["reviewed"]), "review_digest":t["review_digest"],
+                 "reason":t["reason"],
                  "result":json.loads(t["result"]) if t["result"] else None} for t in rows.values()],
                 "complete":all(t["state"]=="completed" for t in rows.values()),
                 "unconfirmed_native_tasks":[t["id"] for t in rows.values() if t["state"] in ACTIVE]}
