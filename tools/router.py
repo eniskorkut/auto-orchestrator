@@ -612,9 +612,9 @@ def delegation_decision(objective: str) -> dict:
     text = objective.strip()
     if not text:
         return {"mode": "single", "max_agents": 1, "reason": "empty"}
-    numbered = re.findall(r"(?m)^\\s*(?:[-*]\\s+|[1-9][0-9]?[.)]\\s+)\\S", text)
-    marked = bool(re.search(r"(?i)\\b(parallel|independent|independently|concurrent|paralel|bağımsız|eşzamanlı)\\b", text))
-    files = set(re.findall(r"(?i)\\b[\\w.-]+/([\\w.-]+/[\\w.-]+)\\b", text))
+    numbered = re.findall(r"(?m)^\s*(?:[-*]\s+|[1-9][0-9]?[.)]\s+)\S", text)
+    marked = bool(re.search(r"(?i)\b(parallel|independent|independently|concurrent|paralel|bağımsız|eşzamanlı)\b", text))
+    files = set(re.findall(r"(?i)\b[\w.-]+/([\w.-]+/[\w.-]+)\b", text))
     tasks = len(numbered)
     if marked and tasks >= 2:
         return {"mode": "consider-parallel", "max_agents": min(3, tasks), "reason": "explicit-independent-items"}
