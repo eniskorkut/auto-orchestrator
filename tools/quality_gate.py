@@ -53,7 +53,7 @@ def validate_policy(policy):
         alternate = check.get("alternates", [])
         if not isinstance(alternate, list) or len(alternate) > 4 or any(
             not isinstance(cmd, str) or not cmd or len(cmd) > 500 or
-            "\\n" in cmd or "\\r" in cmd or cmd == command
+            "\n" in cmd or "\r" in cmd or cmd == command
             for cmd in alternate
         ) or len(set(alternate)) != len(alternate):
             raise GateError("Check alternates must be 0..4 distinct explicit commands")
