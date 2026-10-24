@@ -118,7 +118,7 @@ export default {
           if (check.alternates != null && (!Array.isArray(check.alternates) ||
               check.alternates.length > 4 ||
               check.alternates.some(cmd => typeof cmd !== 'string' || !cmd ||
-                cmd.length > 500 || /[\\r\\n]/.test(cmd) || cmd === check.command) ||
+                cmd.length > 500 || /[\r\n]/.test(cmd) || cmd === check.command) ||
               new Set(check.alternates).size !== check.alternates.length)) return null;
           ids.add(check.id);
         }
