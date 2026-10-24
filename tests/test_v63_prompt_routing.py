@@ -40,6 +40,12 @@ class PromptRouterV63(unittest.TestCase):
         self.assertEqual(x["max_agents"], 3)
         self.assertEqual(delegation_decision("parallelize this typo fix")["max_agents"], 1)
 
+    def test_explicit_agent_count_in_parallel_prompt(self):
+        x = delegation_decision("Launch THREE native subagents IN PARALLEL in a single message")
+        self.assertEqual(x["mode"], "consider-parallel")
+        self.assertEqual(x["max_agents"], 3)
+        self.assertEqual(delegation_decision("parallelize this typo fix")["max_agents"], 1)
+
     def test_inline_numbered_independent_tasks(self):
         x = delegation_decision("Üç bağımsız modül geliştir: 1. backend API "
                                 "2. frontend bileşen 3. test otomasyonu. Bağımsız çalışabilirler.")

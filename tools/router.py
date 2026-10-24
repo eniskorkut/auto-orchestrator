@@ -643,8 +643,14 @@ def delegation_decision(objective: str) -> dict:
     marked = bool(re.search(r"(?i)\b(parallel|independent|independently|concurrent|paralel|bağımsız|eşzamanlı)\b", text))
     files = set(re.findall(r"(?i)\b[\w.-]+/([\w.-]+/[\w.-]+)\b", text))
     tasks = len(numbered)
-    if marked and tasks >= 2:
-        return {"mode": "consider-parallel", "max_agents": min(3, tasks), "reason": "explicit-independent-items"}
+    counts = {"two": 2, "three": 3, "four": 4, "iki": 2, "üç": 3, "dört": 4,
+              "2": 2, "3": 3, "4": 4}
+    mentioned = [value for word, value in counts.items()
+                 if re.search(r"(?<!\w)" + re.escape(word) + r"(?!\w)", text, re.IGNORECASE)]
+    target = max([tasks, len(files), *mentioned])
+    if marked and target >= 2:
+        return {"mode": "consider-parallel", "max_agents": min(3, target),
+                "reason": "explicit-independent-items"}
     if marked and len(files) >= 2:
         return {"mode": "consider-parallel", "max_agents": min(3, len(files)), "reason": "explicit-separated-paths"}
     return {"mode": "single", "max_agents": 1, "reason": "no-proven-independent-work"}
