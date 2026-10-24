@@ -70,3 +70,15 @@ Use the V6.2 `router.py brief` selection for scoped tasks, but **never force** a
 ## V6.3 — native OpenCode prompt-time skill selection
 
 In OpenCode V2 with an active trusted global plugin, `session.hook("prompt")` attempts to select up to two skills from OpenCode's own catalog via the local installed Router before the prompt is admitted. Do not repeat routing manually merely to activate skills already attached. Explicit user skill choices remain untouched; no match is acceptable. The advisory `single` mode means avoid needless subagents for small work, unless genuine independence is established later. Prompt hook does not force native delegation. See source `docs/V63_NATIVE_PROMPT_ROUTING.md`.
+
+## V6.4 — incomplete native runs and conservative benchmark claims
+
+Native event-stream loss, project ownership transitions and plugin unload
+produce diagnostic evidence **without** a synthetic finish or verified status.
+Inspect `perf.py diagnose --latest --json` or `perf.py audit --json` in the
+project before interpreting performance. Compare repeated verified serial vs
+orchestrated runs and count incomplete attempts. Routing recommendations are
+advisory; observed agent starts and maximum concurrency must be read from
+native event spans, not inferred from `max_agents`. Only explicitly approved
+literal test `alternates` may satisfy the V5 Quality Gate. See source
+`docs/V64_RELIABILITY.md`.
