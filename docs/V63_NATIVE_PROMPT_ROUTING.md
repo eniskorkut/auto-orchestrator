@@ -69,8 +69,14 @@ runs, not inferred wall-time savings from overlapping tool spans.
 
 - Native prompt hooks insert skills, but do **not** force subagent
   dispatch; the model can still decide to work alone or delegate.
-- The router remains deterministic and does not improve the blind3
-  long-tail evaluation set by itself.
+- The deterministic router was tightened with a primary-domain gate, a
+  skill-name domain gate, Turkish imperative handling, and inline
+  numbered task detection. On the existing 227-case labelled corpus the
+  aggregate Top-1 moved to 96.9% (0% FPR); the previously weak blind3
+  split moved from 56.7% to 93.3% (0% FPR). These sets were used during
+  development, so this is regression evidence, not a production accuracy
+  claim. A fresh unseen corpus is still required for independent
+  validation.
 - It does not add external embedding/LLM calls or change user's API
   provider settings.
 - No independent review-agent identity attestation or Desktop toast is

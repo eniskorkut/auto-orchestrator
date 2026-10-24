@@ -39,6 +39,34 @@ class PromptRouterV63(unittest.TestCase):
         self.assertEqual(x["max_agents"], 3)
         self.assertEqual(delegation_decision("parallelize this typo fix")["max_agents"], 1)
 
+    def test_inline_numbered_independent_tasks(self):
+        x = delegation_decision("Üç bağımsız modül geliştir: 1. backend API "
+                                "2. frontend bileşen 3. test otomasyonu. Bağımsız çalışabilirler.")
+        self.assertEqual(x["mode"], "consider-parallel")
+        self.assertEqual(x["max_agents"], 3)
+
+    def test_turkish_backend_prompt_excludes_platform_skill(self):
+        catalog = SKILLS + [
+            {"name": "write-swift", "description": "Write modern Swift, Swift Testing, API design and performance"},
+            {"name": "mobile-native", "description": "Build mobile native iOS Swift interfaces"},
+        ]
+        x = select_prompt({"objective": "API endpoint'ine doğrulama ekle ve testini yaz.",
+                           "skills": catalog})
+        self.assertIn("backend-api", x["selected"])
+        self.assertNotIn("write-swift", x["selected"])
+        self.assertNotIn("mobile-native", x["selected"])
+
+    def test_web_frontend_prompt_excludes_mobile_native(self):
+        catalog = [
+            {"name": "frontend-react", "description": "Build React components with CSS and responsive layouts"},
+            {"name": "mobile-native", "description": "Build mobile native iOS Swift interfaces"},
+            {"name": "write-swift", "description": "Write modern Swift, Swift Testing, API design"},
+        ]
+        x = select_prompt({"objective": "Build a responsive React component with CSS", "skills": catalog})
+        self.assertEqual(x["selected"][0], "frontend-react")
+        self.assertNotIn("mobile-native", x["selected"])
+        self.assertNotIn("write-swift", x["selected"])
+
     def test_bad_inputs_fail_closed(self):
         for payload in (
             {"objective": None, "skills": []},

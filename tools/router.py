@@ -54,6 +54,9 @@ PHRASES = {
     "container image": {"devops": 3}, "layout shift": {"frontend": 2, "performance": 2},
     "design system": {"frontend": 2}, "reset token": {"security": 3},
     "event sourcing": {"backend": 2, "research": 2},
+    "command palette": {"frontend": 2}, "reduced motion": {"accessibility": 2, "animation": 2},
+    "check constraint": {"database": 3}, "cold start": {"performance": 2},
+    "threat model": {"security": 3}, "package lock": {"devops": 2},
     "mutation testing": {"testing": 3}, "container image": {"devops": 3},
     "güvenlik açığı": {"security": 3}, "veritabanı şeması": {"database": 3},
     "docker imajı": {"devops": 2}, "yetkilendirme testleri": {"security": 2, "testing": 2},
@@ -67,7 +70,8 @@ DOMAIN_TERMS = {
                 "queue", "cron", "resolver", "validation", "serialization",
                 "pagination", "blueprint", "payment", "error", "session", "import",
                 "cursor", "audit", "status", "email", "signup", "response",
-                "yanıt", "booking", "iso", "structured", "return"},
+                "yanıt", "booking", "iso", "structured", "return", "optimistic",
+                "locking", "normalize", "phone"},
     "frontend": {"frontend", "ui", "ux", "react", "vue", "angular", "svelte",
                  "css", "html", "dom", "component", "layout", "page", "navbar",
                  "modal", "responsive", "tailwind", "theme", "style", "styling",
@@ -78,12 +82,12 @@ DOMAIN_TERMS = {
                  "input", "toggle", "badge", "scroll", "viewport", "px",
                  "pricing", "tab", "tabs", "combobox", "aria", "renderer",
                  "sticky", "header", "overlap", "skeleton", "shimmer", "bundle",
-                 "site"},
+                 "site", "carousel", "swipe", "fuzzy", "palette"},
     "animation": {"animation", "motion", "transition", "micro", "interaction",
                   "spring", "easing", "keyframe", "stagger", "fade", "slide",
                   "toast", "accordion", "hover", "jank", "gsap", "framer",
                   "crossfade", "notification", "bildirim", "shimmer",
-                  "skeleton"},
+                  "skeleton", "parallax", "confetti"},
     "security": {"security", "secure", "auth", "authentication", "authorization",
                  "oauth", "jwt", "csrf", "xss", "injection", "vulnerability",
                  "owasp", "secret", "credential", "password", "replay",
@@ -94,7 +98,7 @@ DOMAIN_TERMS = {
     "testing": {"test", "pytest", "unittest", "jest", "vitest", "playwright",
                 "cypress", "e2e", "coverage", "fixture", "mock", "stub",
                 "regression", "flaky", "assertion", "tdd", "contract",
-                "property", "suite", "mutation"},
+                "property", "suite", "mutation", "snapshot", "load"},
     "devops": {"docker", "dockerfile", "container", "containerize", "kubernetes",
                "k8s", "helm", "terraform", "ansible", "ci", "cd", "pipeline",
                "deployment", "deploy", "release", "observability", "logs",
@@ -112,14 +116,14 @@ DOMAIN_TERMS = {
                  "deadlock", "join", "orm", "normalization", "normalized", "table",
                  "column", "redis", "elasticsearch", "lock", "backfill",
                  "tenant", "partition", "constraint", "partial", "subquery",
-                 "correlated", "rewrite"},
+                 "correlated", "rewrite", "snapshot"},
     "data": {"pandas", "dataframe", "csv", "dataset", "analytics", "statistics",
              "visualization", "chart", "etl", "warehouse", "numpy", "jupyter"},
     "docs": {"documentation", "docs", "readme", "tutorial", "changelog", "guide",
              "manual"},
     "research": {"research", "investigate", "compare", "survey", "benchmark",
                  "evaluate", "explore", "feasibility", "tradeoff", "spike",
-                 "options", "study", "tradeoffs", "monorepo"},
+                 "options", "study", "tradeoffs", "monorepo", "migrate", "grpc"},
     "refactor": {"refactor", "duplication", "maintainability", "restructure",
                  "cleanup"},
     "mobile": {"ios", "android", "swift", "swiftui", "kotlin", "mobile"},
@@ -150,7 +154,11 @@ TERM_WEIGHTS = {
     "header": 2, "overlap": 2, "skeleton": 2, "shimmer": 2, "bundle": 2,
     "ssrf": 3, "signing": 2, "privilege": 2, "mutation": 2, "canary": 3,
     "autoscaling": 3, "subquery": 3, "correlated": 2, "rewrite": 2,
-    "monorepo": 2, "booking": 2, "downtime": 2, "logging": 2,
+    "monorepo": 2, "booking": 2, "downtime": 2, "logging": 2, "pin": 2,
+    "sha": 2, "nonce": 2, "threat": 2, "snapshot": 2, "load": 2,
+    "carousel": 2, "swipe": 2, "fuzzy": 2, "palette": 2, "parallax": 2,
+    "confetti": 2, "optimistic": 2, "locking": 2, "normalize": 2, "phone": 2,
+    "migrate": 2, "grpc": 2, "cold": 2,
     "authentication": 2, "authorization": 2, "vulnerability": 2, "xss": 2,
     "csrf": 2, "replay": 2, "leak": 2, "leaked": 2, "harden": 2,
     "pytest": 2, "playwright": 2, "coverage": 2, "e2e": 2, "fixture": 2,
@@ -199,7 +207,11 @@ ALIASES = {"arayüz": "ui", "arayüzü": "ui", "arayüzdeki": "ui",
            "yedeğini": "backup", "başlıkları": "header", "reranking": "rerank",
            "hata": "error", "hatalarını": "error", "döndür": "return",
            "yapılandırılmış": "structured", "menü": "menu",
-           "menüdeki": "menu", "taşma": "overflow", "taşmayı": "overflow"}
+           "menüdeki": "menu", "taşma": "overflow", "taşmayı": "overflow",
+           "kaydırma": "scroll", "kaydırmasını": "scroll", "tablo": "table",
+           "vektör": "vector", "aramasında": "search", "yeniden": "rerank",
+           "sıralama": "rerank", "anahtarı": "key", "idempotency": "idempotency",
+           "geliştir": "develop", "geliştirir": "develop"}
 
 MAX_SKILL_BYTES = 64 * 1024
 CROSS_CUTTING = {"refactor", "performance"}
@@ -214,26 +226,26 @@ ACTIONS = {
     "backend": {"add", "implement", "create", "expose", "fix", "refactor",
                 "design", "build", "debug", "optimize", "validate", "handle",
                 "support", "return", "serve", "extend", "update", "remove",
-                "migrate", "speed"},
+                "migrate", "speed", "normalize", "pin", "rewrite", "develop"},
     "frontend": {"add", "implement", "create", "fix", "build", "design",
                  "style", "update", "make", "convert", "improve", "refactor",
-                 "remove", "reduce", "prevent"},
+                 "remove", "reduce", "prevent", "develop"},
     "animation": {"add", "create", "make", "animate", "improve", "reduce",
-                  "fix", "smooth", "remove"},
+                  "fix", "smooth", "remove", "respect", "develop"},
     "security": {"audit", "scan", "harden", "prevent", "secure", "fix",
                  "check", "rotate", "add", "remove", "validate", "protect",
-                 "escape", "verify", "configure"},
+                 "escape", "verify", "configure", "pin", "threat"},
     "testing": {"write", "add", "fix", "increase", "run", "create", "update",
-                "remove", "cover"},
+                "remove", "cover", "snapshot", "develop"},
     "devops": {"containerize", "deploy", "set", "configure", "fix", "add",
                "reduce", "optimize", "create", "update", "remove", "publish",
-               "build", "provision", "trace", "prevent", "write"},
+               "build", "provision", "trace", "prevent", "write", "pin", "develop"},
     "ai": {"build", "create", "add", "evaluate", "improve", "reduce",
            "implement", "update", "remove", "design", "test", "benchmark",
-           "store"},
+           "store", "develop"},
     "database": {"design", "write", "optimize", "fix", "model", "add",
                  "create", "update", "remove", "migrate", "index", "query",
-                 "normalize", "resolve", "backfill", "partition", "rewrite"},
+                 "normalize", "resolve", "backfill", "partition", "rewrite", "develop"},
     "data": {"analyze", "clean", "transform", "visualize", "add", "create",
              "update", "remove", "build"},
     "docs": {"write", "update", "add", "create", "document", "improve",
@@ -242,11 +254,11 @@ ACTIONS = {
                  "evaluate", "explore", "assess", "review", "study"},
     "refactor": {"refactor", "restructure", "clean", "simplify", "extract",
                  "remove", "sort", "deduplicate"},
-    "mobile": {"build", "create", "add", "fix", "implement", "update", "remove"},
+    "mobile": {"build", "create", "add", "fix", "implement", "update", "remove", "develop"},
     "performance": {"optimize", "improve", "reduce", "profile", "speed", "fix",
-                    "measure", "prevent"},
+                    "measure", "prevent", "respect"},
     "accessibility": {"add", "fix", "improve", "audit", "update", "remove",
-                       "build", "create", "make"},
+                       "build", "create", "make", "respect", "develop"},
 }
 DOMAIN_ORDER = ["backend", "frontend", "animation", "security", "testing",
                 "devops", "ai", "database", "data", "docs", "research",
@@ -480,8 +492,10 @@ def route(task: dict, skills: list[dict], max_skills: int = 2):
     # Use the imperative verb, not every noun that happens to share a domain
     # term ("Delete the benchmark folder" is not a benchmark task).
     action_verbs = set()
+    turkish = bool(re.search(r"[çğıöşü]", objective, re.IGNORECASE))
     if raw_actions:
-        for word in (raw_actions[0], raw_actions[-1]):
+        candidates = raw_actions if turkish else (raw_actions[0], raw_actions[-1])
+        for word in candidates:
             action_verbs.add(word)
             action_verbs.add(_stem(word))
     domain_action_ok = any(action_verbs & ACTIONS.get(domain, set()) for domain in task_domains)
@@ -515,6 +529,11 @@ def route(task: dict, skills: list[dict], max_skills: int = 2):
         if name == "generic-helper" and not manual:
             continue
         primary = _primary_domain(skill_domains)
+        name_domains = domains(name_words)
+        if not manual and task_domains and name_domains and not (name_domains & set(task_domains)):
+            # A platform-specific skill name (mobile-native, write-swift) must
+            # not win through an incidental description domain.
+            continue
         shared = set(task_domains) & set(skill_domains)
         objective_canon = _canon(objective_tokens)
         name_hits = objective_canon & name_words
@@ -533,7 +552,8 @@ def route(task: dict, skills: list[dict], max_skills: int = 2):
             score *= 0.4
         elif primary == "performance" and any(d not in CROSS_CUTTING and task_domains[d] >= 2 for d in task_domains):
             score *= 0.9
-        strong_lexical = any(word not in GENERIC_NAME_TOKENS for word in name_hits) or len(desc_hits) >= 2
+        specific_desc = [word for word in desc_hits if word not in GENERIC_NAME_TOKENS]
+        strong_lexical = any(word not in GENERIC_NAME_TOKENS for word in name_hits) or len(specific_desc) >= 2
         action_ok = (not task_domains or (primary in task_domains and
                      bool(action_verbs & ACTIONS.get(primary or "", set()))))
         if not manual:
@@ -541,7 +561,7 @@ def route(task: dict, skills: list[dict], max_skills: int = 2):
                 continue
             if not task_domains and not strong_lexical:
                 continue
-            if task_domains and primary not in task_domains and not strong_lexical:
+            if task_domains and primary not in task_domains:
                 continue
             if task_domains and shared and not strong_lexical and max(task_domains.values()) < 2:
                 # A single broad word (e.g. "json") is not enough for a
@@ -612,7 +632,7 @@ def delegation_decision(objective: str) -> dict:
     text = objective.strip()
     if not text:
         return {"mode": "single", "max_agents": 1, "reason": "empty"}
-    numbered = re.findall(r"(?m)^\s*(?:[-*]\s+|[1-9][0-9]?[.)]\s+)\S", text)
+    numbered = re.findall(r"(?:^|[\s:])(?:[-*]\s+|[1-9][0-9]?[.)]\s+)\S", text)
     marked = bool(re.search(r"(?i)\b(parallel|independent|independently|concurrent|paralel|bağımsız|eşzamanlı)\b", text))
     files = set(re.findall(r"(?i)\b[\w.-]+/([\w.-]+/[\w.-]+)\b", text))
     tasks = len(numbered)

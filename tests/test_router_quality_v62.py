@@ -53,7 +53,7 @@ class RouterQualityV62Tests(unittest.TestCase):
         self.assertGreaterEqual(recall, 0.80, f"Recall {recall:.3f} < 0.80")
 
     def test_holdout_and_blind_splits_do_not_regress(self):
-        for split in ("dev", "holdout", "blind"):
+        for split in ("dev", "holdout", "blind", "blind2", "blind3"):
             with self.subTest(split=split):
                 top1, fpr, *_ = self.evaluate(split)
                 self.assertGreaterEqual(top1, 0.90)
