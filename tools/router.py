@@ -38,14 +38,15 @@ DOMAIN_TERMS={
     "data":{"pandas","analytics","dataset","datasets","dataframe","dataframes",
             "statistics","visualization","csv","etl","warehouse"},
     "docs":{"documentation","docs","readme","manual","changelog","tutorial"},
+    "research":{"research","investigate","explore","survey","benchmark","literature"},
 }
 # Small controlled translation map for common Turkish task objectives.
 ALIASES={"arayüz":"ui","arayüzü":"ui","animasyon":"animation",
-         "sunucu":"server","veritabanı":"database","veritabanı":"database",
+         "sunucu":"server","veritabanı":"database",
          "güvenlik":"security","yetkilendirme":"authorization",
          "kimlik":"authentication","dağıtım":"deployment",
          "dokümantasyon":"documentation","belgelendirme":"documentation",
-         "testler":"tests","testleri":"tests"}
+         "testler":"tests","testleri":"tests","araştırma":"research"}
 MAX_SKILL_BYTES=64*1024
 
 def tokens(value):
@@ -89,9 +90,21 @@ def discover(project:Path, home:Path|None=None):
             found[name]={"name":name,"description":description[:300],"path":str(path.resolve())}
     return sorted(found.values(),key=lambda x:x["name"])
 
+def suggest_role(objective:str)->str:
+    """Advisory only; an explicitly assigned Supervisor role is never changed."""
+    words=set(w.lower() for w in WORDS.findall(objective))
+    if words & {"audit","review","reviewer","inspect"}:
+        return "reviewer"
+    if words & {"test","tests","pytest","unittest","regression","coverage","e2e"}:
+        return "tester"
+    if words & {"research","investigate","explore","survey","benchmark","araştırma"}:
+        return "explorer"
+    return "implementer"
+
+
 def route(task:dict, skills:list[dict], max_skills:int=2):
     """Deterministic, abstaining router; metadata is data, never instructions."""
-    if not isinstance(max_skills,int) or not 0<=max_skills<=5:
+    if type(max_skills) is not int or not 0<=max_skills<=5:
         raise SupervisorError("max_skills out of range")
     if max_skills==0:
         return []
@@ -143,6 +156,9 @@ def brief(project:Path,plan:dict,task_id:str,home:Path|None=None,max_skills:int=
     skills=route(task|{"skills":original.get("skills",[])},discover(project,home),max_skills)
     return {
         "task_id":task_id,"role":task["role"],"objective":task["objective"],
+        "routing":{"version":2,"domains":sorted(domains(tokens(task["objective"]))),
+                   "suggested_role":suggest_role(task["objective"]),
+                   "abstained":not bool(skills)},
         "depends_on":task["depends_on"],"read_scope":task["read"],"write_scope":task["write"],
         "selected_skills":[{"name":s["name"],"path":s["path"]} for s in skills],
         "required_result":{
