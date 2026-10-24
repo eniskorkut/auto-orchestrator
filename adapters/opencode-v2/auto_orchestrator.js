@@ -4,12 +4,15 @@
  * create a telemetry run from an event without an explicit matching location.
  */
 import { createHash, randomUUID } from 'node:crypto';
-import { appendFileSync, closeSync, mkdirSync, openSync, readFileSync, lstatSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, lstatSync } from 'node:fs';
+import { execFile } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { dirname, join, resolve } from 'node:path';
 
 export const POLICY = 'Auto-Orchestrator: For non-trivial coding tasks read the auto-orchestrator skill and delegate independent work to native subagents automatically; max three concurrent. Verify results and never invent timings or human time savings. Trivial tasks use one agent.';
 
 const hash = (value) => createHash('sha256').update(String(value)).digest('hex').slice(0, 24);
+const nativeHash = (id) => createHash('sha256').update('opencode|' + id).digest('hex');
 
 /**
  * Overlap among observed native *tool-call* spans only. The OpenCode
@@ -45,6 +48,27 @@ export default {
     const runs = new Map();
     const approvedTools = new Set(['bash', 'shell', 'powershell']);
     const mutatingTools = new Set(['edit', 'write', 'apply_patch', 'multiedit']);
+    // Global installer places this trusted helper alongside the plugin; do
+    // not execute a project-owned script from a native lifecycle callback.
+    const supervisorScript = join(dirname(fileURLToPath(import.meta.url)),
+      '..', 'auto-orchestrator', 'tools', 'supervisor.py');
+    const supervisorDb = directory && join(directory, '.auto-orchestrator', 'supervisor.sqlite3');
+    const observeNative = async (id, state) => {
+      if (!supervisorDb || typeof id !== 'string' || id.length < 4 ||
+          !existsSync(supervisorScript)) return;
+      try {
+        const stat = lstatSync(supervisorDb);
+        if (!stat.isFile() || stat.isSymbolicLink()) return;
+        // Never transmit raw native IDs or project content to the subprocess.
+        const args = [supervisorScript, '--root', directory, 'observe-native',
+          '--platform', 'opencode', '--native-hash', nativeHash(id), '--event', state];
+        await new Promise(resolve => {
+          execFile(process.env.AUTO_ORCHESTRATOR_PYTHON || 'python3', args,
+            { timeout: 2500, maxBuffer: 8192, windowsHide: true },
+            () => resolve());
+        });
+      } catch { /* Missing/unavailable native bridge must fail closed. */ }
+    };
     const policyForRun = () => {
       if (!directory) return null;
       try {
@@ -202,13 +226,18 @@ export default {
         if (!approvedTools.has(name)) return;
         const input = event?.input ?? event?.data?.input ?? {};
         const command = input.command;
-        // OpenCode Desktop v2.0.28 reports shell working directory as
-        // input.workdir, not input.cwd. Missing/foreign cwd is not evidence.
-        const cwd = input.workdir ?? input.cwd;
+        // OpenCode 2.1.x shell may provide only {command}. Explicit cwd must
+        // match. Without cwd, require an authoritative ctx.session.get lookup
+        // (ownsSession already checked it) and the exact allowlisted command.
+        // An event location or process.cwd() alone is never enough.
+        const cwdSupplied = Object.hasOwn(input, 'workdir') ||
+          Object.hasOwn(input, 'cwd');
+        const cwdAllowed = cwdSupplied
+          ? normalized(input.workdir ?? input.cwd) === directory
+          : typeof ctx.session.get === 'function';
         const check = run.policy && typeof command === 'string' &&
           run.policy.required_checks.find(c => c.tool === name && c.command === command);
-        if (!check || typeof id !== 'string' || !id ||
-            normalized(cwd) !== directory) {
+        if (!check || typeof id !== 'string' || !id || !cwdAllowed) {
           // An arbitrary shell command may edit files without an edit/write
           // tool event. Conservatively expire all previous test evidence
           // BEFORE executing it (even when it fails or throws).
@@ -246,7 +275,9 @@ export default {
         run.backgroundDispatches.add(agent);
         run.nativeSpanComplete = false;
       }
-      write(run, { event: 'agent-start', agent_id: agent });
+      write(run, { event: 'agent-start', agent_id: agent,
+        native_hash: nativeHash(id) });
+      await observeNative(id, 'start');
     });
     await ctx.tool.hook('execute.after', async (event) => {
       const sid = session(event), id = callId(event);
@@ -267,8 +298,15 @@ export default {
           event?.result?.metadata?.exitCode ??
           event?.result?.metadata?.exit_code ??
           event?.result?.exitCode ?? event?.metadata?.exitCode;
-        // Tool "completed" without an actual native integer exit code is NOT evidence.
-        if (event.status !== 'completed' || !Number.isInteger(code)) return;
+        // OpenCode 2.1.x may omit the tool's top-level status in execute.after.
+        // The native integer exit code plus a non-error after callback suffices;
+        // any explicit failed/interrupted status or error must still fail closed.
+        const statuses = [event.status, event?.result?.metadata?.status];
+        const rejected = statuses.some(x => ['error', 'failed', 'cancelled', 'interrupted'].includes(x)) ||
+          event?.error != null || event?.result?.error != null;
+        const completed = statuses.includes('completed') ||
+          (statuses.every(x => x == null) && event?.result != null);
+        if (rejected || !completed || !Number.isInteger(code)) return;
         run.checks.set(checkId, { passed: code === 0, tick: ++run.tick });
         write(run, { event: 'check', check_id: checkId,
           exit_code: code, source: 'native-tool', policy_hash: run.policy.hash });
@@ -295,7 +333,11 @@ export default {
       run.invalidatedAt = ++run.tick; // Test results must follow native agent completion.
       // A background task tool ends when the spawn request completes.
       // Its span is NOT proof of the child's total execution time.
-      if (event.status === 'completed') write(run, { event: 'agent-stop', agent_id: agent });
+      if (event.status === 'completed') {
+        write(run, { event: 'agent-stop', agent_id: agent,
+          native_hash: nativeHash(id) });
+        await observeNative(id, 'stop');
+      }
     });
     const controller = new AbortController();
     void (async () => {
