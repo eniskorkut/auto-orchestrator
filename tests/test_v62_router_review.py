@@ -4,7 +4,7 @@ import json
 import tempfile
 import unittest
 
-from tools.router import route, brief
+from tools.router import route, brief, suggest_role
 from tools.review_gate import result_digest, validate_review, ReviewError
 from tools.supervisor import Supervisor, SupervisorError
 
@@ -64,6 +64,12 @@ class RouterV62Tests(unittest.TestCase):
             route({"objective": "API backend", "read": [], "write": [], "skills": "invalid"}, CATALOG)
         with self.assertRaises(SupervisorError):
             self.select("API backend", max_skills=7)
+
+    def test_agent_role_is_advisory_and_deterministic(self):
+        self.assertEqual(suggest_role("Inspect architecture and review security"), "reviewer")
+        self.assertEqual(suggest_role("Write pytest regression tests"), "tester")
+        self.assertEqual(suggest_role("Research alternatives and benchmark agents"), "explorer")
+        self.assertEqual(suggest_role("Fix backend API endpoint"), "implementer")
 
     def test_scope_words_cannot_override_clear_domain_mismatch(self):
         result = self.select("Implement backend API endpoint", read=["assets/animation/layout.tsx"])
