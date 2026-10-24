@@ -822,6 +822,15 @@ test('V6.3 native prompt admission auto-selects OpenCode skill IDs and advises s
       assert.equal(read()[0][1].selected_count,1);
       assert.doesNotMatch(JSON.stringify(read()),/SENSITIVE_CREDENTIAL_TEXT|backend-api|routed-one/);
 
+      const manuallyOverridden = {text:'Implement backend API endpoint',
+        skills:[{id:'skill-motion'}]};
+      await hooks.prompt({sessionID:'routed-one',prompt:manuallyOverridden});
+      assert.deepEqual(manuallyOverridden.skills,[{id:'skill-motion'}]);
+      const manualContext={sessionID:'routed-one',system:[],agent:'build'};
+      await hooks.context(manualContext);
+      assert.equal(manualContext.system.length,1,
+        'old routing hints must not leak into later manual-skill prompts');
+
       const manual = {text:'Implement FastAPI backend API endpoint',
         skills:[{id:'skill-motion'}]};
       await hooks.prompt({sessionID:'manual',prompt:manual});
