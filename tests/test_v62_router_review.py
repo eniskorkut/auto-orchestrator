@@ -70,6 +70,19 @@ class RouterV62Tests(unittest.TestCase):
         self.assertNotIn("animation-vocabulary", result)
         self.assertNotIn("break-ui", result)
 
+    def test_mixed_backend_testing_still_excludes_ui_skill_with_test_mention(self):
+        catalog = [dict(x) for x in CATALOG]
+        catalog[0]["description"] += " includes test coverage"
+        task = {"objective": "Add tests for backend API endpoint", "read": [],
+                "write": [], "skills": []}
+        chosen = [x["name"] for x in route(task, catalog)]
+        self.assertNotIn("animation-vocabulary", chosen)
+        self.assertNotIn("break-ui", chosen)
+
+    def test_turkish_domain_terms_map_to_english_skills(self):
+        self.assertIn("backend-api", self.select("Sunucu API endpoint düzelt"))
+        self.assertIn("animation-vocabulary", self.select("Arayüz animasyon geliştir"))
+
 
 def result():
     return {"summary": "Implemented and verified", "changed_files": ["src/api.py"],
@@ -108,7 +121,10 @@ class SupervisorReviewV62Tests(unittest.TestCase):
         self.assertEqual(self.s.status("run")["tasks"][0]["state"], "running")
         self.assertEqual(self.s.change("run", "backend", lease, "completed",
                                        result=result(), review=review())["state"], "completed")
-        self.assertTrue(self.s.status("run")["require_review"])
+        state=self.s.status("run")
+        self.assertTrue(state["require_review"])
+        self.assertTrue(state["tasks"][0]["review_attested"])
+        self.assertEqual(state["tasks"][0]["review_digest"], result_digest(result()))
 
     def test_old_plans_remain_compatible(self):
         lease = self.claim(False)
