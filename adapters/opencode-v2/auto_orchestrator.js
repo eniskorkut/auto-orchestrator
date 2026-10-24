@@ -299,7 +299,9 @@ export default {
           ids.set(skill.name, skill.id);
           catalog.push({ name: skill.name, description: skill.description });
         }
+        const routeStarted = Date.now();
         const decision = await selectLocal(prompt.text, catalog);
+        const routeLatencyMs = Math.max(0, Date.now() - routeStarted);
         if (!decision) return;
         const picks = decision.selected.filter(name => ids.has(name)).slice(0, 2);
         if (picks.length !== decision.selected.length) return; // no partial trust
@@ -318,7 +320,7 @@ export default {
         write(run, { event: 'route', source: 'native-prompt-hook',
           selected_count: picks.length,
           delegation: promptRouting.get(sid).mode,
-          max_agents: max });
+          max_agents: max, latency_ms: routeLatencyMs });
       } catch {
         // An unavailable native API/helper must not block user prompt admission
         // or turn a guessed location into trusted routing.
