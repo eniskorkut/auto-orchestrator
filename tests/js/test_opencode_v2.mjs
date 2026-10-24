@@ -883,7 +883,9 @@ test('V6.3 prompt admission never modifies explicit skills, missing-helper or un
 });
 
 test('V6.4 event subscription reconnect preserves unfinished state and logs only diagnostics',async()=>{
+  let owner;
   await sandbox(async({project,hooks,emit,read})=>{
+    owner=project;
     await emit(lifecycle('session.execution.started','transient',project));
     const before=read()[0].map(x=>x.event);
     assert.deepEqual(before,['start','diagnostic']);
@@ -893,7 +895,7 @@ test('V6.4 event subscription reconnect preserves unfinished state and logs only
     await emit(lifecycle('session.execution.succeeded','transient',project));
     assert.deepEqual(read()[0].map(x=>x.event),['start','diagnostic','finish']);
     assert.equal(read()[0].at(-1).verified,false);
-  },()=>({location:{directory:undefined}}),{disconnectOnce:true});
+  },()=>({location:{directory:owner}}),{disconnectOnce:true});
 });
 
 test('V6.4 native shell accepts only explicit policy alternates',async()=>{
