@@ -56,6 +56,8 @@ PHRASES = {
     "event sourcing": {"backend": 2, "research": 2},
     "command palette": {"frontend": 2}, "reduced motion": {"accessibility": 2, "animation": 2},
     "check constraint": {"database": 3}, "cold start": {"performance": 2},
+    "pod disruption": {"devops": 3}, "blue green": {"devops": 3},
+    "audit table": {"database": 3},
     "threat model": {"security": 3}, "package lock": {"devops": 2},
     "mutation testing": {"testing": 3}, "container image": {"devops": 3},
     "güvenlik açığı": {"security": 3}, "veritabanı şeması": {"database": 3},
@@ -82,7 +84,8 @@ DOMAIN_TERMS = {
                  "input", "toggle", "badge", "scroll", "viewport", "px",
                  "pricing", "tab", "tabs", "combobox", "aria", "renderer",
                  "sticky", "header", "overlap", "skeleton", "shimmer", "bundle",
-                 "site", "carousel", "swipe", "fuzzy", "palette"},
+                 "site", "carousel", "swipe", "fuzzy", "palette", "autocomplete",
+                 "debounce"},
     "animation": {"animation", "motion", "transition", "micro", "interaction",
                   "spring", "easing", "keyframe", "stagger", "fade", "slide",
                   "toast", "accordion", "hover", "jank", "gsap", "framer",
@@ -158,7 +161,8 @@ TERM_WEIGHTS = {
     "sha": 2, "nonce": 2, "threat": 2, "snapshot": 2, "load": 2,
     "carousel": 2, "swipe": 2, "fuzzy": 2, "palette": 2, "parallax": 2,
     "confetti": 2, "optimistic": 2, "locking": 2, "normalize": 2, "phone": 2,
-    "migrate": 2, "grpc": 2, "cold": 2,
+    "migrate": 2, "grpc": 2, "cold": 2, "autocomplete": 2, "debounce": 2,
+    "reranker": 2, "kb": 2, "digest": 2, "pod": 2, "blue": 2, "green": 2,
     "authentication": 2, "authorization": 2, "vulnerability": 2, "xss": 2,
     "csrf": 2, "replay": 2, "leak": 2, "leaked": 2, "harden": 2,
     "pytest": 2, "playwright": 2, "coverage": 2, "e2e": 2, "fixture": 2,
@@ -211,6 +215,7 @@ ALIASES = {"arayüz": "ui", "arayüzü": "ui", "arayüzdeki": "ui",
            "kaydırma": "scroll", "kaydırmasını": "scroll", "tablo": "table",
            "vektör": "vector", "aramasında": "search", "yeniden": "rerank",
            "sıralama": "rerank", "anahtarı": "key", "idempotency": "idempotency",
+           "reranker": "rerank",
            "geliştir": "develop", "geliştirir": "develop"}
 
 MAX_SKILL_BYTES = 64 * 1024
@@ -236,7 +241,7 @@ ACTIONS = {
                  "check", "rotate", "add", "remove", "validate", "protect",
                  "escape", "verify", "configure", "pin", "threat"},
     "testing": {"write", "add", "fix", "increase", "run", "create", "update",
-                "remove", "cover", "snapshot", "develop"},
+                "remove", "cover", "snapshot", "develop", "stabilize"},
     "devops": {"containerize", "deploy", "set", "configure", "fix", "add",
                "reduce", "optimize", "create", "update", "remove", "publish",
                "build", "provision", "trace", "prevent", "write", "pin", "develop"},
@@ -530,6 +535,8 @@ def route(task: dict, skills: list[dict], max_skills: int = 2):
             continue
         primary = _primary_domain(skill_domains)
         name_domains = domains(name_words)
+        if primary == "mobile" and not (objective_tokens & {"ios", "android", "swift", "swiftui", "kotlin"}):
+            continue
         if not manual and task_domains and name_domains and not (name_domains & set(task_domains)):
             # A platform-specific skill name (mobile-native, write-swift) must
             # not win through an incidental description domain.

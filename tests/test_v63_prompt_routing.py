@@ -67,6 +67,15 @@ class PromptRouterV63(unittest.TestCase):
         self.assertNotIn("mobile-native", x["selected"])
         self.assertNotIn("write-swift", x["selected"])
 
+    def test_turkish_mobile_web_prompt_excludes_native_swift_skill(self):
+        catalog = [
+            {"name": "frontend-react", "description": "Build React responsive UI layouts and CSS"},
+            {"name": "mobile-swift", "description": "Build mobile native iOS Swift interfaces"},
+        ]
+        x = select_prompt({"objective": "Mobil menüdeki taşmayı düzelt", "skills": catalog})
+        self.assertIn("frontend-react", x["selected"])
+        self.assertNotIn("mobile-swift", x["selected"])
+
     def test_bad_inputs_fail_closed(self):
         for payload in (
             {"objective": None, "skills": []},
