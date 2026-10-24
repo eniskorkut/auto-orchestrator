@@ -519,6 +519,13 @@ def route(task: dict, skills: list[dict], max_skills: int = 2):
     if not isinstance(explicit, list) or any(not isinstance(x, str) for x in explicit):
         raise SupervisorError("Explicit skills must be a list of names")
     selected = set(explicit)
+    # Negation by intent: incidental software vocabulary inside an artistic
+    # writing request is not a request to build or deploy software.
+    if not selected and re.search(
+        r"(?i)^\s*(?:write|compose|tell|translate)\s+(?:(?:a|an|the)\s+)?"
+        r"(?:limerick|poem|haiku|joke|song|story)\b", objective
+    ):
+        return []
     if not skills:
         return []
 
