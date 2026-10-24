@@ -115,6 +115,11 @@ export default {
               ids.has(check.id) || !approvedTools.has(check.tool) ||
               typeof check.command !== 'string' || check.command.length < 1 ||
               check.command.length > 500 || /[\r\n]/.test(check.command)) return null;
+          if (check.alternates != null && (!Array.isArray(check.alternates) ||
+              check.alternates.length > 4 ||
+              check.alternates.some(cmd => typeof cmd !== 'string' || !cmd ||
+                cmd.length > 500 || /[\\r\\n]/.test(cmd) || cmd === check.command) ||
+              new Set(check.alternates).size !== check.alternates.length)) return null;
           ids.add(check.id);
         }
         return { ...policy, hash: createHash('sha256').update(bytes).digest('hex') };
@@ -351,7 +356,8 @@ export default {
           ? normalized(input.workdir ?? input.cwd) === directory
           : typeof ctx.session.get === 'function';
         const check = run.policy && typeof command === 'string' &&
-          run.policy.required_checks.find(c => c.tool === name && c.command === command);
+          run.policy.required_checks.find(c => c.tool === name &&
+            (c.command === command || c.alternates?.includes(command)));
         if (!check || typeof id !== 'string' || !id || !cwdAllowed) {
           // An arbitrary shell command may edit files without an edit/write
           // tool event. Conservatively expire all previous test evidence
