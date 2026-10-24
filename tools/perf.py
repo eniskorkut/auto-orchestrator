@@ -303,6 +303,8 @@ def diagnose(run_id: str, events: list[dict]) -> dict:
             terminal = event.get('status')
     if terminal:
         category = 'terminal_recorded'
+    elif 'session_deleted_without_terminal' in reasons:
+        category = 'missing_terminal_session_deleted'
     elif starts:
         category = 'missing_terminal_open_native_spans'
     elif any(x.startswith('event_stream_') for x in reasons):

@@ -82,6 +82,12 @@ class EvidenceDiagnostics(unittest.TestCase):
             self.assertEqual(data["categories"]["missing_terminal_reason_unknown"],1)
             self.assertEqual(data["categories"]["terminal_recorded"],1)
 
+    def test_session_deleted_has_specific_classification(self):
+        events=[{"event":"start","time":1.0,"platform":"opencode"},
+                {"event":"diagnostic","time":2.0,"reason":"session_deleted_without_terminal"}]
+        self.assertEqual(diagnose("r",events)["classification"],
+                         "missing_terminal_session_deleted")
+
     def test_terminal_record_is_distinct(self):
         events=[{"event":"start","time":1.0,"platform":"opencode"},
                 {"event":"finish","time":2.0,"status":"failed","verified":False}]

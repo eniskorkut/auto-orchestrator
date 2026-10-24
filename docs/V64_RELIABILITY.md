@@ -17,7 +17,7 @@ python tools/perf.py --root PROJECT diagnose --latest --json
 python tools/perf.py --root PROJECT report --latest --json
 ```
 
-Possible classifications: `terminal_recorded`, `missing_terminal_open_native_spans`, `missing_terminal_subscription_interrupted`, `missing_terminal_session_ownership_lost`, `missing_terminal_plugin_unloaded`, `missing_terminal_reason_unknown`.
+Possible classifications: `terminal_recorded`, `missing_terminal_session_deleted`, `missing_terminal_open_native_spans`, `missing_terminal_subscription_interrupted`, `missing_terminal_session_ownership_lost`, `missing_terminal_plugin_unloaded`, `missing_terminal_reason_unknown`.
 All diagnostic metadata is categorical. No raw prompts, API keys, native IDs or exception strings are persisted.
 
 ## Quality Gate: exact explicit command alternatives
