@@ -149,6 +149,9 @@ class Supervisor:
         CREATE TABLE IF NOT EXISTS native_pending_starts (
           platform TEXT NOT NULL, native_hash TEXT NOT NULL,
           observed REAL NOT NULL, PRIMARY KEY(platform,native_hash));
+        CREATE TABLE IF NOT EXISTS native_pending_stops (
+          platform TEXT NOT NULL, native_hash TEXT NOT NULL,
+          observed REAL NOT NULL, PRIMARY KEY(platform,native_hash));
         """)
         native_cols={row["name"] for row in self.conn.execute("PRAGMA table_info(native_bindings)")}
         if "started" not in native_cols:
@@ -280,9 +283,18 @@ class Supervisor:
             raise SupervisorError("Invalid native ID")
         return hashlib.sha256((platform+"|"+native_id).encode()).hexdigest()
 
-    def bind_native(self,run,task_id,lease,platform,native_id):
-        """Bind a claimed attempt to the real native ID returned by the client."""
-        digest=self.native_hash(platform,native_id)
+    @staticmethod
+    def validate_native_hash(platform, digest):
+        if platform not in ("codex","cursor","opencode") or not isinstance(digest,str) or not re.fullmatch(r"[0-9a-f]{64}",digest):
+            raise SupervisorError("Invalid native platform or hash")
+        return digest
+
+    def bind_native(self,run,task_id,lease,platform,native_id=None,native_hash=None):
+        """Bind an attempt by native ID or its platform-scoped SHA256 digest."""
+        if (native_id is None) == (native_hash is None):
+            raise SupervisorError("Exactly one native ID or native hash is required")
+        digest=(self.native_hash(platform,native_id) if native_id is not None
+                else self.validate_native_hash(platform,native_hash))
         identifier(task_id)
         def op():
             rows=self._tasks(run)
@@ -316,22 +328,34 @@ class Supervisor:
               SELECT observed FROM native_pending_starts
               WHERE platform=? AND native_hash=?
             """,(platform,digest)).fetchone()
-            if pending and item["started"] is not None and (
+            accepted_start=bool(pending and item["started"] is not None and (
                 item["started"]-2 <= pending["observed"] <= time.time()+2 and
-                time.time()-pending["observed"] <= 600):
+                time.time()-pending["observed"] <= 600))
+            stop=self.conn.execute("""
+              SELECT observed FROM native_pending_stops
+              WHERE platform=? AND native_hash=?
+            """,(platform,digest)).fetchone()
+            accepted_stop=bool(accepted_start and stop and
+                pending["observed"] <= stop["observed"] <= time.time()+2 and
+                time.time()-stop["observed"] <= 600)
+            if accepted_start:
                 self.conn.execute("""
-                  UPDATE native_bindings SET started=1
+                  UPDATE native_bindings SET started=1, stopped=?
                   WHERE run_id=? AND task_id=? AND attempt=?
-                """,(run,task_id,item["attempts"]))
-            self.conn.execute("""
-              DELETE FROM native_pending_starts WHERE platform=? AND native_hash=?
-            """,(platform,digest))
+                """,(int(accepted_stop),run,task_id,item["attempts"]))
+            for table in ("native_pending_starts","native_pending_stops"):
+                self.conn.execute(f"""
+                  DELETE FROM {table} WHERE platform=? AND native_hash=?
+                """,(platform,digest))
             return {"bound":True,"idempotent":False,"task_id":task_id,"attempt":item["attempts"]}
         return self.transaction(op)
 
     def observe_native(self,platform,native_id,event):
-        """A trusted hook records a stop; it NEVER marks the task completed."""
-        digest=self.native_hash(platform,native_id)
+        return self.observe_hash(platform,self.native_hash(platform,native_id),event)
+
+    def observe_hash(self,platform,digest,event):
+        """Trusted native lifecycle evidence only; NEVER complete a task here."""
+        self.validate_native_hash(platform,digest)
         if event not in ("start","stop"):
             raise SupervisorError("Unknown native observation")
         def op():
@@ -342,14 +366,33 @@ class Supervisor:
               WHERE b.platform=? AND b.native_hash=?
             """,(platform,digest)).fetchone()
             if not binding or binding["attempt"]!=binding["attempts"] or binding["state"] not in ACTIVE:
-                if event=="start" and not binding:
+                if not binding:
                     now=time.time()
-                    self.conn.execute("DELETE FROM native_pending_starts WHERE observed<?",(now-600,))
-                    self.conn.execute("""
-                      INSERT INTO native_pending_starts(platform,native_hash,observed)
-                      VALUES (?,?,?)
-                      ON CONFLICT(platform,native_hash) DO UPDATE SET observed=excluded.observed
-                    """,(platform,digest,now))
+                    for table in ("native_pending_starts","native_pending_stops"):
+                        self.conn.execute(f"DELETE FROM {table} WHERE observed<?",(now-600,))
+                    # Never collect unmatched starts when no supervised attempt is running.
+                    active=self.conn.execute("""
+                      SELECT 1 FROM tasks t JOIN runs r ON t.run_id=r.id
+                      WHERE r.native_supervision=1 AND t.state='running' LIMIT 1
+                    """).fetchone()
+                    if active and event=="start":
+                        self.conn.execute("""
+                          INSERT INTO native_pending_starts(platform,native_hash,observed)
+                          VALUES (?,?,?)
+                          ON CONFLICT(platform,native_hash) DO UPDATE SET observed=excluded.observed
+                        """,(platform,digest,now))
+                        self.conn.execute("DELETE FROM native_pending_stops WHERE platform=? AND native_hash=?",(platform,digest))
+                    elif active and event=="stop":
+                        pending=self.conn.execute("""
+                          SELECT observed FROM native_pending_starts
+                          WHERE platform=? AND native_hash=?
+                        """,(platform,digest)).fetchone()
+                        if pending and pending["observed"]<=now:
+                            self.conn.execute("""
+                              INSERT INTO native_pending_stops(platform,native_hash,observed)
+                              VALUES (?,?,?)
+                              ON CONFLICT(platform,native_hash) DO UPDATE SET observed=excluded.observed
+                            """,(platform,digest,now))
                 return {"matched":False}
             if event=="start" and not binding["started"]:
                 self.conn.execute("""
@@ -424,9 +467,13 @@ def main(argv=None):
         q.add_argument("--lease",required=True);q.add_argument("--result");q.add_argument("--reason")
     bind=sub.add_parser("bind-native");bind.add_argument("--run-id",required=True)
     bind.add_argument("--task-id",required=True);bind.add_argument("--lease",required=True)
-    bind.add_argument("--platform",required=True);bind.add_argument("--native-id",required=True)
+    bind.add_argument("--platform",required=True)
+    bind_ids=bind.add_mutually_exclusive_group(required=True)
+    bind_ids.add_argument("--native-id");bind_ids.add_argument("--native-hash")
     observe=sub.add_parser("observe-native");observe.add_argument("--platform",required=True)
-    observe.add_argument("--native-id",required=True);observe.add_argument("--event",choices=["start","stop"],required=True)
+    observe_ids=observe.add_mutually_exclusive_group(required=True)
+    observe_ids.add_argument("--native-id");observe_ids.add_argument("--native-hash")
+    observe.add_argument("--event",choices=["start","stop"],required=True)
     cancel=sub.add_parser("cancel");cancel.add_argument("--run-id",required=True);cancel.add_argument("--task-id",required=True)
     retry=sub.add_parser("retry");retry.add_argument("--run-id",required=True);retry.add_argument("--task-id",required=True)
     retry.add_argument("--reason",required=True)
@@ -436,8 +483,10 @@ def main(argv=None):
         if a.command=="init": result=s.init(a.run_id,json.loads(Path(a.plan).read_text(encoding="utf-8")))
         elif a.command=="claim": result=s.claim(a.run_id)
         elif a.command=="status": result=s.status(a.run_id)
-        elif a.command=="bind-native": result=s.bind_native(a.run_id,a.task_id,a.lease,a.platform,a.native_id)
-        elif a.command=="observe-native": result=s.observe_native(a.platform,a.native_id,a.event)
+        elif a.command=="bind-native": result=s.bind_native(a.run_id,a.task_id,a.lease,a.platform,a.native_id,a.native_hash)
+        elif a.command=="observe-native":
+            result=(s.observe_native(a.platform,a.native_id,a.event) if a.native_id is not None
+                    else s.observe_hash(a.platform,a.native_hash,a.event))
         elif a.command=="cancel": result=s.cancel(a.run_id,a.task_id)
         elif a.command=="retry": result=s.retry(a.run_id,a.task_id,a.reason)
         else:
