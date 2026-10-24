@@ -39,6 +39,13 @@ DOMAIN_TERMS={
             "statistics","visualization","csv","etl","warehouse"},
     "docs":{"documentation","docs","readme","manual","changelog","tutorial"},
 }
+# Small controlled translation map for common Turkish task objectives.
+ALIASES={"arayüz":"ui","arayüzü":"ui","animasyon":"animation",
+         "sunucu":"server","veritabanı":"database","veritabanı":"database",
+         "güvenlik":"security","yetkilendirme":"authorization",
+         "kimlik":"authentication","dağıtım":"deployment",
+         "dokümantasyon":"documentation","belgelendirme":"documentation",
+         "testler":"tests","testleri":"tests"}
 MAX_SKILL_BYTES=64*1024
 
 def tokens(value):
@@ -47,7 +54,7 @@ def tokens(value):
     # CamelCase, slash paths, and hyphenated skill names are split into words.
     value=re.sub(r"([a-z0-9])([A-Z])",r"\1 \2",value)
     value=re.sub(r"[/_.+\-]", " ", value)
-    return {w.lower() for w in WORDS.findall(value)
+    return {ALIASES.get(w.lower(),w.lower()) for w in WORDS.findall(value)
             if w.lower() not in STOP and len(w)>=2}
 
 def domains(words):
@@ -101,10 +108,14 @@ def route(task:dict, skills:list[dict], max_skills:int=2):
         name=item["name"]
         name_words=tokens(name)
         description_words=tokens(item.get("description",""))
+        name_domains=domains(name_words)
         skill_domains=domains(name_words|description_words)
         manual=name in selected
-        # A backend API request must not accidentally select a UI/animation
-        # skill through generic terms in its description.
+        # Name-derived domain is more reliable than incidental descriptor
+        # terms. A UI-named skill mentioning tests is not a backend testing
+        # skill merely because the task also asks for tests.
+        if not manual and task_domains and name_domains and not (task_domains & name_domains):
+            continue
         if not manual and task_domains and skill_domains and not (task_domains & skill_domains):
             continue
         name_hits=objective & name_words
