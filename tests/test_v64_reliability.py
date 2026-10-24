@@ -3,7 +3,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from tools.perf import analyze, diagnose, append_event, load_events, path_for, EventError
+from tools.perf import analyze, diagnose, append_event, load_events, path_for, EventError, main as perf_main
 from tools.benchmark import compare, BenchmarkError
 from tools.quality_gate import validate_policy, GateError
 
@@ -31,6 +31,56 @@ class EvidenceDiagnostics(unittest.TestCase):
         self.assertEqual(d["classification"],"missing_terminal_subscription_interrupted")
         self.assertFalse(d["finished"])
         self.assertIsNone(analyze("r",events).elapsed_seconds)
+
+    def test_advice_is_separate_from_actual_native_dispatch(self):
+        events=[
+            {"event":"start","time":1.0,"platform":"opencode"},
+            {"event":"route","time":1.1,"delegation":"single",
+             "max_agents":1,"latency_ms":153},
+            {"event":"agent-start","time":2.0,"agent_id":"child1"},
+            {"event":"agent-stop","time":3.0,"agent_id":"child1"},
+            {"event":"finish","time":4.0,"status":"success","verified":False},
+        ]
+        summary=analyze("run",events)
+        self.assertEqual(summary.route_latency_ms,153)
+        self.assertEqual(summary.observed_native_starts,1)
+        self.assertEqual(summary.observed_max_native_concurrency,1)
+        self.assertFalse(summary.routing_advice_followed)
+        self.assertFalse(summary.verified)
+
+    def test_parallel_recommendation_caps_concurrent_not_total(self):
+        events=[
+            {"event":"start","time":1.0,"platform":"opencode"},
+            {"event":"route","time":1.1,"delegation":"consider-parallel",
+             "max_agents":2,"latency_ms":99},
+            {"event":"agent-start","time":2.0,"agent_id":"a"},
+            {"event":"agent-start","time":2.2,"agent_id":"b"},
+            {"event":"agent-stop","time":3.0,"agent_id":"a"},
+            {"event":"agent-start","time":3.1,"agent_id":"c"},
+            {"event":"agent-stop","time":4.0,"agent_id":"b"},
+            {"event":"agent-stop","time":5.0,"agent_id":"c"},
+            {"event":"finish","time":6.0,"status":"success","verified":False},
+        ]
+        summary=analyze("run",events)
+        self.assertEqual(summary.observed_native_starts,3)
+        self.assertEqual(summary.observed_max_native_concurrency,2)
+        self.assertTrue(summary.routing_advice_followed)
+
+    def test_audit_lists_incomplete_without_synthetic_finish(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            append_event(root,"unfinished","start",platform="opencode",at=1)
+            append_event(root,"finished","start",platform="opencode",at=2)
+            append_event(root,"finished","finish",status="failed",at=3)
+            from unittest.mock import patch
+            from io import StringIO
+            with patch("sys.stdout",new_callable=StringIO) as output:
+                code=perf_main(["--root",str(root),"audit","--json"])
+            self.assertEqual(code,0)
+            data=json.loads(output.getvalue())
+            self.assertEqual(data["run_count"],2)
+            self.assertEqual(data["categories"]["missing_terminal_reason_unknown"],1)
+            self.assertEqual(data["categories"]["terminal_recorded"],1)
 
     def test_terminal_record_is_distinct(self):
         events=[{"event":"start","time":1.0,"platform":"opencode"},
