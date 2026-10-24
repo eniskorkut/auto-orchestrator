@@ -12,9 +12,9 @@ import os
 import time
 from pathlib import Path
 try:
-    from tools.review_gate import ReviewError, validate_review
+    from tools.review_gate import ReviewError, code_digest, validate_review
 except ModuleNotFoundError:
-    from review_gate import ReviewError, validate_review
+    from review_gate import ReviewError, code_digest, validate_review
 
 ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$")
 ROLES = {"explorer", "implementer", "tester", "reviewer"}
@@ -120,6 +120,7 @@ def validate_result(value):
 
 class Supervisor:
     def __init__(self, root):
+        self.root = Path(root).resolve()
         p = Path(root)/".auto-orchestrator"/"supervisor.sqlite3"
         p.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
         self.conn=sqlite3.connect(p,timeout=20,isolation_level=None)
@@ -273,7 +274,8 @@ class Supervisor:
             if action=="completed" and settings["require_review"]:
                 try:
                     review_proof=validate_review(review,task_id=task_id,
-                        attempt=task["attempts"],result=result)
+                        attempt=task["attempts"],result=result,
+                        code_sha256=code_digest(self.root,result["changed_files"]))
                 except ReviewError as exc:
                     raise SupervisorError("Quality review rejected: "+str(exc)) from exc
             if supervised:

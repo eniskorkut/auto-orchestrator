@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from pathlib import Path
 
 
 class ReviewError(ValueError):
@@ -29,8 +30,30 @@ def result_digest(result: dict) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def code_digest(root, changed_files) -> str:
+    """Stable digest of the reviewed files' current contents.
+
+    The review is still caller-attested metadata. This digest prevents a stale
+    review from being reused after the reviewed files change.
+    """
+    if not isinstance(changed_files, list) or any(
+            not isinstance(x, str) or not x or x.startswith("/")
+            or ".." in Path(x).parts for x in changed_files):
+        raise ReviewError("Invalid changed_files for code digest")
+    entries = []
+    base = Path(root)
+    for relative in sorted(set(changed_files)):
+        path = base / relative
+        try:
+            data = path.read_bytes() if path.is_file() and not path.is_symlink() else b""
+        except OSError:
+            data = b""
+        entries.append(relative + "\0" + hashlib.sha256(data).hexdigest())
+    return hashlib.sha256("\n".join(entries).encode("utf-8")).hexdigest()
+
+
 def validate_review(review: dict, *, task_id: str, attempt: int,
-                    result: dict) -> dict:
+                    result: dict, code_sha256: str) -> dict:
     """Reject stale, unsupported, unreviewed, or failed evidence."""
     if not isinstance(review, dict) or review.get("version") != 1:
         raise ReviewError("A version 1 review artifact is required")
@@ -39,6 +62,9 @@ def validate_review(review: dict, *, task_id: str, attempt: int,
     digest = review.get("result_sha256")
     if not isinstance(digest, str) or not DIGEST.fullmatch(digest) or digest != result_digest(result):
         raise ReviewError("Review digest does not match the submitted result")
+    reviewed_code = review.get("code_sha256")
+    if not isinstance(reviewed_code, str) or not DIGEST.fullmatch(reviewed_code) or reviewed_code != code_sha256:
+        raise ReviewError("Review does not match the current reviewed files")
     if review.get("verdict") != "approved":
         raise ReviewError("Review verdict is not approved")
     tests = result.get("tests")

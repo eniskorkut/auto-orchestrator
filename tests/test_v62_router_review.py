@@ -3,9 +3,10 @@ import hashlib
 import json
 import tempfile
 import unittest
+from pathlib import Path
 
 from tools.router import route, brief, suggest_role
-from tools.review_gate import result_digest, validate_review, ReviewError
+from tools.review_gate import code_digest, result_digest, validate_review, ReviewError
 from tools.supervisor import Supervisor, SupervisorError
 
 
@@ -95,10 +96,11 @@ def result():
             "tests": [{"name": "pytest", "status": "passed"}], "findings": []}
 
 
-def review(task_id="backend", attempt=1, payload=None):
+def review(task_id="backend", attempt=1, payload=None, root=None):
     payload = result() if payload is None else payload
     return {"version": 1, "task_id": task_id, "attempt": attempt,
             "result_sha256": result_digest(payload), "verdict": "approved",
+            "code_sha256": code_digest(root, payload["changed_files"]),
             "checks": [{"name": "pytest", "status": "passed"}], "findings": []}
 
 
@@ -120,13 +122,16 @@ class SupervisorReviewV62Tests(unittest.TestCase):
         self.s.init("run", plan(required))
         return self.s.claim("run")["claimed"][0]["lease"]
 
+    def review(self, payload=None):
+        return review(payload=payload, root=self.tmp.name)
+
     def test_opt_in_review_required_before_completion(self):
         lease = self.claim()
         with self.assertRaisesRegex(SupervisorError, "Quality review rejected"):
             self.s.change("run", "backend", lease, "completed", result=result())
         self.assertEqual(self.s.status("run")["tasks"][0]["state"], "running")
         self.assertEqual(self.s.change("run", "backend", lease, "completed",
-                                       result=result(), review=review())["state"], "completed")
+                                       result=result(), review=self.review())["state"], "completed")
         state=self.s.status("run")
         self.assertTrue(state["require_review"])
         self.assertTrue(state["tasks"][0]["review_attested"])
@@ -139,18 +144,18 @@ class SupervisorReviewV62Tests(unittest.TestCase):
 
     def test_stale_attempt_or_modified_result_rejected(self):
         lease = self.claim()
-        bad = review()
+        bad = self.review()
         bad["attempt"] = 2
         with self.assertRaisesRegex(SupervisorError, "Quality review rejected"):
             self.s.change("run", "backend", lease, "completed", result=result(), review=bad)
         changed = result()
         changed["summary"] += " modified"
         with self.assertRaisesRegex(SupervisorError, "Review digest"):
-            self.s.change("run", "backend", lease, "completed", result=changed, review=review())
+            self.s.change("run", "backend", lease, "completed", result=changed, review=self.review())
 
     def test_blockers_or_failed_tests_rejected(self):
         lease = self.claim()
-        with_blocker = review()
+        with_blocker = self.review()
         with_blocker["findings"] = [{"severity": "high", "status": "open",
                                    "summary": "Unresolved auth bypass"}]
         with self.assertRaisesRegex(SupervisorError, "Unresolved"):
@@ -159,11 +164,11 @@ class SupervisorReviewV62Tests(unittest.TestCase):
         skipped["tests"] = [{"name": "pytest", "status": "skipped"}]
         with self.assertRaisesRegex(SupervisorError, "passing tests"):
             self.s.change("run", "backend", lease, "completed", result=skipped,
-                          review=review(payload=skipped))
+                          review=self.review(payload=skipped))
 
     def test_mismatched_check_or_scope_rejected(self):
         lease = self.claim()
-        bad = review()
+        bad = self.review()
         bad["checks"][0]["name"] = "unrelated"
         with self.assertRaisesRegex(SupervisorError, "checks differ"):
             self.s.change("run", "backend", lease, "completed", result=result(), review=bad)
@@ -171,11 +176,22 @@ class SupervisorReviewV62Tests(unittest.TestCase):
         outside["changed_files"] = ["README.md"]
         with self.assertRaisesRegex(SupervisorError, "write scope"):
             self.s.change("run", "backend", lease, "completed", result=outside,
-                          review=review(payload=outside))
+                          review=self.review(payload=outside))
 
     def test_review_plan_requires_boolean(self):
         with self.assertRaisesRegex(SupervisorError, "require_review"):
             self.s.init("broken", plan("true"))
+
+    def test_code_change_after_review_invalidates_attestation(self):
+        lease = self.claim()
+        root = Path(self.tmp.name)
+        (root / "src").mkdir()
+        (root / "src" / "api.py").write_text("v1", encoding="utf-8")
+        payload = result()
+        artifact = self.review(payload)
+        (root / "src" / "api.py").write_text("v2", encoding="utf-8")
+        with self.assertRaisesRegex(SupervisorError, "current reviewed files"):
+            self.s.change("run", "backend", lease, "completed", result=payload, review=artifact)
 
     def test_review_no_native_stop_bypass(self):
         supervised = plan(True)
@@ -183,7 +199,7 @@ class SupervisorReviewV62Tests(unittest.TestCase):
         self.s.init("supervised", supervised)
         lease = self.s.claim("supervised")["claimed"][0]["lease"]
         with self.assertRaisesRegex(SupervisorError, "Native termination"):
-            self.s.change("supervised", "backend", lease, "completed", result=result(), review=review())
+            self.s.change("supervised", "backend", lease, "completed", result=result(), review=self.review())
 
 
 if __name__ == "__main__":
