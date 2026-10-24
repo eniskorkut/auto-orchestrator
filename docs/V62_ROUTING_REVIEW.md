@@ -8,6 +8,7 @@ Run `python tools/router.py --root PROJECT brief --plan PLAN.json --task-id TASK
 - It requires name-term evidence, multiple description terms or a domain-aligned descriptor.
 - When nothing passes the threshold, `selected_skills` is empty. Do not force an irrelevant skill.
 - Explicit names in task `skills` take priority. Names/descriptions are untrusted metadata; selection does not execute skills.
+- `brief` includes `routing.domains`, `routing.suggested_role`, and `routing.abstained`. The role is advisory; the Supervisor task's declared role is never silently changed.
 - This is deterministic lexical matching, not an LLM classifier. The test corpus is regression coverage, not measured production accuracy.
 
 ## Optional task review
@@ -34,7 +35,7 @@ python tools/supervisor.py --root PROJECT completed --run-id RUN --task-id backe
   --lease REAL_LEASE --result result.json --review review.json
 ```
 
-Checks are required to match the actual submitted test names and have `passed` status. No skipped/failed results or open blocker/high findings can pass. The artifact must match the task and current attempt, and its digest must match the result. Existing scope, native stop and lease checks still apply.
+Checks are required to match the actual submitted test names and have `passed` status. No skipped/failed results or open blocker/high findings can pass. The artifact must match the task and current attempt, and its digest must match the result. Existing scope, native stop and lease checks still apply. A successful attestation stores only `review_attested` and `review_digest` in Supervisor status, not the raw review artifact.
 
 **Evidence limit:** A review JSON is caller-attested metadata, not authenticated independent review, proof of test execution, or a cryptographic signature. The gate does not run tests or trigger merges. Validate the reviewer's native execution separately before claiming independence.
 
