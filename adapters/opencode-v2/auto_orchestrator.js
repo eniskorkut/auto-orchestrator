@@ -59,7 +59,10 @@ export default {
     // Stdout is bounded. Raw user text is only transmitted via local stdin,
     // never argv, shell, telemetry, or a provider. No shell execution.
     const selectLocal = async (objective, catalog) => {
-      if (!existsSync(routerScript)) return null;
+      try {
+        const stat = lstatSync(routerScript);
+        if (!stat.isFile() || stat.isSymbolicLink()) return null;
+      } catch { return null; }
       const input = JSON.stringify({ objective, skills: catalog });
       if (Buffer.byteLength(input, 'utf8') > 100000) return null;
       return await new Promise(resolve => {
@@ -127,6 +130,7 @@ export default {
     // A location transition or unavailable session lookup invalidates prior
     // evidence. The abandoned run remains incomplete (no fabricated finish).
     const abandon = (sid) => {
+      promptRouting.delete(sid);
       const run = runs.get(sid);
       if (!run || run.done) return;
       run.done = true;
@@ -246,15 +250,22 @@ export default {
     // native subagent dispatch (which remains under model/permission control).
     await ctx.session.hook('prompt', async (event) => {
       const sid = event?.sessionID, prompt = event?.prompt;
-      if (!directory || typeof sid !== 'string' || typeof prompt?.text !== 'string' ||
+      if (typeof sid !== 'string' || !sid) return;
+      // The user controls manual skill attachments. Clear any previous
+      // advisory state before evaluating each new user prompt in this session.
+      promptRouting.delete(sid);
+      if (!directory || typeof prompt?.text !== 'string' ||
           !prompt.text.trim() || prompt.text.length > 12000 ||
           (Array.isArray(prompt.skills) && prompt.skills.length > 0) ||
           typeof ctx.session.get !== 'function' || typeof ctx.skill?.list !== 'function') return;
       try {
         const session = await ctx.session.get({ sessionID: sid });
         const info = session?.data ?? session;
-        if (normalized(info?.location?.directory) !== directory ||
-            info?.parentID || info?.parentId) return;
+        if (normalized(info?.location?.directory) !== directory) {
+          abandon(sid);
+          return;
+        }
+        if (info?.parentID || info?.parentId) return;
         const available = await ctx.skill.list();
         const list = Array.isArray(available) ? available :
           (Array.isArray(available?.data) ? available.data :
