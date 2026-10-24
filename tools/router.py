@@ -599,11 +599,68 @@ def brief(project: Path, plan: dict, task_id: str, home: Path | None = None,
     }
 
 
+
+def delegation_decision(objective: str) -> dict:
+    """Advisory only. Native IDE/model retains all dispatch decisions.
+
+    Bias toward a single agent: V6.2 measured negative gains for tiny work.
+    Count explicitly enumerated independent tasks, never assume word count alone
+    implies that parallel *writing* is safe.
+    """
+    if not isinstance(objective, str):
+        raise SupervisorError("objective must be a string")
+    text = objective.strip()
+    if not text:
+        return {"mode": "single", "max_agents": 1, "reason": "empty"}
+    numbered = re.findall(r"(?m)^\\s*(?:[-*]\\s+|[1-9][0-9]?[.)]\\s+)\\S", text)
+    marked = bool(re.search(r"(?i)\\b(parallel|independent|independently|concurrent|paralel|bağımsız|eşzamanlı)\\b", text))
+    files = set(re.findall(r"(?i)\\b[\\w.-]+/([\\w.-]+/[\\w.-]+)\\b", text))
+    tasks = len(numbered)
+    if marked and tasks >= 2:
+        return {"mode": "consider-parallel", "max_agents": min(3, tasks), "reason": "explicit-independent-items"}
+    if marked and len(files) >= 2:
+        return {"mode": "consider-parallel", "max_agents": min(3, len(files)), "reason": "explicit-separated-paths"}
+    return {"mode": "single", "max_agents": 1, "reason": "no-proven-independent-work"}
+
+
+def select_prompt(payload: dict) -> dict:
+    """Route one in-memory prompt against an IDE-provided catalog.
+
+    Input/output do not include raw task text in the returned JSON. This call
+    never opens files, creates processes, or persists prompts.
+    """
+    if not isinstance(payload, dict):
+        raise SupervisorError("select input must be an object")
+    objective = payload.get("objective")
+    catalog = payload.get("skills")
+    if not isinstance(objective, str) or len(objective) > 12000:
+        raise SupervisorError("objective must be a string up to 12000 characters")
+    if not isinstance(catalog, list) or len(catalog) > 128:
+        raise SupervisorError("skill catalog must be <= 128 items")
+    safe = []
+    for item in catalog:
+        if not isinstance(item, dict):
+            raise SupervisorError("invalid catalog entry")
+        name, description = item.get("name"), item.get("description")
+        if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}", name):
+            raise SupervisorError("invalid catalog skill name")
+        if not isinstance(description, str) or len(description) > 500:
+            raise SupervisorError("invalid skill description")
+        safe.append({"name": name, "description": description, "path": ""})
+    ranked = route({"objective": objective, "role": "implementer",
+                    "read": [], "write": [], "skills": []}, safe,
+                   max_skills=2)
+    return {"version": 1, "selected": [x["name"] for x in ranked],
+            "delegation": delegation_decision(objective),
+            "abstained": not bool(ranked)}
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path.cwd())
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("discover")
+    sub.add_parser("select", help="Read one JSON object from stdin; return skill names and delegation advice")
     brief_parser = sub.add_parser("brief")
     brief_parser.add_argument("--plan", type=Path, required=True)
     brief_parser.add_argument("--task-id", required=True)
@@ -612,6 +669,12 @@ def main(argv=None):
     try:
         if args.command == "discover":
             result = discover(args.root)
+        elif args.command == "select":
+            import sys
+            body = sys.stdin.buffer.read(100001)
+            if len(body) > 100000:
+                raise SupervisorError("select payload too large")
+            result = select_prompt(json.loads(body.decode("utf-8")))
         else:
             result = brief(args.root, json.loads(args.plan.read_text(encoding="utf-8")),
                            args.task_id, max_skills=args.max_skills)
