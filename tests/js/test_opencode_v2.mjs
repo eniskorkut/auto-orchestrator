@@ -493,7 +493,9 @@ test('V5 ignores a moved-out session after a run started under this plugin scope
     await hooks['execute.before'](check);
     await hooks['execute.after'](check);
     await emit(lifecycle('session.execution.succeeded','moving',project));
-    assert.deepEqual(read()[0].map(e=>e.event),['start']);
+    assert.deepEqual(read()[0].map(e=>e.event),['start','diagnostic']);
+    assert.equal(read()[0].at(-1).reason,'session_ownership_lost');
+    assert.equal(read()[0].some(e=>e.event==='finish'||e.event==='verified'),false);
     assert.equal(read(foreignProject).length,0);
   }, sid => ({id:sid,location:{directory:owners.get(sid)}}));
 });
@@ -529,7 +531,8 @@ test('V5 moving away and back does not reuse stale check evidence from the prior
     await emit(lifecycle('session.execution.succeeded','roundtrip-parent',project));
     const entries=read();
     assert.equal(entries.length,2);
-    assert.ok(entries.some(events=>events.map(x=>x.event).join(',')==='start,check'));
+    assert.ok(entries.some(events=>events.map(x=>x.event).join(',')==='start,check,diagnostic'));
+    assert.ok(entries.some(events=>events.some(x=>x.reason==='session_ownership_lost')));
     assert.ok(entries.some(events=>events.map(x=>x.event).join(',')==='start,finish'));
     assert.ok(entries.every(events=>!events.some(x=>x.event==='verified')));
   }, sid => ({id:sid,location:{directory:owners.get(sid)}}));
