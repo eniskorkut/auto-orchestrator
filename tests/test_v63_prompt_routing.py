@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 from tools.router import select_prompt, delegation_decision
 from tools.supervisor import SupervisorError
+from tools.perf import analyze
 
 ROUTER = Path(__file__).resolve().parent.parent / "tools" / "router.py"
 SKILLS = [
@@ -75,6 +76,18 @@ class PromptRouterV63(unittest.TestCase):
         x = select_prompt({"objective": "Mobil menüdeki taşmayı düzelt", "skills": catalog})
         self.assertIn("frontend-react", x["selected"])
         self.assertNotIn("mobile-swift", x["selected"])
+
+    def test_route_metadata_does_not_break_perf_analysis(self):
+        events = [
+            {"event": "start", "time": 1.0, "platform": "opencode"},
+            {"event": "route", "time": 1.2, "source": "native-prompt-hook",
+             "selected_count": 1, "delegation": "single", "max_agents": 1},
+            {"event": "finish", "time": 2.0, "status": "success", "verified": True},
+        ]
+        result = analyze("route-run", events)
+        self.assertTrue(result.verified)
+        self.assertNotEqual(result.reason, "Unknown event")
+        self.assertEqual(result.elapsed_seconds, 1.0)
 
     def test_bad_inputs_fail_closed(self):
         for payload in (
