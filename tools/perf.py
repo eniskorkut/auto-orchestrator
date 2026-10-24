@@ -12,7 +12,9 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 SAFE_ID = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$')
-EVENTS = {'start','route','agent-start','agent-stop','check','mutation','verified','finish'}
+EVENTS = {'start','route','agent-start','agent-stop','check','mutation','verified','finish','diagnostic'}
+DIAGNOSTIC_REASONS = {'session_ownership_lost','session_deleted_without_terminal',
+                      'event_stream_closed','event_stream_error','plugin_unloaded'}
 
 class EventError(ValueError):
     pass
@@ -32,6 +34,12 @@ class Summary:
     # Observed native tool span overlap, not saved wall-clock time. Background
     # tool-return spans might not represent the native child's full lifetime.
     observed_overlap_seconds: float | None = None
+    route_latency_ms: float | None = None
+    suggested_delegation: str | None = None
+    suggested_max_agents: int | None = None
+    observed_native_starts: int = 0
+    observed_max_native_concurrency: int = 0
+    routing_advice_followed: bool | None = None
 
 
 def checked_id(value: str) -> str:
@@ -82,6 +90,10 @@ def append_event(root: Path, run_id: str, event: str, *, platform: str | None = 
             payload['policy_hash']=policy_hash
     elif event == 'mutation':
         pass
+    elif event == 'diagnostic':
+        if source not in DIAGNOSTIC_REASONS:
+            raise EventError('Diagnostic requires a supported reason code')
+        payload['reason'] = source
     elif event == 'verified':
         if source == 'quality-gate':
             payload['source']='quality-gate'
@@ -163,6 +175,10 @@ def analyze(run_id: str, events: list[dict], policy: dict | None = None) -> Summ
     finished=None
     issue=None
     verification_events=[]
+    route_meta=None
+    route_latency=None
+    native_starts=0
+    max_concurrency=0
     for e in events[1:]:
         name=e.get('event')
         t=float(e['time'])
@@ -176,6 +192,8 @@ def analyze(run_id: str, events: list[dict], policy: dict | None = None) -> Summ
                 issue='Duplicate agent ID'
             else:
                 started[aid]=t
+                native_starts+=1
+                max_concurrency=max(max_concurrency,len(started))
         elif name=='agent-stop':
             aid=e['agent_id']
             if aid not in started:
@@ -195,8 +213,17 @@ def analyze(run_id: str, events: list[dict], policy: dict | None = None) -> Summ
                 all(isinstance(x,str) for x in e['check_ids'])
             ):
                 issue='Late verification missing gate evidence'
-        elif name in ('route','check','mutation'):
-            # route is privacy-preserving prompt-routing metadata, not evidence.
+        elif name=='route':
+            # Route events report advice, not authoritative dispatch decisions.
+            # The latest admitted prompt within the run takes precedence.
+            mode=e.get('delegation')
+            limit=e.get('max_agents')
+            latency=e.get('latency_ms')
+            if mode in ('single','consider-parallel') and type(limit) is int and 1<=limit<=3:
+                route_meta=(mode,limit)
+                route_latency=(latency if type(latency) in (int,float) and
+                               0 <= latency <= 60000 else None)
+        elif name in ('check','mutation','diagnostic'):
             pass
         elif name=='finish':
             finished=e
@@ -242,9 +269,57 @@ def analyze(run_id: str, events: list[dict], policy: dict | None = None) -> Summ
     est=max(0.0,summed-elapsed) if issue is None and summed is not None and elapsed is not None else None
     if est is not None and est<=0:
         issue='No positive estimated parallelism benefit'
+    adherence=None
+    if route_meta:
+        # A single-agent recommendation excludes child subagents. Parallel
+        # advice only caps observed concurrent native subagents, not total calls.
+        adherence=(native_starts==0 if route_meta[0]=='single'
+                   else max_concurrency<=route_meta[1])
     return Summary(run_id, platform, status, verified, elapsed, len(spans), summed, est,
                    issue is None, issue or 'Estimate based on agent overlaps; not a benchmark',
-                   observed)
+                   observed, route_latency,
+                   route_meta[0] if route_meta else None,
+                   route_meta[1] if route_meta else None,
+                   native_starts, max_concurrency, adherence)
+
+
+def diagnose(run_id: str, events: list[dict]) -> dict:
+    """Classify observed run evidence, not the current state of an IDE process."""
+    checked_id(run_id)
+    if not events or events[0].get('event') != 'start':
+        raise EventError('Run start not present')
+    starts: set[str] = set()
+    terminal = None
+    reasons: list[str] = []
+    for event in events:
+        kind = event.get('event')
+        if kind == 'agent-start':
+            starts.add(event['agent_id'])
+        elif kind == 'agent-stop':
+            starts.discard(event['agent_id'])
+        elif kind == 'diagnostic' and event.get('reason') in DIAGNOSTIC_REASONS:
+            reasons.append(event['reason'])
+        elif kind == 'finish':
+            terminal = event.get('status')
+    if terminal:
+        category = 'terminal_recorded'
+    elif 'session_deleted_without_terminal' in reasons:
+        category = 'missing_terminal_session_deleted'
+    elif starts:
+        category = 'missing_terminal_open_native_spans'
+    elif any(x.startswith('event_stream_') for x in reasons):
+        category = 'missing_terminal_subscription_interrupted'
+    elif 'session_ownership_lost' in reasons:
+        category = 'missing_terminal_session_ownership_lost'
+    elif 'plugin_unloaded' in reasons:
+        category = 'missing_terminal_plugin_unloaded'
+    else:
+        category = 'missing_terminal_reason_unknown'
+    return {'run_id':run_id,'classification':category,'finished':terminal is not None,
+            'terminal_status':terminal,'open_native_spans':len(starts),
+            'diagnostics':sorted(set(reasons)),
+            'last_event_time':max(float(e['time']) for e in events),
+            'note':'No terminal event cannot prove the native execution ended.'}
 
 
 def fmt_seconds(seconds: float | None) -> str:
@@ -267,19 +342,32 @@ def main(argv=None) -> int:
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root',default='.',type=Path,help='Project directory (default: current directory)')
     commands=parser.add_subparsers(dest='command',required=True)
-    for cmd in ('start','agent-start','agent-stop','verified','finish','report'):
+    for cmd in ('start','agent-start','agent-stop','verified','finish','report','diagnose','audit'):
         p=commands.add_parser(cmd)
         p.add_argument('--run-id')
-        if cmd in ('verified','report'): p.add_argument('--latest',action='store_true',help='Use most recent locally recorded run')
+        if cmd in ('verified','report','diagnose'): p.add_argument('--latest',action='store_true',help='Use most recent locally recorded run')
         if cmd=='start':p.add_argument('--platform',required=True,choices=['codex','opencode','antigravity'])
         if cmd in ('agent-start','agent-stop'):p.add_argument('--agent-id',required=True)
         if cmd=='finish':
             p.add_argument('--status',choices=['success','failed','cancelled'],required=True)
             p.add_argument('--verified',action='store_true')
         if cmd!='report':p.add_argument('--time',type=float,help='Import externally measured Unix timestamp / deterministic test data')
-        if cmd=='report':p.add_argument('--json',action='store_true')
+        if cmd in ('report','diagnose','audit'):p.add_argument('--json',action='store_true')
     a=parser.parse_args(argv)
     try:
+        if a.command=='audit':
+            run_dir=a.root/'.auto-orchestrator/runs'
+            paths=sorted((p for p in run_dir.glob('*.jsonl') if p.is_file() and not p.is_symlink()),
+                         key=lambda p: (p.stat().st_mtime_ns,p.name))[-500:]
+            results=[diagnose(p.stem,load_events(p)) for p in paths]
+            counts={}
+            for item in results:
+                key=item['classification']
+                counts[key]=counts.get(key,0)+1
+            output={'run_count':len(results),'categories':counts,'runs':results}
+            print(json.dumps(output,indent=2) if a.json else
+                  '\n'.join(f"{item['run_id']}: {item['classification']}" for item in results))
+            return 0
         if getattr(a,'latest',False):
             if a.run_id:
                 raise EventError('Choose either --run-id or --latest')
@@ -289,7 +377,12 @@ def main(argv=None) -> int:
             a.run_id = paths[-1].stem
         if not a.run_id:
             raise EventError('Supply --run-id or --latest')
-        if a.command=='report':
+        if a.command=='diagnose':
+            result=diagnose(a.run_id,load_events(path_for(a.root,a.run_id)))
+            print(json.dumps(result,indent=2) if a.json else
+                  f"{result['classification']}; open native spans: {result['open_native_spans']}; "
+                  f"diagnostics: {', '.join(result['diagnostics']) or 'none'}")
+        elif a.command=='report':
             try:
                 from tools.quality_gate import load_policy
             except ModuleNotFoundError:

@@ -60,6 +60,17 @@ PHRASES = {
     "audit table": {"database": 3},
     "threat model": {"security": 3}, "package lock": {"devops": 2},
     "mutation testing": {"testing": 3}, "container image": {"devops": 3},
+    # General software engineering terminology missing from shallow skill
+    # descriptions. These phrases extend ontology coverage without an LLM.
+    "circuit breaker": {"backend": 3}, "circuit breaking": {"backend": 3},
+    "idempotency key": {"backend": 3}, "outbox pattern": {"backend": 3, "database": 1},
+    "bulkhead isolation": {"backend": 3}, "retry storm": {"backend": 3},
+    "supply chain": {"security": 3}, "content security policy": {"security": 3},
+    "guardrail evaluation": {"ai": 3}, "prompt injection": {"security": 3, "ai": 1},
+    "semantic search": {"ai": 3}, "vector similarity": {"ai": 3},
+    "schema migration": {"database": 3}, "zero downtime": {"devops": 3},
+    "distributed trace": {"devops": 3}, "latency budget": {"performance": 3},
+    "contrast ratio": {"accessibility": 3}, "prefers reduced motion": {"animation": 2, "accessibility": 2},
     "güvenlik açığı": {"security": 3}, "veritabanı şeması": {"database": 3},
     "docker imajı": {"devops": 2}, "yetkilendirme testleri": {"security": 2, "testing": 2},
 }
@@ -508,6 +519,13 @@ def route(task: dict, skills: list[dict], max_skills: int = 2):
     if not isinstance(explicit, list) or any(not isinstance(x, str) for x in explicit):
         raise SupervisorError("Explicit skills must be a list of names")
     selected = set(explicit)
+    # Negation by intent: incidental software vocabulary inside an artistic
+    # writing request is not a request to build or deploy software.
+    if not selected and re.search(
+        r"(?i)^\s*(?:write|compose|tell|translate)\s+(?:(?:a|an|the)\s+)?"
+        r"(?:limerick|poem|haiku|joke|song|story)\b", objective
+    ):
+        return []
     if not skills:
         return []
 

@@ -47,6 +47,16 @@ def validate_policy(policy):
             raise GateError("Invalid or duplicate check ID")
         if tool not in TOOLS or not isinstance(command, str) or not command or len(command) > 500 or "\n" in command or "\r" in command:
             raise GateError("Check needs an exact supported native tool and command")
+        # Exact explicit variants are safer than guessing shell equivalence.
+        # "python -m unittest -q ." may collect different tests from
+        # "python -m unittest -q" and must be opt-in, never fuzzy matched.
+        alternate = check.get("alternates", [])
+        if not isinstance(alternate, list) or len(alternate) > 4 or any(
+            not isinstance(cmd, str) or not cmd or len(cmd) > 500 or
+            "\n" in cmd or "\r" in cmd or cmd == command
+            for cmd in alternate
+        ) or len(set(alternate)) != len(alternate):
+            raise GateError("Check alternates must be 0..4 distinct explicit commands")
         seen.add(name)
     return policy
 

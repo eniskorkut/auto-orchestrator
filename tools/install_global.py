@@ -66,7 +66,7 @@ def installed_map(home:Path,platforms:set[str],opencode_version:str,codex_model:
         bridge=codex/'auto-orchestrator/tools/hook_bridge.py'
         files[bridge]=(ROOT/'tools/hook_bridge.py').read_bytes()
         files[codex/'auto-orchestrator/tools/perf.py']=(ROOT/'tools/perf.py').read_bytes()
-        for name in ('supervisor.py','router.py','worktree.py','benchmark.py','quality_gate.py','review_gate.py'):
+        for name in ('supervisor.py','router.py','router_eval.py','worktree.py','benchmark.py','quality_gate.py','review_gate.py'):
             files[codex/'auto-orchestrator/tools'/name]=(ROOT/'tools'/name).read_bytes()
         hooks_path=codex/'hooks.json'
         if not hooks_path.exists():
@@ -97,7 +97,7 @@ def installed_map(home:Path,platforms:set[str],opencode_version:str,codex_model:
         plugin=ROOT/('adapters/opencode-v2/auto_orchestrator.js' if opencode_version=='v2' else '.opencode/plugins/auto_orchestrator.js')
         files[oc/'plugins/auto_orchestrator.js']=plugin.read_bytes()
         files[oc/'auto-orchestrator/tools/perf.py']=(ROOT/'tools/perf.py').read_bytes()
-        for name in ('supervisor.py','router.py','worktree.py','benchmark.py','quality_gate.py','review_gate.py'):
+        for name in ('supervisor.py','router.py','router_eval.py','worktree.py','benchmark.py','quality_gate.py','review_gate.py'):
             files[oc/'auto-orchestrator/tools'/name]=(ROOT/'tools'/name).read_bytes()
     if 'antigravity' in platforms:
         gemini=home/'.gemini'
@@ -108,7 +108,7 @@ def installed_map(home:Path,platforms:set[str],opencode_version:str,codex_model:
         bridge=gemini/'config/auto-orchestrator/tools/hook_bridge.py'
         files[bridge]=(ROOT/'tools/hook_bridge.py').read_bytes()
         files[gemini/'config/auto-orchestrator/tools/perf.py']=(ROOT/'tools/perf.py').read_bytes()
-        for name in ('supervisor.py','router.py','worktree.py','benchmark.py','quality_gate.py','review_gate.py'):
+        for name in ('supervisor.py','router.py','router_eval.py','worktree.py','benchmark.py','quality_gate.py','review_gate.py'):
             files[gemini/'config/auto-orchestrator/tools'/name]=(ROOT/'tools'/name).read_bytes()
         hooks_path=gemini/'config/hooks.json'
         if not hooks_path.exists():
@@ -128,7 +128,7 @@ def installed_map(home:Path,platforms:set[str],opencode_version:str,codex_model:
         skills_at(cursor/'skills/auto-orchestrator')
         for source in (ROOT/'.cursor/agents').glob('*.md'):
             files[cursor/'agents'/source.name]=source.read_bytes()
-        for name in ('supervisor.py','router.py','worktree.py','quality_gate.py','review_gate.py','perf.py','hook_bridge.py'):
+        for name in ('supervisor.py','router.py','router_eval.py','worktree.py','quality_gate.py','review_gate.py','perf.py','hook_bridge.py'):
             files[cursor/'auto-orchestrator/tools'/name]=(ROOT/'tools'/name).read_bytes()
     return files
 

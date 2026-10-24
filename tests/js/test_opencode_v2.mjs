@@ -17,6 +17,7 @@ async function sandbox(fn, getSession = null, options = {}) {
   const toasts = [];
   const pending = [];
   let release;
+  let subscriptions = 0;
   const ctx = {
     location: { directory: project },
     tui: options.tuiMissing ? undefined : {
@@ -32,17 +33,24 @@ async function sandbox(fn, getSession = null, options = {}) {
     },
     skill: { list: async () => ({ data: options.skillList ?? [] }) },
     tool: { hook: async (name, callback) => { hooks[name] = callback; } },
-    event: { subscribe: ({ signal }) => ({
-      async *[Symbol.asyncIterator]() {
-        while (!signal.aborted) {
-          if (pending.length) yield pending.shift();
-          else await new Promise(resolve => {
-            release = resolve;
-            signal.addEventListener('abort', resolve, { once: true });
-          });
-        }
-      },
-    }) },
+    event: { subscribe: ({ signal }) => {
+      const attempt = ++subscriptions;
+      return {
+        async *[Symbol.asyncIterator]() {
+          while (!signal.aborted) {
+            if (pending.length) {
+              yield pending.shift();
+              if (options.disconnectOnce && attempt === 1) {
+                throw new Error('SENSITIVE-STREAM-ERROR-MUST-NOT-LOG');
+              }
+            } else await new Promise(resolve => {
+              release = resolve;
+              signal.addEventListener('abort', resolve, { once: true });
+            });
+          }
+        },
+      };
+    } },
   };
   const emit = async event => { pending.push(event); release?.(); await tick(); };
   const read = (folder = project) => {
@@ -485,7 +493,9 @@ test('V5 ignores a moved-out session after a run started under this plugin scope
     await hooks['execute.before'](check);
     await hooks['execute.after'](check);
     await emit(lifecycle('session.execution.succeeded','moving',project));
-    assert.deepEqual(read()[0].map(e=>e.event),['start']);
+    assert.deepEqual(read()[0].map(e=>e.event),['start','diagnostic']);
+    assert.equal(read()[0].at(-1).reason,'session_ownership_lost');
+    assert.equal(read()[0].some(e=>e.event==='finish'||e.event==='verified'),false);
     assert.equal(read(foreignProject).length,0);
   }, sid => ({id:sid,location:{directory:owners.get(sid)}}));
 });
@@ -521,7 +531,8 @@ test('V5 moving away and back does not reuse stale check evidence from the prior
     await emit(lifecycle('session.execution.succeeded','roundtrip-parent',project));
     const entries=read();
     assert.equal(entries.length,2);
-    assert.ok(entries.some(events=>events.map(x=>x.event).join(',')==='start,check'));
+    assert.ok(entries.some(events=>events.map(x=>x.event).join(',')==='start,check,diagnostic'));
+    assert.ok(entries.some(events=>events.some(x=>x.reason==='session_ownership_lost')));
     assert.ok(entries.some(events=>events.map(x=>x.event).join(',')==='start,finish'));
     assert.ok(entries.every(events=>!events.some(x=>x.event==='verified')));
   }, sid => ({id:sid,location:{directory:owners.get(sid)}}));
@@ -872,4 +883,52 @@ test('V6.3 prompt admission never modifies explicit skills, missing-helper or un
     assert.deepEqual(read(),[]);
   },()=>({location:{directory:'/foreign'}}),{skillList:[
     {id:'backend',name:'backend-api',description:'FastAPI backend API'}]});
+});
+
+test('V6.4 event subscription reconnect preserves unfinished state and logs only diagnostics',async()=>{
+  let owner;
+  await sandbox(async({project,hooks,emit,read})=>{
+    owner=project;
+    await emit(lifecycle('session.execution.started','transient',project));
+    const before=read()[0].map(x=>x.event);
+    assert.deepEqual(before,['start','diagnostic']);
+    assert.equal(read()[0][1].reason,'event_stream_error');
+    assert.doesNotMatch(JSON.stringify(read()),/SENSITIVE-STREAM-ERROR/);
+    await new Promise(resolve=>setTimeout(resolve,320));
+    await emit(lifecycle('session.execution.succeeded','transient',project));
+    assert.deepEqual(read()[0].map(x=>x.event),['start','diagnostic','finish']);
+    assert.equal(read()[0].at(-1).verified,false);
+  },()=>({location:{directory:owner}}),{disconnectOnce:true});
+});
+
+test('V6.4 native shell accepts only explicit policy alternates',async()=>{
+  let owner;
+  await sandbox(async({project,hooks,emit,read})=>{
+    owner=project;
+    enableGate(project);
+    writeFileSync(join(project,'.auto-orchestrator','verification.json'),JSON.stringify({
+      version:1,auto_verify:true,
+      required_checks:[{id:'unit',tool:'shell',command:'python -m unittest -q',
+        alternates:['python -m unittest -q .']}],
+    }));
+    await emit(lifecycle('session.execution.started','alias-ok',project));
+    const event={id:'alias-1',tool:'shell',data:{sessionID:'alias-ok'},
+      input:{command:'python -m unittest -q .'},result:{metadata:{exit:0}}};
+    await hooks['execute.before'](event);
+    await hooks['execute.after'](event);
+    await emit(lifecycle('session.execution.succeeded','alias-ok',project));
+    const events=read()[0];
+    assert.equal(events.find(e=>e.event==='check').exit_code,0);
+    assert.equal(events.at(-1).event,'verified');
+
+    await emit(lifecycle('session.execution.started','alias-denied',project));
+    const unexpected={id:'alias-2',tool:'shell',data:{sessionID:'alias-denied'},
+      input:{command:'python -m unittest -q ./other'},result:{metadata:{exit:0}}};
+    await hooks['execute.before'](unexpected);
+    await hooks['execute.after'](unexpected);
+    await emit(lifecycle('session.execution.succeeded','alias-denied',project));
+    const rejected=read().find(ev=>ev.some(e=>e.event==='mutation'));
+    assert.ok(rejected);
+    assert.equal(rejected.some(e=>e.event==='verified'),false);
+  },()=>({location:{directory:owner}}));
 });

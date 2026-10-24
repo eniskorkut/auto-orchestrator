@@ -115,6 +115,11 @@ export default {
               ids.has(check.id) || !approvedTools.has(check.tool) ||
               typeof check.command !== 'string' || check.command.length < 1 ||
               check.command.length > 500 || /[\r\n]/.test(check.command)) return null;
+          if (check.alternates != null && (!Array.isArray(check.alternates) ||
+              check.alternates.length > 4 ||
+              check.alternates.some(cmd => typeof cmd !== 'string' || !cmd ||
+                cmd.length > 500 || /[\r\n]/.test(cmd) || cmd === check.command) ||
+              new Set(check.alternates).size !== check.alternates.length)) return null;
           ids.add(check.id);
         }
         return { ...policy, hash: createHash('sha256').update(bytes).digest('hex') };
@@ -133,6 +138,10 @@ export default {
       promptRouting.delete(sid);
       const run = runs.get(sid);
       if (!run || run.done) return;
+      // Lost ownership is NOT a terminal execution event. Preserve evidence
+      // explaining why this run has no finish rather than inventing success.
+      write(run, { event: 'diagnostic', reason: 'session_ownership_lost',
+        active_agents: run.tasks.size });
       run.done = true;
       promptRouting.delete(sid);
       run.tasks.clear();
@@ -209,6 +218,13 @@ export default {
       const run = runs.get(sid);
       return run && !run.done ? run : null;
     };
+
+    const reportStreamIssue = (reason) => {
+      for (const run of runs.values()) {
+        if (!run.done) write(run, { event: 'diagnostic', reason,
+          active_agents: run.tasks.size });
+      }
+    };
     const finish = async (sid, status) => {
       const run = existing(sid);
       if (!run) return;
@@ -283,7 +299,9 @@ export default {
           ids.set(skill.name, skill.id);
           catalog.push({ name: skill.name, description: skill.description });
         }
+        const routeStarted = Date.now();
         const decision = await selectLocal(prompt.text, catalog);
+        const routeLatencyMs = Math.max(0, Date.now() - routeStarted);
         if (!decision) return;
         const picks = decision.selected.filter(name => ids.has(name)).slice(0, 2);
         if (picks.length !== decision.selected.length) return; // no partial trust
@@ -302,7 +320,7 @@ export default {
         write(run, { event: 'route', source: 'native-prompt-hook',
           selected_count: picks.length,
           delegation: promptRouting.get(sid).mode,
-          max_agents: max });
+          max_agents: max, latency_ms: routeLatencyMs });
       } catch {
         // An unavailable native API/helper must not block user prompt admission
         // or turn a guessed location into trusted routing.
@@ -340,7 +358,8 @@ export default {
           ? normalized(input.workdir ?? input.cwd) === directory
           : typeof ctx.session.get === 'function';
         const check = run.policy && typeof command === 'string' &&
-          run.policy.required_checks.find(c => c.tool === name && c.command === command);
+          run.policy.required_checks.find(c => c.tool === name &&
+            (c.command === command || c.alternates?.includes(command)));
         if (!check || typeof id !== 'string' || !id || !cwdAllowed) {
           // An arbitrary shell command may edit files without an edit/write
           // tool event. Conservatively expire all previous test evidence
@@ -443,27 +462,53 @@ export default {
         await observeNative(id, 'stop');
       }
     });
+    // The event stream can close unexpectedly while a native task is still
+    // active. Retry the *subscription* with bounded exponential backoff, but
+    // NEVER infer a missed execution terminal event or manufacture "finish".
     const controller = new AbortController();
+    const waitRetry = (ms) => new Promise(resolve => {
+      if (controller.signal.aborted) return resolve();
+      const timer = setTimeout(() => { controller.signal.removeEventListener('abort', onAbort); resolve(); }, ms);
+      const onAbort = () => { clearTimeout(timer); resolve(); };
+      controller.signal.addEventListener('abort', onAbort, { once: true });
+    });
     void (async () => {
-      try {
-        for await (const event of ctx.event.subscribe({ signal: controller.signal })) {
-          const sid = session(event);
-          if (!(await ownsSession(sid, event))) continue;
-          if (event.type === 'session.execution.started' || event.type === 'session.created') {
-            // Never open a run in another project (or from location-less events).
-            begin(sid);
-          } else if (event.type === 'session.execution.succeeded') {
-            await finish(sid, 'success');
-          } else if (event.type === 'session.execution.failed') {
-            await finish(sid, 'failed');
-          } else if (event.type === 'session.execution.interrupted') {
-            await finish(sid, 'cancelled');
+      let retry = 0;
+      while (!controller.signal.aborted) {
+        try {
+          for await (const event of ctx.event.subscribe({ signal: controller.signal })) {
+            retry = 0;
+            const sid = session(event);
+            if (!(await ownsSession(sid, event))) continue;
+            if (event.type === 'session.execution.started' || event.type === 'session.created') {
+              begin(sid);
+            } else if (event.type === 'session.execution.succeeded') {
+              await finish(sid, 'success');
+            } else if (event.type === 'session.execution.failed') {
+              await finish(sid, 'failed');
+            } else if (event.type === 'session.execution.interrupted') {
+              await finish(sid, 'cancelled');
+            } else if (event.type === 'session.deleted') {
+              const run = existing(sid);
+              if (run) write(run, {event:'diagnostic', reason:'session_deleted_without_terminal',
+                active_agents:run.tasks.size});
+              abandon(sid);
+            }
           }
+          if (controller.signal.aborted) break;
+          reportStreamIssue('event_stream_closed');
+        } catch {
+          if (controller.signal.aborted) break;
+          // Log only a fixed diagnostic category; exception strings may
+          // include secrets, prompt text or URLs.
+          reportStreamIssue('event_stream_error');
         }
-      } catch {
-        // Aborted/incomplete streams must never imply a successful finish.
+        await waitRetry(Math.min(5000, 200 * 2 ** Math.min(retry++, 5)));
       }
     })();
-    return () => controller.abort();
+    return () => {
+      if (!controller.signal.aborted) reportStreamIssue('plugin_unloaded');
+      controller.abort();
+    };
   },
 };
