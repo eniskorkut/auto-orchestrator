@@ -252,3 +252,9 @@ V6.2 reduces false-positive Router selections using objective-derived task domai
 Plans may set `"require_review": true` (off by default). This adds a pre-completion structured review artifact, bound to the current task attempt and an exact digest of the submitted result. It rejects missing/failed/skipped tests or unresolved blocker/high findings. Existing native termination, lease and write-scope protections remain unchanged. Caller-created review records are **not** authenticated evidence of independent agent review or actual test execution.
 
 Read [V6.2 routing and review](docs/V62_ROUTING_REVIEW.md) for examples and limitations. Hosted tests cover deterministic contracts; real IDE selection quality and reviewer independence require separate live evidence.
+
+## V6.3 — OpenCode prompt-time Router
+
+The OpenCode V2 global plugin now tries to select relevant skills **automatically at native prompt admission**, without asking the user to invoke `router.py`. It reads the native skill catalog and executes the installed local Python Router via stdin, never writing raw prompt text into telemetry. Explicit user-pinned skills are left intact, unknown prompts may select no skills, and unverified sessions fail closed. Router also gives conservative **advisory** one-agent vs possible-parallel guidance. This does not compel native subagent dispatch or prove time saved.
+
+See [V6.3 native routing](docs/V63_NATIVE_PROMPT_ROUTING.md) for implementation, safety limits and real-IDE validation.

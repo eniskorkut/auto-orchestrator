@@ -12,7 +12,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 SAFE_ID = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$')
-EVENTS = {'start','agent-start','agent-stop','check','mutation','verified','finish'}
+EVENTS = {'start','route','agent-start','agent-stop','check','mutation','verified','finish'}
 
 class EventError(ValueError):
     pass
@@ -195,7 +195,8 @@ def analyze(run_id: str, events: list[dict], policy: dict | None = None) -> Summ
                 all(isinstance(x,str) for x in e['check_ids'])
             ):
                 issue='Late verification missing gate evidence'
-        elif name in ('check','mutation'):
+        elif name in ('route','check','mutation'):
+            # route is privacy-preserving prompt-routing metadata, not evidence.
             pass
         elif name=='finish':
             finished=e

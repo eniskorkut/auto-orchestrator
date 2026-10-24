@@ -46,6 +46,7 @@ export default {
     const directory = normalized(ctx.location?.directory);
     const base = directory && join(directory, '.auto-orchestrator', 'runs');
     const runs = new Map();
+    const promptRouting = new Map();
     const approvedTools = new Set(['bash', 'shell', 'powershell']);
     const mutatingTools = new Set(['edit', 'write', 'apply_patch', 'multiedit']);
     // Global installer places this trusted helper alongside the plugin; do
@@ -53,6 +54,34 @@ export default {
     const supervisorScript = join(dirname(fileURLToPath(import.meta.url)),
       '..', 'auto-orchestrator', 'tools', 'supervisor.py');
     const supervisorDb = directory && join(directory, '.auto-orchestrator', 'supervisor.sqlite3');
+    const routerScript = join(dirname(fileURLToPath(import.meta.url)),
+      '..', 'auto-orchestrator', 'tools', 'router.py');
+    // Stdout is bounded. Raw user text is only transmitted via local stdin,
+    // never argv, shell, telemetry, or a provider. No shell execution.
+    const selectLocal = async (objective, catalog) => {
+      try {
+        const stat = lstatSync(routerScript);
+        if (!stat.isFile() || stat.isSymbolicLink()) return null;
+      } catch { return null; }
+      const input = JSON.stringify({ objective, skills: catalog });
+      if (Buffer.byteLength(input, 'utf8') > 100000) return null;
+      return await new Promise(resolve => {
+        try {
+          const child = execFile(process.env.AUTO_ORCHESTRATOR_PYTHON || 'python3',
+            [routerScript, 'select'],
+            { timeout: 1800, maxBuffer: 16384, windowsHide: true },
+            (error, stdout) => {
+              if (error) return resolve(null);
+              try {
+                const value = JSON.parse(stdout);
+                resolve(value?.version === 1 && Array.isArray(value.selected) ? value : null);
+              } catch { resolve(null); }
+            });
+          child.stdin?.on('error', () => {});
+          child.stdin?.end(input);
+        } catch { resolve(null); }
+      });
+    };
     const observeNative = async (id, state) => {
       if (!supervisorDb || typeof id !== 'string' || id.length < 4 ||
           !existsSync(supervisorScript)) return;
@@ -101,9 +130,11 @@ export default {
     // A location transition or unavailable session lookup invalidates prior
     // evidence. The abandoned run remains incomplete (no fabricated finish).
     const abandon = (sid) => {
+      promptRouting.delete(sid);
       const run = runs.get(sid);
       if (!run || run.done) return;
       run.done = true;
+      promptRouting.delete(sid);
       run.tasks.clear();
       run.toolStarts.clear();
       run.backgroundDispatches.clear();
@@ -195,6 +226,7 @@ export default {
           check_ids: run.policy.required_checks.map(c => c.id).sort() });
       }
       run.done = true;
+      promptRouting.delete(sid);
       run.tasks.clear();
       run.toolStarts.clear();
       run.backgroundDispatches.clear();
@@ -212,9 +244,81 @@ export default {
       }
     };
 
+    // Native V2 prompt admission: selection occurs without the user needing
+    // to remember "run router.py". No changes to their text or attachments.
+    // A prompt hook is guidance/skill admission, not an enforcement point for
+    // native subagent dispatch (which remains under model/permission control).
+    await ctx.session.hook('prompt', async (event) => {
+      const sid = event?.sessionID, prompt = event?.prompt;
+      if (typeof sid !== 'string' || !sid) return;
+      // The user controls manual skill attachments. Clear any previous
+      // advisory state before evaluating each new user prompt in this session.
+      promptRouting.delete(sid);
+      if (!directory || typeof prompt?.text !== 'string' ||
+          !prompt.text.trim() || prompt.text.length > 12000 ||
+          (Array.isArray(prompt.skills) && prompt.skills.length > 0) ||
+          typeof ctx.session.get !== 'function' || typeof ctx.skill?.list !== 'function') return;
+      try {
+        const session = await ctx.session.get({ sessionID: sid });
+        const info = session?.data ?? session;
+        if (normalized(info?.location?.directory) !== directory) {
+          abandon(sid);
+          return;
+        }
+        if (info?.parentID || info?.parentId) return;
+        const available = await ctx.skill.list();
+        const list = Array.isArray(available) ? available :
+          (Array.isArray(available?.data) ? available.data :
+            Array.isArray(available?.items) ? available.items : null);
+        if (!list) return;
+        const ids = new Map();
+        const catalog = [];
+        for (const skill of list) {
+          if (!skill || typeof skill.id !== 'string' ||
+              typeof skill.name !== 'string' ||
+              !/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(skill.name) ||
+              skill.name === 'auto-orchestrator' || skill.autoinvoke === false ||
+              ids.has(skill.name)) continue;
+          if (typeof skill.description !== 'string' || skill.description.length > 500) continue;
+          ids.set(skill.name, skill.id);
+          catalog.push({ name: skill.name, description: skill.description });
+        }
+        const decision = await selectLocal(prompt.text, catalog);
+        if (!decision) return;
+        const picks = decision.selected.filter(name => ids.has(name)).slice(0, 2);
+        if (picks.length !== decision.selected.length) return; // no partial trust
+        prompt.skills = [...(Array.isArray(prompt.skills) ? prompt.skills : []),
+          ...picks.map(name => ({ id: ids.get(name) }))];
+        const delegation = decision.delegation;
+        const max = Number.isInteger(delegation?.max_agents) &&
+          delegation.max_agents >= 1 && delegation.max_agents <= 3
+          ? delegation.max_agents : 1;
+        promptRouting.set(sid, {
+          mode: delegation?.mode === 'consider-parallel' ? 'consider-parallel' : 'single',
+          max_agents: max, selected_count: picks.length
+        });
+        // Never persist objective, skill names, skill paths or full prompts.
+        const run = existing(sid) ?? begin(sid);
+        write(run, { event: 'route', source: 'native-prompt-hook',
+          selected_count: picks.length,
+          delegation: promptRouting.get(sid).mode,
+          max_agents: max });
+      } catch {
+        // An unavailable native API/helper must not block user prompt admission
+        // or turn a guessed location into trusted routing.
+      }
+    });
     await ctx.session.hook('context', (event) => {
       if (event.agent?.startsWith('auto_')) return;
       event.system.push({ type: 'text', text: POLICY });
+      const guidance = promptRouting.get(event.sessionID);
+      if (guidance?.mode === 'single') {
+        event.system.push({ type: 'text',
+          text: 'Auto-Orchestrator routing: no independent work was established. Prefer one agent; do not create subagents solely for routine verification. You may reconsider if you discover genuine independent work.' });
+      } else if (guidance?.mode === 'consider-parallel') {
+        event.system.push({ type: 'text',
+          text: 'Auto-Orchestrator routing: potentially independent subtasks detected. Use native subagents only if scopes and dependencies really permit them; at most ' + guidance.max_agents + '. Never claim routing guarantees dispatch.' });
+      }
     });
     await ctx.tool.hook('execute.before', async (event) => {
       const sid = session(event), id = callId(event);
