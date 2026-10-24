@@ -133,6 +133,10 @@ export default {
       promptRouting.delete(sid);
       const run = runs.get(sid);
       if (!run || run.done) return;
+      // Lost ownership is NOT a terminal execution event. Preserve evidence
+      // explaining why this run has no finish rather than inventing success.
+      write(run, { event: 'diagnostic', reason: 'session_ownership_lost',
+        active_agents: run.tasks.size });
       run.done = true;
       promptRouting.delete(sid);
       run.tasks.clear();
@@ -208,6 +212,13 @@ export default {
       if (typeof sid !== 'string' || !sid) return null;
       const run = runs.get(sid);
       return run && !run.done ? run : null;
+    };
+
+    const reportStreamIssue = (reason) => {
+      for (const run of runs.values()) {
+        if (!run.done) write(run, { event: 'diagnostic', reason,
+          active_agents: run.tasks.size });
+      }
     };
     const finish = async (sid, status) => {
       const run = existing(sid);
@@ -443,27 +454,53 @@ export default {
         await observeNative(id, 'stop');
       }
     });
+    // The event stream can close unexpectedly while a native task is still
+    // active. Retry the *subscription* with bounded exponential backoff, but
+    // NEVER infer a missed execution terminal event or manufacture "finish".
     const controller = new AbortController();
+    const waitRetry = (ms) => new Promise(resolve => {
+      if (controller.signal.aborted) return resolve();
+      const timer = setTimeout(() => { controller.signal.removeEventListener('abort', onAbort); resolve(); }, ms);
+      const onAbort = () => { clearTimeout(timer); resolve(); };
+      controller.signal.addEventListener('abort', onAbort, { once: true });
+    });
     void (async () => {
-      try {
-        for await (const event of ctx.event.subscribe({ signal: controller.signal })) {
-          const sid = session(event);
-          if (!(await ownsSession(sid, event))) continue;
-          if (event.type === 'session.execution.started' || event.type === 'session.created') {
-            // Never open a run in another project (or from location-less events).
-            begin(sid);
-          } else if (event.type === 'session.execution.succeeded') {
-            await finish(sid, 'success');
-          } else if (event.type === 'session.execution.failed') {
-            await finish(sid, 'failed');
-          } else if (event.type === 'session.execution.interrupted') {
-            await finish(sid, 'cancelled');
+      let retry = 0;
+      while (!controller.signal.aborted) {
+        try {
+          for await (const event of ctx.event.subscribe({ signal: controller.signal })) {
+            retry = 0;
+            const sid = session(event);
+            if (!(await ownsSession(sid, event))) continue;
+            if (event.type === 'session.execution.started' || event.type === 'session.created') {
+              begin(sid);
+            } else if (event.type === 'session.execution.succeeded') {
+              await finish(sid, 'success');
+            } else if (event.type === 'session.execution.failed') {
+              await finish(sid, 'failed');
+            } else if (event.type === 'session.execution.interrupted') {
+              await finish(sid, 'cancelled');
+            } else if (event.type === 'session.deleted') {
+              const run = existing(sid);
+              if (run) write(run, {event:'diagnostic', reason:'session_deleted_without_terminal',
+                active_agents:run.tasks.size});
+              abandon(sid);
+            }
           }
+          if (controller.signal.aborted) break;
+          reportStreamIssue('event_stream_closed');
+        } catch {
+          if (controller.signal.aborted) break;
+          // Log only a fixed diagnostic category; exception strings may
+          // include secrets, prompt text or URLs.
+          reportStreamIssue('event_stream_error');
         }
-      } catch {
-        // Aborted/incomplete streams must never imply a successful finish.
+        await waitRetry(Math.min(5000, 200 * 2 ** Math.min(retry++, 5)));
       }
     })();
-    return () => controller.abort();
+    return () => {
+      if (!controller.signal.aborted) reportStreamIssue('plugin_unloaded');
+      controller.abort();
+    };
   },
 };
