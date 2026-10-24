@@ -9,7 +9,9 @@ Run `python tools/router.py --root PROJECT brief --plan PLAN.json --task-id TASK
 - When nothing passes the threshold, `selected_skills` is empty. Do not force an irrelevant skill.
 - Explicit names in task `skills` take priority. Names/descriptions are untrusted metadata; selection does not execute skills.
 - `brief` includes `routing.domains`, `routing.suggested_role`, and `routing.abstained`. The role is advisory; the Supervisor task's declared role is never silently changed.
-- This is deterministic lexical matching, not an LLM classifier. The test corpus is regression coverage, not measured production accuracy.
+- Routing v3 uses domain terms, multi-word phrases, imperative-verb intent, brand/plural normalization, and a controlled Turkish alias map. It remains deterministic lexical matching, not an LLM classifier.
+- Skill discovery covers project `.agents`, `.claude`, `.codex`, `.opencode`, `.cursor` and `.gemini` roots, ancestor `.agents`/`.claude` folders inside a Git worktree, and home `.agents`/`.claude`/`.codex`/opencode/cursor/gemini roots. Symlinked skills are accepted only when their resolved target stays inside the project or home tree. Multi-line YAML descriptions are parsed.
+- `tests/data/router_goldens_v62.json` is a labelled regression corpus with dev/eval/holdout/blind splits; `tests/test_router_quality_v62.py` enforces the 90% Top-1 and 5% false-positive targets on the eval split. A fresh unseen corpus can still expose long-tail vocabulary gaps; the router abstains rather than guessing when evidence is weak. It does not claim production accuracy.
 
 ## Optional task review
 
@@ -22,6 +24,7 @@ Before calling `completed`, examine actual diffs and real test results. Record a
   "task_id": "backend",
   "attempt": 1,
   "result_sha256": "<canonical result digest>",
+  "code_sha256": "<digest of the changed files at review time>",
   "verdict": "approved",
   "checks": [{"name": "pytest", "status": "passed"}],
   "findings": [{"severity": "low", "status": "open", "summary": "Consider docs follow-up"}]
@@ -37,6 +40,6 @@ python tools/supervisor.py --root PROJECT completed --run-id RUN --task-id backe
 
 Checks are required to match the actual submitted test names and have `passed` status. No skipped/failed results or open blocker/high findings can pass. The artifact must match the task and current attempt, and its digest must match the result. Existing scope, native stop and lease checks still apply. A successful attestation stores only `review_attested` and `review_digest` in Supervisor status, not the raw review artifact.
 
-**Evidence limit:** A review JSON is caller-attested metadata, not authenticated independent review, proof of test execution, or a cryptographic signature. The gate does not run tests or trigger merges. Validate the reviewer's native execution separately before claiming independence.
+**Evidence limit:** A review JSON is caller-attested metadata, not authenticated independent review, proof of test execution, or a cryptographic signature. The gate does not run tests or trigger merges. The code digest prevents stale reuse after file changes, but it does not prove that a different agent performed the review. Validate the reviewer's native execution separately before claiming independence; never label a caller-attested review as `independently_verified`.
 
 Run Python unittest discovery and Node test suites before distribution. Restart IDE and validate the global install in a disposable project to establish native runtime compatibility.

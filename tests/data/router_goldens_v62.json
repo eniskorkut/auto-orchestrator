@@ -1,0 +1,2508 @@
+[
+ {
+  "id": "eva-001",
+  "split": "eval",
+  "domain": "backend",
+  "objective": "Implement a REST endpoint for invoice creation in the billing service",
+  "expected": [
+   "backend-api"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-002",
+  "split": "eval",
+  "domain": "backend",
+  "objective": "Add request validation and error handling to the user registration route",
+  "expected": [
+   "backend-api"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-003",
+  "split": "eval",
+  "domain": "backend",
+  "objective": "Refactor the Flask blueprint that serves order history",
+  "expected": [
+   "backend-api"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-004",
+  "split": "eval",
+  "domain": "backend",
+  "objective": "Design a GraphQL resolver for product search",
+  "expected": [
+   "backend-api"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-005",
+  "split": "eval",
+  "domain": "backend",
+  "objective": "Add pagination and filtering to the customers REST API",
+  "expected": [
+   "backend-api"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-006",
+  "split": "eval",
+  "domain": "backend",
+  "objective": "Fix a race condition in the background worker that processes payments",
+  "expected": [
+   "backend-api"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-007",
+  "split": "eval",
+  "domain": "backend",
+  "objective": "Create a FastAPI dependency for database session management",
+  "expected": [
+   "backend-api",
+   "database-sql"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-008",
+  "split": "eval",
+  "domain": "backend",
+  "objective": "Expose a health check endpoint and structured JSON errors",
+  "expected": [
+   "backend-api"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-009",
+  "split": "eval",
+  "domain": "frontend",
+  "objective": "Build a responsive settings page with React and CSS grid",
+  "expected": [
+   "frontend-react"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-010",
+  "split": "eval",
+  "domain": "frontend",
+  "objective": "Create an accessible modal component with keyboard focus trapping",
+  "expected": [
+   "frontend-react",
+   "accessibility-audit"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-011",
+  "split": "eval",
+  "domain": "frontend",
+  "objective": "Fix layout overflow in the mobile navigation bar",
+  "expected": [
+   "frontend-react"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-012",
+  "split": "eval",
+  "domain": "frontend",
+  "objective": "Convert the dashboard cards to a reusable component library",
+  "expected": [
+   "frontend-react"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-013",
+  "split": "eval",
+  "domain": "frontend",
+  "objective": "Add dark mode styles to the account page",
+  "expected": [
+   "frontend-react"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-014",
+  "split": "eval",
+  "domain": "frontend",
+  "objective": "Implement a drag-and-drop kanban board with React",
+  "expected": [
+   "frontend-react"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-015",
+  "split": "eval",
+  "domain": "frontend",
+  "objective": "Add a spring animation to the bottom sheet open transition",
+  "expected": [
+   "ui-animation"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-016",
+  "split": "eval",
+  "domain": "frontend",
+  "objective": "Create staggered entrance motion for the onboarding cards",
+  "expected": [
+   "ui-animation"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-017",
+  "split": "eval",
+  "domain": "frontend",
+  "objective": "Make the toast notification slide in and fade out",
+  "expected": [
+   "ui-animation"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-018",
+  "split": "eval",
+  "domain": "frontend",
+  "objective": "Reduce animation jank when the sidebar collapses",
+  "expected": [
+   "ui-animation",
+   "performance-profiler"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-019",
+  "split": "eval",
+  "domain": "security",
+  "objective": "Audit the login flow for session fixation and CSRF weaknesses",
+  "expected": [
+   "security-audit"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-020",
+  "split": "eval",
+  "domain": "security",
+  "objective": "Prevent XSS in the comment rendering path",
+  "expected": [
+   "security-audit"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-021",
+  "split": "eval",
+  "domain": "security",
+  "objective": "Add role-based authorization checks to admin endpoints",
+  "expected": [
+   "security-audit",
+   "backend-api"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-022",
+  "split": "eval",
+  "domain": "security",
+  "objective": "Scan the repository for leaked API keys and rotate them",
+  "expected": [
+   "security-audit"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-023",
+  "split": "eval",
+  "domain": "security",
+  "objective": "Harden password reset tokens against replay attacks",
+  "expected": [
+   "security-audit"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-024",
+  "split": "eval",
+  "domain": "testing",
+  "objective": "Write pytest fixtures for the payment service integration tests",
+  "expected": [
+   "test-automation"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-025",
+  "split": "eval",
+  "domain": "testing",
+  "objective": "Add Playwright end-to-end coverage for the checkout flow",
+  "expected": [
+   "test-automation"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-026",
+  "split": "eval",
+  "domain": "testing",
+  "objective": "Increase unit test coverage for the date parsing helpers",
+  "expected": [
+   "test-automation"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-027",
+  "split": "eval",
+  "domain": "testing",
+  "objective": "Fix a flaky integration test caused by shared database state",
+  "expected": [
+   "test-automation"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-028",
+  "split": "eval",
+  "domain": "testing",
+  "objective": "Add regression tests for the retry logic",
+  "expected": [
+   "test-automation"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-029",
+  "split": "eval",
+  "domain": "devops",
+  "objective": "Containerize the API with a multi-stage Dockerfile",
+  "expected": [
+   "devops-docker"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-030",
+  "split": "eval",
+  "domain": "devops",
+  "objective": "Add a Kubernetes readiness probe and Helm values for staging",
+  "expected": [
+   "devops-docker"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-031",
+  "split": "eval",
+  "domain": "devops",
+  "objective": "Fix the GitHub Actions workflow that publishes the image",
+  "expected": [
+   "devops-docker"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-032",
+  "split": "eval",
+  "domain": "devops",
+  "objective": "Set up Terraform for the production database and VPC",
+  "expected": [
+   "devops-docker"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-033",
+  "split": "eval",
+  "domain": "devops",
+  "objective": "Add structured logs and metrics to the deployment pipeline",
+  "expected": [
+   "devops-docker"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-034",
+  "split": "eval",
+  "domain": "ai",
+  "objective": "Build a retrieval pipeline with embeddings and a vector index",
+  "expected": [
+   "rag-llm"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-035",
+  "split": "eval",
+  "domain": "ai",
+  "objective": "Evaluate prompt variants for the support assistant",
+  "expected": [
+   "rag-llm"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-036",
+  "split": "eval",
+  "domain": "ai",
+  "objective": "Add document chunking and reranking to the knowledge base search",
+  "expected": [
+   "rag-llm"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-037",
+  "split": "eval",
+  "domain": "ai",
+  "objective": "Reduce hallucinations in the LLM answer generation step",
+  "expected": [
+   "rag-llm"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-038",
+  "split": "eval",
+  "domain": "ai",
+  "objective": "Create a tool-calling agent that queries internal APIs",
+  "expected": [
+   "rag-llm",
+   "backend-api"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-039",
+  "split": "eval",
+  "domain": "database",
+  "objective": "Design a normalized schema for subscription billing",
+  "expected": [
+   "database-sql"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-040",
+  "split": "eval",
+  "domain": "database",
+  "objective": "Write a migration that adds a unique index to the orders table",
+  "expected": [
+   "database-sql"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-041",
+  "split": "eval",
+  "domain": "database",
+  "objective": "Optimize a slow PostgreSQL query with an explain plan",
+  "expected": [
+   "database-sql"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-042",
+  "split": "eval",
+  "domain": "database",
+  "objective": "Fix a transaction deadlock in the inventory update",
+  "expected": [
+   "database-sql"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-043",
+  "split": "eval",
+  "domain": "database",
+  "objective": "Model many-to-many tags for the article database",
+  "expected": [
+   "database-sql"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-044",
+  "split": "eval",
+  "domain": "research",
+  "objective": "Compare vector database options for our self-hosted stack",
+  "expected": [
+   "research-scout"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-045",
+  "split": "eval",
+  "domain": "research",
+  "objective": "Investigate why the build became slower after the framework upgrade",
+  "expected": [
+   "research-scout",
+   "performance-profiler"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-046",
+  "split": "eval",
+  "domain": "research",
+  "objective": "Survey authentication libraries suitable for a Django monolith",
+  "expected": [
+   "research-scout",
+   "security-audit"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-047",
+  "split": "eval",
+  "domain": "research",
+  "objective": "Benchmark two message queue implementations",
+  "expected": [
+   "research-scout"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-048",
+  "split": "eval",
+  "domain": "research",
+  "objective": "Explore approaches for incremental static regeneration",
+  "expected": [
+   "research-scout",
+   "frontend-react"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-049",
+  "split": "eval",
+  "domain": "mixed",
+  "objective": "Sunucu tarafında ödeme API'si ekle ve hata durumlarını test et",
+  "expected": [
+   "backend-api",
+   "test-automation"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-050",
+  "split": "eval",
+  "domain": "mixed",
+  "objective": "Arayüzdeki animasyonu iyileştir ve mobilde kaymayı düzelt",
+  "expected": [
+   "ui-animation",
+   "frontend-react"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-051",
+  "split": "eval",
+  "domain": "mixed",
+  "objective": "Veritabanı şemasını güncelle ve migration yaz",
+  "expected": [
+   "database-sql"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-052",
+  "split": "eval",
+  "domain": "mixed",
+  "objective": "Docker imajını küçült ve CI süresini azalt",
+  "expected": [
+   "devops-docker"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-053",
+  "split": "eval",
+  "domain": "mixed",
+  "objective": "Güvenlik açığını kapat ve yetkilendirme testlerini ekle",
+  "expected": [
+   "security-audit",
+   "test-automation"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-054",
+  "split": "eval",
+  "domain": "mixed",
+  "objective": "RAG pipeline'ı için chunking stratejisini araştır ve uygula",
+  "expected": [
+   "rag-llm",
+   "research-scout"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-055",
+  "split": "eval",
+  "domain": "multi",
+  "objective": "Add authentication to the FastAPI app and write security regression tests",
+  "expected": [
+   "backend-api",
+   "security-audit",
+   "test-automation"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-056",
+  "split": "eval",
+  "domain": "multi",
+  "objective": "Build the React settings page and add end-to-end tests for it",
+  "expected": [
+   "frontend-react",
+   "test-automation"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-057",
+  "split": "eval",
+  "domain": "multi",
+  "objective": "Create the Postgres schema, API endpoints, and integration tests",
+  "expected": [
+   "database-sql",
+   "backend-api",
+   "test-automation"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-058",
+  "split": "eval",
+  "domain": "multi",
+  "objective": "Containerize the service, add a health endpoint, and document deployment",
+  "expected": [
+   "devops-docker",
+   "backend-api",
+   "docs-writer"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-059",
+  "split": "eval",
+  "domain": "negative",
+  "objective": "Translate the release notes into German",
+  "expected": [],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-060",
+  "split": "eval",
+  "domain": "negative",
+  "objective": "Rename the variable userId to accountId across the file",
+  "expected": [],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-061",
+  "split": "eval",
+  "domain": "negative",
+  "objective": "Update the copyright year in LICENSE",
+  "expected": [],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-062",
+  "split": "eval",
+  "domain": "negative",
+  "objective": "Summarize the meeting notes into five bullets",
+  "expected": [],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-063",
+  "split": "eval",
+  "domain": "negative",
+  "objective": "Write a haiku about autumn",
+  "expected": [],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-064",
+  "split": "eval",
+  "domain": "negative",
+  "objective": "Delete unused images from the assets folder",
+  "expected": [],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-065",
+  "split": "eval",
+  "domain": "negative",
+  "objective": "Bump the version number in package.json",
+  "expected": [],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "eva-066",
+  "split": "eval",
+  "domain": "negative",
+  "objective": "Rename the feature branch to release-candidate",
+  "expected": [],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "dev-067",
+  "split": "dev",
+  "domain": "dev",
+  "objective": "Add a route to fetch user preferences",
+  "expected": [
+   "backend-api"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "dev-068",
+  "split": "dev",
+  "domain": "dev",
+  "objective": "Validate webhook payloads in the server",
+  "expected": [
+   "backend-api"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "dev-069",
+  "split": "dev",
+  "domain": "dev",
+  "objective": "Speed up the product listing query",
+  "expected": [
+   "database-sql"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "dev-070",
+  "split": "dev",
+  "domain": "dev",
+  "objective": "Create a responsive pricing table",
+  "expected": [
+   "frontend-react"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "dev-071",
+  "split": "dev",
+  "domain": "dev",
+  "objective": "Fix button focus styles",
+  "expected": [
+   "frontend-react"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "dev-072",
+  "split": "dev",
+  "domain": "dev",
+  "objective": "Animate the accordion expand",
+  "expected": [
+   "ui-animation"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "dev-073",
+  "split": "dev",
+  "domain": "dev",
+  "objective": "Add hover motion to cards",
+  "expected": [
+   "ui-animation"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "dev-074",
+  "split": "dev",
+  "domain": "dev",
+  "objective": "Check for SQL injection in the search endpoint",
+  "expected": [
+   "security-audit"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "dev-075",
+  "split": "dev",
+  "domain": "dev",
+  "objective": "Add unit tests for the tax calculator",
+  "expected": [
+   "test-automation"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "dev-076",
+  "split": "dev",
+  "domain": "dev",
+  "objective": "Write Cypress tests for login",
+  "expected": [
+   "test-automation"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "dev-077",
+  "split": "dev",
+  "domain": "dev",
+  "objective": "Add a Docker healthcheck",
+  "expected": [
+   "devops-docker"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "dev-078",
+  "split": "dev",
+  "domain": "dev",
+  "objective": "Deploy the worker with Helm",
+  "expected": [
+   "devops-docker"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "dev-079",
+  "split": "dev",
+  "domain": "dev",
+  "objective": "Improve retrieval recall for the FAQ bot",
+  "expected": [
+   "rag-llm"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "dev-080",
+  "split": "dev",
+  "domain": "dev",
+  "objective": "Add citation support to LLM answers",
+  "expected": [
+   "rag-llm"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "dev-081",
+  "split": "dev",
+  "domain": "dev",
+  "objective": "Add a foreign key to the invoices table",
+  "expected": [
+   "database-sql"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "dev-082",
+  "split": "dev",
+  "domain": "dev",
+  "objective": "Compare Playwright and Cypress",
+  "expected": [
+   "research-scout"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "dev-083",
+  "split": "dev",
+  "domain": "dev",
+  "objective": "Investigate memory growth in the API",
+  "expected": [
+   "research-scout",
+   "performance-profiler"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "dev-084",
+  "split": "dev",
+  "domain": "dev",
+  "objective": "API endpoint ekle ve pytest yaz",
+  "expected": [
+   "backend-api",
+   "test-automation"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "dev-085",
+  "split": "dev",
+  "domain": "dev",
+  "objective": "React bileşeni oluştur ve animasyon ekle",
+  "expected": [
+   "frontend-react",
+   "ui-animation"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "dev-086",
+  "split": "dev",
+  "domain": "dev",
+  "objective": "Build a secure upload endpoint with tests",
+  "expected": [
+   "backend-api",
+   "security-audit",
+   "test-automation"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "dev-087",
+  "split": "dev",
+  "domain": "dev",
+  "objective": "Refactor duplicated validation helpers",
+  "expected": [
+   "refactor-helper"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "dev-088",
+  "split": "dev",
+  "domain": "dev",
+  "objective": "Improve Lighthouse performance score",
+  "expected": [
+   "performance-profiler",
+   "frontend-react"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "dev-089",
+  "split": "dev",
+  "domain": "dev",
+  "objective": "Add WCAG contrast fixes to the theme",
+  "expected": [
+   "accessibility-audit"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "dev-090",
+  "split": "dev",
+  "domain": "dev",
+  "objective": "Build an iOS settings screen in Swift",
+  "expected": [
+   "mobile-swift"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "dev-091",
+  "split": "dev",
+  "domain": "dev",
+  "objective": "Write the API reference documentation",
+  "expected": [
+   "docs-writer"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "dev-092",
+  "split": "dev",
+  "domain": "dev",
+  "objective": "Format the JSON config",
+  "expected": [],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "dev-093",
+  "split": "dev",
+  "domain": "dev",
+  "objective": "Rename the docs folder",
+  "expected": [],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "dev-094",
+  "split": "dev",
+  "domain": "dev",
+  "objective": "Archive old logs",
+  "expected": [],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "dev-095",
+  "split": "dev",
+  "domain": "dev",
+  "objective": "Update the README badge",
+  "expected": [
+   "docs-writer"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "dev-096",
+  "split": "dev",
+  "domain": "dev",
+  "objective": "Sort imports in utils.py",
+  "expected": [
+   "refactor-helper"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "hol-001",
+  "split": "holdout",
+  "domain": "backend",
+  "objective": "Add a retry policy to the payment webhook handler",
+  "expected": [
+   "backend-api"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "hol-002",
+  "split": "holdout",
+  "domain": "backend",
+  "objective": "Expose metrics for the order service",
+  "expected": [
+   "backend-api",
+   "devops-docker"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "hol-003",
+  "split": "holdout",
+  "domain": "backend",
+  "objective": "Implement cursor pagination for the audit log API",
+  "expected": [
+   "backend-api"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "hol-004",
+  "split": "holdout",
+  "domain": "backend",
+  "objective": "Validate multipart uploads in the Express server",
+  "expected": [
+   "backend-api"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "hol-005",
+  "split": "holdout",
+  "domain": "frontend",
+  "objective": "Build a responsive checkout form with React Hook Form",
+  "expected": [
+   "frontend-react"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "hol-006",
+  "split": "holdout",
+  "domain": "frontend",
+  "objective": "Fix z-index stacking for the dropdown menu",
+  "expected": [
+   "frontend-react"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "hol-007",
+  "split": "holdout",
+  "domain": "frontend",
+  "objective": "Add reduced-motion support to the page transitions",
+  "expected": [
+   "ui-animation",
+   "accessibility-audit"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "hol-008",
+  "split": "holdout",
+  "domain": "frontend",
+  "objective": "Animate the notification badge with a subtle pulse",
+  "expected": [
+   "ui-animation"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "hol-009",
+  "split": "holdout",
+  "domain": "security",
+  "objective": "Prevent open redirects in the login callback",
+  "expected": [
+   "security-audit"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "hol-010",
+  "split": "holdout",
+  "domain": "security",
+  "objective": "Add rate limiting to the password reset endpoint",
+  "expected": [
+   "security-audit",
+   "backend-api"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "hol-011",
+  "split": "holdout",
+  "domain": "testing",
+  "objective": "Add contract tests for the billing client",
+  "expected": [
+   "test-automation"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "hol-012",
+  "split": "holdout",
+  "domain": "testing",
+  "objective": "Stabilize the flaky Playwright login test",
+  "expected": [
+   "test-automation"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "hol-013",
+  "split": "holdout",
+  "domain": "devops",
+  "objective": "Write a Dockerfile for the worker and add a healthcheck",
+  "expected": [
+   "devops-docker"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "hol-014",
+  "split": "holdout",
+  "domain": "devops",
+  "objective": "Provision an S3 bucket with Terraform",
+  "expected": [
+   "devops-docker"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "hol-015",
+  "split": "holdout",
+  "domain": "devops",
+  "objective": "Fix the CI job that runs database migrations",
+  "expected": [
+   "devops-docker",
+   "database-sql"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "hol-016",
+  "split": "holdout",
+  "domain": "ai",
+  "objective": "Add hybrid search with BM25 and embeddings",
+  "expected": [
+   "rag-llm"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "hol-017",
+  "split": "holdout",
+  "domain": "ai",
+  "objective": "Implement citation rendering for RAG answers",
+  "expected": [
+   "rag-llm"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "hol-018",
+  "split": "holdout",
+  "domain": "ai",
+  "objective": "Reduce prompt token usage in the summarizer",
+  "expected": [
+   "rag-llm",
+   "performance-profiler"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "hol-019",
+  "split": "holdout",
+  "domain": "database",
+  "objective": "Add a composite index for the event log table",
+  "expected": [
+   "database-sql"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "hol-020",
+  "split": "holdout",
+  "domain": "database",
+  "objective": "Resolve a lock timeout in the order transaction",
+  "expected": [
+   "database-sql"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "hol-021",
+  "split": "holdout",
+  "domain": "research",
+  "objective": "Compare Kafka and RabbitMQ for our event bus",
+  "expected": [
+   "research-scout"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "hol-022",
+  "split": "holdout",
+  "domain": "research",
+  "objective": "Investigate a memory leak in the worker process",
+  "expected": [
+   "research-scout",
+   "performance-profiler"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "hol-023",
+  "split": "holdout",
+  "domain": "research",
+  "objective": "Survey feature flag providers for a monorepo",
+  "expected": [
+   "research-scout"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "hol-024",
+  "split": "holdout",
+  "domain": "security",
+  "objective": "Add RBAC checks to the reporting API",
+  "expected": [
+   "security-audit",
+   "backend-api"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "hol-025",
+  "split": "holdout",
+  "domain": "frontend",
+  "objective": "Build an accessible date picker with keyboard support",
+  "expected": [
+   "frontend-react",
+   "accessibility-audit"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "hol-026",
+  "split": "holdout",
+  "domain": "devops",
+  "objective": "Containerize the frontend and serve it with nginx",
+  "expected": [
+   "devops-docker"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "hol-027",
+  "split": "holdout",
+  "domain": "backend",
+  "objective": "Add structured error responses to the GraphQL gateway",
+  "expected": [
+   "backend-api"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "hol-028",
+  "split": "holdout",
+  "domain": "frontend",
+  "objective": "Optimize the dashboard chart rendering performance",
+  "expected": [
+   "frontend-react",
+   "performance-profiler"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "hol-029",
+  "split": "holdout",
+  "domain": "database",
+  "objective": "Write a migration to backfill tenant IDs",
+  "expected": [
+   "database-sql"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "hol-030",
+  "split": "holdout",
+  "domain": "devops",
+  "objective": "Add OpenTelemetry traces to the checkout service",
+  "expected": [
+   "devops-docker"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "hol-031",
+  "split": "holdout",
+  "domain": "mixed",
+  "objective": "Docker imajını ve CI pipeline'ını güncelle",
+  "expected": [
+   "devops-docker"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "hol-032",
+  "split": "holdout",
+  "domain": "mixed",
+  "objective": "Kullanıcı giriş akışındaki güvenlik açığını kapat",
+  "expected": [
+   "security-audit"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "hol-033",
+  "split": "holdout",
+  "domain": "mixed",
+  "objective": "React bileşenlerinde erişilebilirliği iyileştir",
+  "expected": [
+   "frontend-react",
+   "accessibility-audit"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "hol-034",
+  "split": "holdout",
+  "domain": "mixed",
+  "objective": "Veritabanı sorgusunu optimize et ve index ekle",
+  "expected": [
+   "database-sql",
+   "performance-profiler"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "hol-035",
+  "split": "holdout",
+  "domain": "mixed",
+  "objective": "RAG cevaplarında kaynak gösterimi ekle",
+  "expected": [
+   "rag-llm"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "hol-036",
+  "split": "holdout",
+  "domain": "negative",
+  "objective": "Translate the onboarding checklist into Spanish",
+  "expected": [],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "hol-037",
+  "split": "holdout",
+  "domain": "negative",
+  "objective": "Write a short poem about the ocean",
+  "expected": [],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "hol-038",
+  "split": "holdout",
+  "domain": "negative",
+  "objective": "Remove the old logo from the press kit",
+  "expected": [],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "hol-039",
+  "split": "holdout",
+  "domain": "negative",
+  "objective": "Rename the variable retryCount to attempts",
+  "expected": [],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "hol-040",
+  "split": "holdout",
+  "domain": "negative",
+  "objective": "Summarize the customer interview notes",
+  "expected": [],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "hol-041",
+  "split": "holdout",
+  "domain": "negative",
+  "objective": "Convert a screenshot to PNG",
+  "expected": [],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "bln-001",
+  "split": "blind",
+  "domain": "backend",
+  "objective": "Add a GraphQL mutation for updating a shipping address",
+  "expected": [
+   "backend-api"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "bln-002",
+  "split": "blind",
+  "domain": "backend",
+  "objective": "Return 409 when the email already exists in the signup service",
+  "expected": [
+   "backend-api"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "bln-003",
+  "split": "blind",
+  "domain": "frontend",
+  "objective": "Create a reusable combobox component with ARIA labels",
+  "expected": [
+   "frontend-react",
+   "accessibility-audit"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "bln-004",
+  "split": "blind",
+  "domain": "frontend",
+  "objective": "Fix horizontal scroll on the pricing page at 375px",
+  "expected": [
+   "frontend-react"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "bln-005",
+  "split": "blind",
+  "domain": "frontend",
+  "objective": "Add a crossfade when switching tabs",
+  "expected": [
+   "ui-animation"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "bln-006",
+  "split": "blind",
+  "domain": "security",
+  "objective": "Audit JWT verification for algorithm confusion",
+  "expected": [
+   "security-audit"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "bln-007",
+  "split": "blind",
+  "domain": "security",
+  "objective": "Escape user HTML in the profile bio renderer",
+  "expected": [
+   "security-audit"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "bln-008",
+  "split": "blind",
+  "domain": "testing",
+  "objective": "Add property-based tests for the money parser",
+  "expected": [
+   "test-automation"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "bln-009",
+  "split": "blind",
+  "domain": "testing",
+  "objective": "Run the Cypress suite against the staging URL in CI",
+  "expected": [
+   "test-automation",
+   "devops-docker"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "bln-010",
+  "split": "blind",
+  "domain": "devops",
+  "objective": "Build a multi-arch image for the API service",
+  "expected": [
+   "devops-docker"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "bln-011",
+  "split": "blind",
+  "domain": "devops",
+  "objective": "Add a Helm chart for the background worker",
+  "expected": [
+   "devops-docker"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "bln-012",
+  "split": "blind",
+  "domain": "ai",
+  "objective": "Store document embeddings in pgvector",
+  "expected": [
+   "rag-llm",
+   "database-sql"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "bln-013",
+  "split": "blind",
+  "domain": "ai",
+  "objective": "Add reranking to the support article search",
+  "expected": [
+   "rag-llm"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "bln-014",
+  "split": "blind",
+  "domain": "database",
+  "objective": "Write a SQL query to detect duplicate invoices",
+  "expected": [
+   "database-sql"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "bln-015",
+  "split": "blind",
+  "domain": "database",
+  "objective": "Add a partial index for active subscriptions",
+  "expected": [
+   "database-sql"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "bln-016",
+  "split": "blind",
+  "domain": "research",
+  "objective": "Study the tradeoffs of event sourcing for the ledger",
+  "expected": [
+   "research-scout"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "bln-017",
+  "split": "blind",
+  "domain": "research",
+  "objective": "Benchmark our image pipeline against sharp",
+  "expected": [
+   "research-scout",
+   "performance-profiler"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "bln-018",
+  "split": "blind",
+  "domain": "security",
+  "objective": "Secure the admin impersonation endpoint with audit logs",
+  "expected": [
+   "security-audit",
+   "backend-api"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "bln-019",
+  "split": "blind",
+  "domain": "frontend",
+  "objective": "Add dark mode tokens to the design system",
+  "expected": [
+   "frontend-react"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "bln-020",
+  "split": "blind",
+  "domain": "frontend",
+  "objective": "Prevent layout shift when the banner loads",
+  "expected": [
+   "frontend-react",
+   "performance-profiler"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "bln-021",
+  "split": "blind",
+  "domain": "testing",
+  "objective": "Add an integration test for the webhook signature check",
+  "expected": [
+   "test-automation",
+   "security-audit"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "bln-022",
+  "split": "blind",
+  "domain": "devops",
+  "objective": "Containerize the cron job and add resource limits",
+  "expected": [
+   "devops-docker"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "bln-023",
+  "split": "blind",
+  "domain": "mixed",
+  "objective": "API yanıtlarına sayfalama ekle",
+  "expected": [
+   "backend-api"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "bln-024",
+  "split": "blind",
+  "domain": "mixed",
+  "objective": "Animasyonlu bildirim bileşeni oluştur",
+  "expected": [
+   "ui-animation",
+   "frontend-react"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "bln-025",
+  "split": "blind",
+  "domain": "mixed",
+  "objective": "Veritabanı yedeğini doğrulayan bir test yaz",
+  "expected": [
+   "test-automation",
+   "database-sql"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "bln-026",
+  "split": "blind",
+  "domain": "mixed",
+  "objective": "Güvenlik başlıklarını ve CSP'yi yapılandır",
+  "expected": [
+   "security-audit",
+   "devops-docker"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "bln-027",
+  "split": "blind",
+  "domain": "negative",
+  "objective": "Summarize this blog post in three sentences",
+  "expected": [],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "bln-028",
+  "split": "blind",
+  "domain": "negative",
+  "objective": "Write a birthday message for a colleague",
+  "expected": [],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "bln-029",
+  "split": "blind",
+  "domain": "negative",
+  "objective": "Convert the logo to favicon.ico",
+  "expected": [],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "bln-030",
+  "split": "blind",
+  "domain": "negative",
+  "objective": "Delete the temporary benchmark results folder",
+  "expected": [],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b2-001",
+  "split": "blind2",
+  "domain": "backend",
+  "objective": "Add idempotency keys to the refund endpoint",
+  "expected": [
+   "backend-api"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b2-002",
+  "split": "blind2",
+  "domain": "backend",
+  "objective": "Validate ISO dates in the booking service",
+  "expected": [
+   "backend-api"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b2-003",
+  "split": "blind2",
+  "domain": "frontend",
+  "objective": "Build a stepper component with form validation",
+  "expected": [
+   "frontend-react"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b2-004",
+  "split": "blind2",
+  "domain": "frontend",
+  "objective": "Fix sticky header overlap on mobile Safari",
+  "expected": [
+   "frontend-react"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b2-005",
+  "split": "blind2",
+  "domain": "frontend",
+  "objective": "Add a confetti animation when onboarding completes",
+  "expected": [
+   "ui-animation"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b2-006",
+  "split": "blind2",
+  "domain": "frontend",
+  "objective": "Add a shimmer skeleton while content loads",
+  "expected": [
+   "ui-animation",
+   "frontend-react"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b2-007",
+  "split": "blind2",
+  "domain": "security",
+  "objective": "Rotate the signing key without downtime",
+  "expected": [
+   "security-audit",
+   "devops-docker"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b2-008",
+  "split": "blind2",
+  "domain": "security",
+  "objective": "Prevent SSRF in the image proxy",
+  "expected": [
+   "security-audit"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b2-009",
+  "split": "blind2",
+  "domain": "testing",
+  "objective": "Add mutation testing for the pricing module",
+  "expected": [
+   "test-automation"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b2-010",
+  "split": "blind2",
+  "domain": "testing",
+  "objective": "Write contract tests for the notification consumer",
+  "expected": [
+   "test-automation"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b2-011",
+  "split": "blind2",
+  "domain": "devops",
+  "objective": "Add a canary deployment for the API",
+  "expected": [
+   "devops-docker"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b2-012",
+  "split": "blind2",
+  "domain": "devops",
+  "objective": "Configure autoscaling for the worker pool",
+  "expected": [
+   "devops-docker"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b2-013",
+  "split": "blind2",
+  "domain": "ai",
+  "objective": "Implement semantic chunking for legal documents",
+  "expected": [
+   "rag-llm"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b2-014",
+  "split": "blind2",
+  "domain": "ai",
+  "objective": "Add guardrails against prompt injection",
+  "expected": [
+   "rag-llm",
+   "security-audit"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b2-015",
+  "split": "blind2",
+  "domain": "database",
+  "objective": "Add a unique constraint for tenant slugs",
+  "expected": [
+   "database-sql"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b2-016",
+  "split": "blind2",
+  "domain": "database",
+  "objective": "Rewrite a correlated subquery as a join",
+  "expected": [
+   "database-sql"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b2-017",
+  "split": "blind2",
+  "domain": "research",
+  "objective": "Assess whether to adopt a monorepo build system",
+  "expected": [
+   "research-scout"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b2-018",
+  "split": "blind2",
+  "domain": "research",
+  "objective": "Compare Lambda cold-start strategies",
+  "expected": [
+   "research-scout",
+   "performance-profiler"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b2-019",
+  "split": "blind2",
+  "domain": "security",
+  "objective": "Add audit logging for privilege changes",
+  "expected": [
+   "security-audit",
+   "backend-api"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b2-020",
+  "split": "blind2",
+  "domain": "frontend",
+  "objective": "Make the data table keyboard navigable",
+  "expected": [
+   "frontend-react",
+   "accessibility-audit"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b2-021",
+  "split": "blind2",
+  "domain": "frontend",
+  "objective": "Reduce bundle size for the marketing site",
+  "expected": [
+   "frontend-react",
+   "performance-profiler"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b2-022",
+  "split": "blind2",
+  "domain": "backend",
+  "objective": "Add retries with jitter to the outbound webhook client",
+  "expected": [
+   "backend-api"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b2-023",
+  "split": "blind2",
+  "domain": "security",
+  "objective": "Harden the CI workflow against dependency confusion",
+  "expected": [
+   "security-audit",
+   "devops-docker"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b2-024",
+  "split": "blind2",
+  "domain": "mixed",
+  "objective": "API hatalarını yapılandırılmış biçimde döndür",
+  "expected": [
+   "backend-api"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b2-025",
+  "split": "blind2",
+  "domain": "mixed",
+  "objective": "Mobil menüdeki taşmayı düzelt",
+  "expected": [
+   "frontend-react"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b2-026",
+  "split": "blind2",
+  "domain": "mixed",
+  "objective": "RAG yanıtları için yeniden sıralama ekle",
+  "expected": [
+   "rag-llm"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b2-027",
+  "split": "blind2",
+  "domain": "mixed",
+  "objective": "Veritabanı şemasına TenantID ekle",
+  "expected": [
+   "database-sql"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b2-028",
+  "split": "blind2",
+  "domain": "negative",
+  "objective": "Translate the changelog to Japanese",
+  "expected": [],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b2-029",
+  "split": "blind2",
+  "domain": "negative",
+  "objective": "Create a playlist cover image",
+  "expected": [],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b2-030",
+  "split": "blind2",
+  "domain": "negative",
+  "objective": "Summarize the release retro notes",
+  "expected": [],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b3-001",
+  "split": "blind3",
+  "domain": "backend",
+  "objective": "Implement optimistic locking for the inventory service",
+  "expected": [
+   "backend-api"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b3-002",
+  "split": "blind3",
+  "domain": "backend",
+  "objective": "Normalize phone numbers in the signup flow",
+  "expected": [
+   "backend-api"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b3-003",
+  "split": "blind3",
+  "domain": "frontend",
+  "objective": "Add a command palette with fuzzy search",
+  "expected": [
+   "frontend-react"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b3-004",
+  "split": "blind3",
+  "domain": "frontend",
+  "objective": "Fix the carousel swipe gesture on iOS",
+  "expected": [
+   "frontend-react"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b3-005",
+  "split": "blind3",
+  "domain": "frontend",
+  "objective": "Add a parallax hero animation",
+  "expected": [
+   "ui-animation"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b3-006",
+  "split": "blind3",
+  "domain": "frontend",
+  "objective": "Respect prefers-reduced-motion in the modal",
+  "expected": [
+   "ui-animation",
+   "accessibility-audit"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b3-007",
+  "split": "blind3",
+  "domain": "security",
+  "objective": "Threat-model the file upload feature",
+  "expected": [
+   "security-audit"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b3-008",
+  "split": "blind3",
+  "domain": "security",
+  "objective": "Add CSP nonces to the server-rendered pages",
+  "expected": [
+   "security-audit",
+   "frontend-react"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b3-009",
+  "split": "blind3",
+  "domain": "testing",
+  "objective": "Add snapshot tests for the invoice renderer",
+  "expected": [
+   "test-automation"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b3-010",
+  "split": "blind3",
+  "domain": "testing",
+  "objective": "Write load tests for the checkout API",
+  "expected": [
+   "test-automation",
+   "performance-profiler"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b3-011",
+  "split": "blind3",
+  "domain": "devops",
+  "objective": "Set up blue-green deployment for the API",
+  "expected": [
+   "devops-docker"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b3-012",
+  "split": "blind3",
+  "domain": "devops",
+  "objective": "Add a Kubernetes pod disruption budget",
+  "expected": [
+   "devops-docker"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b3-013",
+  "split": "blind3",
+  "domain": "ai",
+  "objective": "Build a reranker for the FAQ retrieval pipeline",
+  "expected": [
+   "rag-llm"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b3-014",
+  "split": "blind3",
+  "domain": "ai",
+  "objective": "Evaluate guardrail false positives in the LLM assistant",
+  "expected": [
+   "rag-llm"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b3-015",
+  "split": "blind3",
+  "domain": "database",
+  "objective": "Add a check constraint for order totals",
+  "expected": [
+   "database-sql"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b3-016",
+  "split": "blind3",
+  "domain": "database",
+  "objective": "Partition the events table by month",
+  "expected": [
+   "database-sql"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b3-017",
+  "split": "blind3",
+  "domain": "research",
+  "objective": "Evaluate whether to migrate from REST to gRPC",
+  "expected": [
+   "research-scout",
+   "backend-api"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b3-018",
+  "split": "blind3",
+  "domain": "research",
+  "objective": "Study the cost of vector index rebuilds",
+  "expected": [
+   "research-scout",
+   "rag-llm"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b3-019",
+  "split": "blind3",
+  "domain": "security",
+  "objective": "Add signed webhook verification",
+  "expected": [
+   "security-audit",
+   "backend-api"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b3-020",
+  "split": "blind3",
+  "domain": "frontend",
+  "objective": "Make the chart tooltips screen-reader friendly",
+  "expected": [
+   "frontend-react",
+   "accessibility-audit"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b3-021",
+  "split": "blind3",
+  "domain": "frontend",
+  "objective": "Reduce cold-start time for the serverless API",
+  "expected": [
+   "performance-profiler",
+   "backend-api"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b3-022",
+  "split": "blind3",
+  "domain": "backend",
+  "objective": "Add circuit breaking to the payment client",
+  "expected": [
+   "backend-api"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b3-023",
+  "split": "blind3",
+  "domain": "security",
+  "objective": "Pin GitHub Actions to commit SHAs",
+  "expected": [
+   "security-audit",
+   "devops-docker"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b3-024",
+  "split": "blind3",
+  "domain": "mixed",
+  "objective": "Ödeme servisine idempotency anahtarı ekle",
+  "expected": [
+   "backend-api"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b3-025",
+  "split": "blind3",
+  "domain": "mixed",
+  "objective": "Mobilde tablo kaydırmasını düzelt",
+  "expected": [
+   "frontend-react"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b3-026",
+  "split": "blind3",
+  "domain": "mixed",
+  "objective": "Vektör aramasında yeniden sıralama ekle",
+  "expected": [
+   "rag-llm"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b3-027",
+  "split": "blind3",
+  "domain": "mixed",
+  "objective": "Şema değişikliği için migration yaz",
+  "expected": [
+   "database-sql"
+  ],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b3-028",
+  "split": "blind3",
+  "domain": "negative",
+  "objective": "Translate the support macro to French",
+  "expected": [],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b3-029",
+  "split": "blind3",
+  "domain": "negative",
+  "objective": "Write a limerick about deploys",
+  "expected": [],
+  "read": [],
+  "write": []
+ },
+ {
+  "id": "b3-030",
+  "split": "blind3",
+  "domain": "negative",
+  "objective": "Compress the office photos",
+  "expected": [],
+  "read": [],
+  "write": []
+ }
+]

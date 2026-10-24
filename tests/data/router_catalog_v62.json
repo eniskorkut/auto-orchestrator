@@ -1,0 +1,82 @@
+[
+ {
+  "name": "accessibility-audit",
+  "description": "Audit WCAG accessibility, keyboard navigation, screen readers, and color contrast.",
+  "path": "../ao-eval/project/.agents/skills/accessibility-audit/SKILL.md"
+ },
+ {
+  "name": "backend-api",
+  "description": "Design and implement backend REST API endpoints, request validation, server routes, and service layers in Python.",
+  "path": "../ao-eval/project/.agents/skills/backend-api/SKILL.md"
+ },
+ {
+  "name": "data-analysis",
+  "description": "Analyze tabular datasets with pandas, statistics, and visualizations.",
+  "path": "../ao-eval/project/.agents/skills/data-analysis/SKILL.md"
+ },
+ {
+  "name": "database-sql",
+  "description": "Design relational database schemas, SQL queries, migrations, indexes, and transactions.",
+  "path": "../ao-eval/project/.agents/skills/database-sql/SKILL.md"
+ },
+ {
+  "name": "devops-docker",
+  "description": "Containerize services with Docker, deploy with Kubernetes/Helm, and maintain CI/CD pipelines.",
+  "path": "../ao-eval/project/.agents/skills/devops-docker/SKILL.md"
+ },
+ {
+  "name": "docs-writer",
+  "description": "Write README documentation, tutorials, changelogs, and API reference docs.",
+  "path": "../ao-eval/project/.agents/skills/docs-writer/SKILL.md"
+ },
+ {
+  "name": "frontend-react",
+  "description": "Build React frontend components, responsive UI layouts, CSS styling, and accessible interfaces.",
+  "path": "../ao-eval/project/.agents/skills/frontend-react/SKILL.md"
+ },
+ {
+  "name": "generic-helper",
+  "description": "Help implement projects and manage code tasks.",
+  "path": "../ao-eval/project/.agents/skills/generic-helper/SKILL.md"
+ },
+ {
+  "name": "mobile-swift",
+  "description": "Build mobile-native Swift and iOS interfaces with platform integrations.",
+  "path": "../ao-eval/project/.agents/skills/mobile-swift/SKILL.md"
+ },
+ {
+  "name": "performance-profiler",
+  "description": "Profile CPU and memory performance, optimize hot paths, and reduce latency.",
+  "path": "../ao-eval/project/.agents/skills/performance-profiler/SKILL.md"
+ },
+ {
+  "name": "rag-llm",
+  "description": "Build retrieval-augmented generation and LLM pipelines: embeddings, vector search, prompt evaluation.",
+  "path": "../ao-eval/project/.agents/skills/rag-llm/SKILL.md"
+ },
+ {
+  "name": "refactor-helper",
+  "description": "Refactor existing code for maintainability, remove duplication, and improve structure.",
+  "path": "../ao-eval/project/.agents/skills/refactor-helper/SKILL.md"
+ },
+ {
+  "name": "research-scout",
+  "description": "Research technical options, compare libraries, investigate architecture, and summarize evidence.",
+  "path": "../ao-eval/project/.agents/skills/research-scout/SKILL.md"
+ },
+ {
+  "name": "security-audit",
+  "description": "Audit application security: authentication, authorization, XSS/CSRF, secrets, and OWASP risks.",
+  "path": "../ao-eval/project/.agents/skills/security-audit/SKILL.md"
+ },
+ {
+  "name": "test-automation",
+  "description": "Write and maintain unit, integration, and end-to-end tests with pytest, Playwright, and coverage.",
+  "path": "../ao-eval/project/.agents/skills/test-automation/SKILL.md"
+ },
+ {
+  "name": "ui-animation",
+  "description": "Create web UI motion, transitions, micro-interactions, and animation timing.",
+  "path": "../ao-eval/project/.agents/skills/ui-animation/SKILL.md"
+ }
+]
