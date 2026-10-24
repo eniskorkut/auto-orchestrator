@@ -13,7 +13,7 @@ except ModuleNotFoundError:
 
 # Skill selection must be conservative: a single incidental description word
 # must not route backend work to an animation/UI skill.
-WORDS=re.compile(r"[^\\W_][\\w.+-]*",re.UNICODE)
+WORDS=re.compile(r"[^\W_]+",re.UNICODE)
 STOP={"agent","agents","skill","skills","task","tasks","code","coding","file","files",
       "implement","implementation","review","reviews","this","that","those","these",
       "with","from","must","and","the","for","using","should","work","works",
@@ -45,8 +45,8 @@ def tokens(value):
     if not isinstance(value,str):
         return set()
     # CamelCase, slash paths, and hyphenated skill names are split into words.
-    value=re.sub(r"([a-z0-9])([A-Z])",r"\\1 \\2",value)
-    value=re.sub(r"[/_.+\\\\-]", " ", value)
+    value=re.sub(r"([a-z0-9])([A-Z])",r"\1 \2",value)
+    value=re.sub(r"[/_.+\-]", " ", value)
     return {w.lower() for w in WORDS.findall(value)
             if w.lower() not in STOP and len(w)>=2}
 
