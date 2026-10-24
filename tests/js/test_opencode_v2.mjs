@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, readdirSync, rmSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, existsSync, mkdirSync, writeFileSync, copyFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import plugin, { observedOverlapMs } from '../../adapters/opencode-v2/auto_orchestrator.js';
@@ -49,7 +51,7 @@ async function sandbox(fn, getSession = null, options = {}) {
       : [];
   };
   try {
-    const dispose = await plugin.setup(ctx);
+    const dispose = await (options.pluginImpl ?? plugin).setup(ctx);
     try { await fn({ project, foreignProject, hooks, emit, read, toasts }); }
     finally { dispose(); }
   } finally { rmSync(root, { recursive: true, force: true }); }
@@ -663,4 +665,117 @@ test('V6 foreground native subagent tool still permits quality-gated verificatio
     assert.deepEqual(read()[0].map(e=>e.event),
       ['start','agent-start','agent-stop','check','finish','verified']);
   });
+});
+
+test('V6 OpenCode 2.1 shell command-only shape verifies with authoritative session lookup', async () => {
+  let owner;
+  await sandbox(async ({project,hooks,emit,read}) => {
+    owner = project;
+    enableGate(project);
+    writeFileSync(join(project,'.auto-orchestrator','verification.json'), JSON.stringify({
+      version:1,auto_verify:true,
+      required_checks:[{id:'unit',tool:'shell',command:'python -m pytest -q'}],
+    }));
+    await emit(lifecycle('session.execution.started','shell-native',project));
+    // Observed v2.1.x wrapper: input has command only; no cwd, no status.
+    const native = { id:'native-command-1',tool:'shell',sessionID:'shell-native',
+      input:{command:'python -m pytest -q'},result:{metadata:{exit:0}} };
+    await hooks['execute.before'](native);
+    await hooks['execute.after'](native);
+    await emit(lifecycle('session.execution.succeeded','shell-native',project));
+    assert.deepEqual(read()[0].map(e=>e.event),['start','check','finish','verified']);
+  }, () => ({location:{directory:owner}}));
+});
+
+test('V6 shell command-only without authoritative lookup cannot verify', async () => {
+  await sandbox(async ({project,hooks,emit,read}) => {
+    enableGate(project);
+    writeFileSync(join(project,'.auto-orchestrator','verification.json'), JSON.stringify({
+      version:1,auto_verify:true,
+      required_checks:[{id:'unit',tool:'shell',command:'python -m pytest -q'}],
+    }));
+    await emit(lifecycle('session.execution.started','untrusted-default',project));
+    const native = {id:'native-command-2',tool:'shell',
+      location:{directory:project},data:{sessionID:'untrusted-default'},
+      input:{command:'python -m pytest -q'},result:{metadata:{exit:0}}};
+    await hooks['execute.before'](native);
+    await hooks['execute.after'](native);
+    await emit(lifecycle('session.execution.succeeded','untrusted-default',project));
+    assert.deepEqual(read()[0].map(e=>e.event),['start','mutation','finish']);
+  });
+});
+
+test('V6 shell command-only rejects explicit native failure and moved sessions', async () => {
+  let owner;
+  await sandbox(async ({project,foreignProject,hooks,emit,read}) => {
+    owner=project;
+    enableGate(project);
+    writeFileSync(join(project,'.auto-orchestrator','verification.json'), JSON.stringify({
+      version:1,auto_verify:true,
+      required_checks:[{id:'unit',tool:'shell',command:'python -m pytest -q'}],
+    }));
+    await emit(lifecycle('session.execution.started','error-shell',project));
+    const native = {id:'failed-shell-1',tool:'shell',data:{sessionID:'error-shell'},
+      input:{command:'python -m pytest -q'},result:{metadata:{exit:0,status:'failed'}}};
+    await hooks['execute.before'](native);
+    await hooks['execute.after'](native);
+    await emit(lifecycle('session.execution.succeeded','error-shell',project));
+    assert.deepEqual(read()[0].map(e=>e.event),['start','finish']);
+    owner=foreignProject;
+    await emit(lifecycle('session.execution.started','error-shell',foreignProject));
+    assert.equal(read().length,1);
+  },()=>({location:{directory:owner}}));
+});
+
+test('V6 OpenCode plugin forwards hashed native lifecycle to SQLite even if binding is late', async (t) => {
+  const python = process.env.AUTO_ORCHESTRATOR_PYTHON || 'python3';
+  if (process.platform === 'win32' || spawnSync(python,['--version']).status !== 0) {
+    t.skip('Requires a POSIX Python runtime for native supervisor bridge');
+    return;
+  }
+  const root = mkdtempSync(join(tmpdir(),'ao-v6-installed-'));
+  try {
+    const plugins = join(root,'plugins');
+    const helpers = join(root,'auto-orchestrator','tools');
+    mkdirSync(plugins,{recursive:true});
+    mkdirSync(helpers,{recursive:true});
+    writeFileSync(join(root,'package.json'),'{"type":"module"}');
+    const installed = join(plugins,'auto_orchestrator.js');
+    copyFileSync(new URL('../../adapters/opencode-v2/auto_orchestrator.js',import.meta.url),installed);
+    const script = join(helpers,'supervisor.py');
+    copyFileSync(new URL('../../tools/supervisor.py',import.meta.url),script);
+    const installedPlugin = (await import(pathToFileURL(installed).href)).default;
+    let owner;
+    await sandbox(async ({project,hooks,emit,read}) => {
+      owner=project;
+      const plan = join(project,'plan.json');
+      mkdirSync(project,{recursive:true});
+      writeFileSync(plan,JSON.stringify({native_supervision:true,tasks:[{
+        id:'verify',role:'tester',objective:'Run checks',read_scope:[],write_scope:[],
+      }]}));
+      const invoke=(...args)=>{
+        const p=spawnSync(python,[script,'--root',project,...args],{encoding:'utf8'});
+        assert.equal(p.status,0,p.stderr);
+        return JSON.parse(p.stdout);
+      };
+      invoke('init','--run-id','live-1','--plan',plan);
+      const lease=invoke('claim','--run-id','live-1').claimed[0].lease;
+      await emit(lifecycle('session.execution.started','live-native',project));
+      await hooks['execute.before'](subagent('real-tool-call-123','live-native'));
+      await hooks['execute.after'](subagent('real-tool-call-123','live-native','completed'));
+      const events=read()[0];
+      const digest=events.find(e=>e.event==='agent-start').native_hash;
+      assert.match(digest,/^[0-9a-f]{64}$/);
+      assert.equal(events.find(e=>e.event==='agent-stop').native_hash,digest);
+      invoke('bind-native','--run-id','live-1','--task-id','verify',
+        '--lease',lease,'--platform','opencode','--native-hash',digest);
+      const state=invoke('status','--run-id','live-1');
+      assert.equal(state.tasks[0].native_stop_observed,true);
+      const resultFile=join(project,'result.json');
+      writeFileSync(resultFile,JSON.stringify({summary:'ok',changed_files:[],
+        tests:[{name:'unit',status:'passed'}],findings:[]}));
+      assert.equal(invoke('completed','--run-id','live-1','--task-id','verify',
+        '--lease',lease,'--result',resultFile).state,'completed');
+    },()=>({location:{directory:owner}}),{pluginImpl:installedPlugin});
+  } finally {rmSync(root,{recursive:true,force:true});}
 });
