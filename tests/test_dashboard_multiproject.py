@@ -127,6 +127,34 @@ class ProjectIsolationTests(MultiProjectTestCase):
         self.assertEqual(legacy["run"]["platform"], "opencode")
         self.assertNotIn("project", legacy)
 
+    def test_same_agent_name_stays_project_scoped(self):
+        self.registry.add_agent(self.beta_project["project_id"], name="Ada",
+                                role="Security Reviewer", platform="cursor")
+        catalog = self.catalog()
+        self.addCleanup(catalog.close)
+        alpha_office = catalog.office(self.alpha_project["project_id"])
+        beta_office = catalog.office(self.beta_project["project_id"])
+        alpha_ada = next(agent for agent in alpha_office["agents"]
+                         if agent["name"] == "Ada")
+        beta_ada = next(agent for agent in beta_office["agents"]
+                        if agent["name"] == "Ada")
+        self.assertNotEqual(alpha_ada["agent_definition_id"],
+                            beta_ada["agent_definition_id"])
+        self.assertEqual(alpha_ada["role"], "RAG Engineer")
+        self.assertEqual(beta_ada["role"], "Security Reviewer")
+        self.assertEqual(alpha_office["project_id"], self.alpha_project["project_id"])
+        self.assertEqual(beta_office["project_id"], self.beta_project["project_id"])
+        self.assertIsNone(beta_ada["binding"])
+        self.assertFalse(beta_ada["spawnable"])
+        alpha_inspector = catalog.inspector(
+            self.alpha_project["project_id"], alpha_ada["agent_definition_id"])
+        beta_inspector = catalog.inspector(
+            self.beta_project["project_id"], beta_ada["agent_definition_id"])
+        self.assertEqual(alpha_inspector["agent"]["role"], "RAG Engineer")
+        self.assertEqual(beta_inspector["agent"]["role"], "Security Reviewer")
+        self.assertNotEqual(alpha_inspector["agent"]["agent_definition_id"],
+                            beta_inspector["agent"]["agent_definition_id"])
+
     def test_office_and_inspector_are_project_scoped(self):
         response, body = self.request(
             self.server, f"/api/projects/{self.alpha_project['project_id']}/office")
@@ -401,6 +429,40 @@ class DemoModeTests(unittest.TestCase):
                              "unknown"} <= statuses)
             self.assertTrue(catalog.global_overview()["demo"])
             self.assertEqual(list(Path(temp).iterdir()), [])
+
+    def test_demo_office_rooms_departments_and_unbound_roster(self):
+        with tempfile.TemporaryDirectory() as temp:
+            with mock.patch.dict(os.environ, {"AUTO_ORCHESTRATOR_HOME": temp}):
+                catalog = _demo_catalog()
+            office = catalog.office(catalog.default_id)
+            spawnable = [entry for entry in office["agents"] if entry["spawnable"]]
+            self.assertTrue({"research", "backend", "frontend", "qa", "review"}
+                            <= {entry["room"] for entry in spawnable})
+            departments = {
+                task["department"]
+                for run in catalog.project_state(catalog.default_id)["supervisor"]["runs"]
+                for task in run["tasks"]
+            }
+            self.assertTrue({"research", "backend", "frontend", "qa", "review"}
+                            <= departments)
+            for entry in spawnable:
+                self.assertTrue(entry["session_key"])
+                self.assertIsNotNone(entry["binding"])
+                self.assertTrue(entry["session_key"].startswith(
+                    entry["agent_definition_id"] + ":"))
+            unbound = [entry for project_id in catalog.projects
+                       for entry in catalog.office(project_id)["agents"]
+                       if entry["binding"] is None]
+            self.assertTrue(unbound)
+            for entry in unbound:
+                self.assertFalse(entry["spawnable"])
+                self.assertIsNone(entry["session_key"])
+            for project_id in catalog.projects:
+                for entry in catalog.office(project_id)["unlinked_sessions"]:
+                    self.assertEqual(entry["room"], "lobby")
+                    self.assertEqual(entry["room_source"], "unlinked")
+                    self.assertTrue(entry["session_key"].startswith(
+                        f"s:{entry['run_id']}:"))
 
 
 if __name__ == "__main__":

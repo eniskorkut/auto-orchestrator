@@ -17,6 +17,7 @@ except ModuleNotFoundError:
     from review_gate import ReviewError, code_digest, validate_review
 
 ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$")
+DEPARTMENT = re.compile(r"^[a-z][a-z0-9-]{0,39}$")
 ROLES = {"explorer", "implementer", "tester", "reviewer"}
 ACTIVE = {"running", "cancel_requested", "timed_out"}
 TERMINAL = {"completed", "failed", "cancelled"}
@@ -28,6 +29,15 @@ def identifier(value):
     if not isinstance(value, str) or not ID.fullmatch(value):
         raise SupervisorError("Invalid task/run identifier")
     return value
+
+def department(value):
+    """Normalise an optional department/room id (lowercase, URL-safe)."""
+    if not isinstance(value, str):
+        raise SupervisorError("Department must be a lowercase id")
+    normalised = value.strip().lower()
+    if not DEPARTMENT.fullmatch(normalised):
+        raise SupervisorError("Department must match [a-z][a-z0-9-]{0,39}")
+    return normalised
 
 def scope(value):
     if not isinstance(value, str) or not value or value.startswith("/") or "\\" in value:
@@ -81,8 +91,13 @@ def validate_plan(plan):
             raise SupervisorError("timeout_seconds out of bounds")
         if type(retries) is not int or not 0 <= retries <= 2:
             raise SupervisorError("max_retries must be 0..2")
+        raw_department = item.get("department")
+        if raw_department is None:
+            raw_department = item.get("assigned_room")
+        task_department = department(raw_department) if raw_department is not None else None
         tasks[tid] = {"id":tid,"role":role,"objective":objective,"depends_on":deps,
-                      "read":read,"write":write,"timeout_seconds":float(timeout),"max_retries":retries}
+                      "read":read,"write":write,"timeout_seconds":float(timeout),
+                      "max_retries":retries,"department":task_department}
     visited = set()
     visiting = set()
     def visit(tid):
@@ -140,6 +155,7 @@ class Supervisor:
           timeout_seconds REAL NOT NULL, max_retries INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
           state TEXT NOT NULL DEFAULT 'pending', lease TEXT, started REAL, finished REAL,
           termination_confirmed INTEGER NOT NULL DEFAULT 0, result TEXT, reason TEXT,
+          department TEXT,
           PRIMARY KEY(run_id,id), FOREIGN KEY(run_id) REFERENCES runs(id));
         """)
         # Preserve existing V4 SQLite data in place.
@@ -153,6 +169,9 @@ class Supervisor:
             self.conn.execute("ALTER TABLE tasks ADD COLUMN reviewed INTEGER NOT NULL DEFAULT 0")
         if "review_digest" not in task_columns:
             self.conn.execute("ALTER TABLE tasks ADD COLUMN review_digest TEXT")
+        if "department" not in task_columns:
+            # Additive V7.2 room assignment; older runs stay NULL.
+            self.conn.execute("ALTER TABLE tasks ADD COLUMN department TEXT")
         self.conn.executescript("""
         CREATE TABLE IF NOT EXISTS native_bindings (
           run_id TEXT NOT NULL, task_id TEXT NOT NULL, attempt INTEGER NOT NULL,
@@ -198,10 +217,11 @@ class Supervisor:
               (run,time.time(),limit,int(native_supervision),int(require_review)))
             for item in tasks.values():
                 self.conn.execute("""INSERT INTO tasks
-                  (run_id,id,role,objective,dependencies,read_scope,write_scope,timeout_seconds,max_retries)
-                  VALUES (?,?,?,?,?,?,?,?,?)""",
+                  (run_id,id,role,objective,dependencies,read_scope,write_scope,timeout_seconds,max_retries,department)
+                  VALUES (?,?,?,?,?,?,?,?,?,?)""",
                   (run,item["id"],item["role"],item["objective"],json.dumps(item["depends_on"]),
-                   json.dumps(item["read"]),json.dumps(item["write"]),item["timeout_seconds"],item["max_retries"]))
+                   json.dumps(item["read"]),json.dumps(item["write"]),item["timeout_seconds"],
+                   item["max_retries"],item["department"]))
             return {"run_id":run,"tasks":len(tasks),"max_parallel":limit}
         try:
             return self.transaction(op)
@@ -245,7 +265,8 @@ class Supervisor:
                                   (lease,attempts,now,run,task["id"]))
                 obj={"id":task["id"],"role":task["role"],"objective":task["objective"],
                      "depends_on":json.loads(task["dependencies"]),"read_scope":left["read"],
-                     "write_scope":left["write"],"attempt":attempts,"lease":lease}
+                     "write_scope":left["write"],"attempt":attempts,"lease":lease,
+                     "department":task["department"]}
                 selected.append(obj)
                 active.append(task | {"state":"running"})
             return {"claimed":selected,"timed_out":timed_out,
@@ -478,6 +499,7 @@ class Supervisor:
         bindings={(row["task_id"],row["attempt"]):bool(row["stopped"]) for row in
                   self.conn.execute("SELECT task_id,attempt,stopped FROM native_bindings WHERE run_id=?",(run,))}
         return {"run_id":run,"native_supervision":supervised,"require_review":review_required,"tasks":[{"id":t["id"],"state":t["state"],"role":t["role"],
+                 "department":t["department"],
                  "native_stop_observed":(t["state"]!="pending" and bindings.get((t["id"],t["attempts"]),False)),
                  "attempts":t["attempts"],"max_retries":t["max_retries"],
                  "review_attested":bool(t["reviewed"]), "review_digest":t["review_digest"],

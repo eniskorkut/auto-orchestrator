@@ -26,6 +26,10 @@ except ModuleNotFoundError:  # Running as ``python tools/office_model.py``.
 AGENT_ID = re.compile(r"^a_[0-9a-f]{12}$")
 PROJECT_ID = re.compile(r"^p_[0-9a-f]{16}$")
 SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$")
+DEPARTMENT_ID = re.compile(r"^[a-z][a-z0-9-]{0,39}$")
+
+ROOMS = ("frontend", "backend", "qa", "review", "research", "meeting", "lobby")
+ROLE_ROOMS = {"tester": "qa", "reviewer": "review", "explorer": "research"}
 
 ACTIVE_TASK_STATES = ("running", "cancel_requested", "timed_out")
 FAILED_TASK_STATES = ("failed", "cancelled")
@@ -59,6 +63,9 @@ def _empty_current() -> dict:
     return {
         "run_id": None,
         "task_id": None,
+        "task_role": None,
+        "task_state": None,
+        "department": None,
         "session_id": None,
         "native_hash": None,
         "platform": None,
@@ -83,6 +90,55 @@ def _number(value):
         if math.isfinite(float(value)):
             return value
     return None
+
+
+def _department_id(value) -> str | None:
+    """Normalise an explicit department/room id without guessing."""
+    if not isinstance(value, str):
+        return None
+    normalised = value.strip().lower()
+    if not DEPARTMENT_ID.fullmatch(normalised):
+        return None
+    return normalised
+
+
+def _task_department(task: dict | None) -> str | None:
+    if not isinstance(task, dict):
+        return None
+    return (_department_id(task.get("department"))
+            or _department_id(task.get("assigned_room")))
+
+
+def _room_assignment(agent: dict, task: dict | None) -> tuple[str, str]:
+    """Return ``(room, room_source)`` using only explicit fields and task role.
+
+    Order: task department/assigned room, agent default/assigned room, task
+    role mapping, lobby. Display names, objectives and timing are never read.
+    """
+    explicit_task = _task_department(task)
+    if explicit_task in ROOMS:
+        return explicit_task, "task.department"
+    for key in ("default_room", "assigned_room"):
+        explicit_agent = _department_id(agent.get(key))
+        if explicit_agent in ROOMS:
+            return explicit_agent, "agent.default_room"
+    role = task.get("role") if isinstance(task, dict) else None
+    if role in ROLE_ROOMS:
+        return ROLE_ROOMS[role], "task.role"
+    return "lobby", "unassigned"
+
+
+def _session_key(binding: dict | None) -> str | None:
+    if not isinstance(binding, dict):
+        return None
+    agent_id = binding.get("agent_definition_id")
+    run_id = binding.get("run_id")
+    digest = binding.get("native_hash")
+    if (not isinstance(agent_id, str) or not AGENT_ID.fullmatch(agent_id)
+            or not isinstance(run_id, str) or not SAFE_ID.fullmatch(run_id)
+            or not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)):
+        return None
+    return f"{agent_id}:{run_id}:{digest[:12]}"
 
 
 def _project_agents(project: dict) -> list[dict]:
@@ -303,6 +359,9 @@ def _evaluate_binding(binding: dict, state: dict, supervisor: dict,
         current["run_id"] = run_id
     if isinstance(task, dict):
         current["task_id"] = task_id
+        current["task_role"] = task.get("role") if isinstance(task.get("role"), str) else None
+        current["task_state"] = task.get("state") if isinstance(task.get("state"), str) else None
+        current["department"] = _task_department(task)
     current["session_id"] = binding.get("session_id") if isinstance(
         binding.get("session_id"), str) else None
     current["native_hash"] = digest
@@ -343,17 +402,25 @@ def _agent_entry(agent: dict, binding: dict | None, state: dict,
         "evidence": _empty_evidence(),
         "current": _empty_current(),
         "binding": None,
+        "room": "lobby",
+        "room_source": "unassigned",
+        "session_key": None,
+        "spawnable": False,
     }
-    if binding is None:
-        return base
-    evaluated, _ = _evaluate_binding(binding, state, supervisor, detail_provider)
-    base.update({
-        "status": evaluated["status"],
-        "status_label": evaluated["status_label"],
-        "evidence": evaluated["evidence"],
-        "current": evaluated["current"],
-        "binding": binding,
-    })
+    task = None
+    if binding is not None:
+        evaluated, context = _evaluate_binding(binding, state, supervisor, detail_provider)
+        task = context["task"]
+        base.update({
+            "status": evaluated["status"],
+            "status_label": evaluated["status_label"],
+            "evidence": evaluated["evidence"],
+            "current": evaluated["current"],
+            "binding": binding,
+        })
+        base["session_key"] = _session_key(binding)
+        base["spawnable"] = base["session_key"] is not None
+    base["room"], base["room_source"] = _room_assignment(agent, task)
     return base
 
 
@@ -406,6 +473,7 @@ def _unlinked_sessions(project: dict, state: dict, bindings: dict,
     task_bound_runs = {binding.get("run_id") for binding in bindings.values()
                        if binding.get("task_id")}
     result = []
+    seen_keys: set[str] = set()
     for run in ordered[:MAX_UNLINKED_RUNS]:
         if len(result) >= MAX_UNLINKED:
             break
@@ -435,6 +503,13 @@ def _unlinked_sessions(project: dict, state: dict, bindings: dict,
                 digest = span.get("native_hash_short")
             if isinstance(digest, str) and digest[:12] in bound_hashes:
                 continue
+            agent_id = span.get("id")
+            session_key = (f"s:{run_id}:{agent_id}" if isinstance(agent_id, str)
+                           else None)
+            if session_key is not None:
+                if session_key in seen_keys:
+                    continue
+                seen_keys.add(session_key)
             opened = bool(span.get("open"))
             if opened:
                 item_status = "working" if live else "unknown"
@@ -446,13 +521,17 @@ def _unlinked_sessions(project: dict, state: dict, bindings: dict,
                 item_status = "unknown"
             result.append({
                 "run_id": run_id,
-                "agent_id": span.get("id"),
+                "agent_id": agent_id,
                 "native_hash": digest if isinstance(digest, str) else None,
                 "platform": run.get("platform", "unknown"),
                 "status": item_status,
                 "open": opened,
                 "duration": _number(span.get("duration")),
                 "last_event_at": _number(run.get("last_event_at")),
+                "room": "lobby",
+                "room_source": "unlinked",
+                "session_key": session_key,
+                "spawnable": session_key is not None,
             })
     result.sort(key=lambda item: item.get("last_event_at") or 0, reverse=True)
     return result
@@ -575,6 +654,10 @@ def build_inspector(project: dict, agent_definition_id: str, state: dict, *,
             "evidence": entry["evidence"],
             "current": entry["current"],
             "binding": binding,
+            "room": entry["room"],
+            "room_source": entry["room_source"],
+            "session_key": entry["session_key"],
+            "spawnable": entry["spawnable"],
         },
         "binding": binding,
         "task": task_summary,

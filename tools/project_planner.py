@@ -122,6 +122,7 @@ def supervisor_plan(rich: dict) -> dict:
             "id": task["id"],
             "role": task["role"],
             "objective": task["objective"],
+            "department": task.get("department"),
             "depends_on": task["depends_on"],
             "read_scope": task["read"],
             "write_scope": task["write"],

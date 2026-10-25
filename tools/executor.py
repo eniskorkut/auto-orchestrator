@@ -114,6 +114,7 @@ class Executor:
                     "id": item["id"],
                     "role": item["role"],
                     "objective": item["objective"],
+                    "department": item.get("department"),
                     "acceptance": task_criteria,
                     "depends_on": item.get("depends_on", []),
                     "read_scope": item.get("read_scope", []),
