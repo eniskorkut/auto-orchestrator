@@ -107,6 +107,40 @@ class DashboardDataTests(unittest.TestCase):
             self.assertFalse(run["live"])
             self.assertFalse(store.detail("fresh-open")["run"]["live"])
 
+    def test_missing_or_nonfinite_event_times_do_not_crash(self):
+        started = time.time() - 100
+        write_run(self.root, "no-times", [
+            {"event": "start", "platform": "opencode", "time": started},
+            {"event": "mutation"},
+            {"event": "finish", "status": "success", "verified": False},
+            {"event": "verified", "source": "manual"},
+        ])
+        detail = Store(self.root).detail("no-times")
+        self.assertIsNone(detail["finish"]["offset"])
+        self.assertIsNone(detail["verified_event"]["offset"])
+        self.assertEqual(detail["mutations"], [])
+        path = self.root / ".auto-orchestrator" / "runs" / "nan.jsonl"
+        path.write_text(
+            '{"event":"start","platform":"opencode","time":NaN}\n',
+            encoding="utf-8",
+        )
+        runs = {run["id"]: run for run in Store(self.root).state()["runs"]}
+        self.assertEqual(runs["nan"]["status"], "invalid")
+
+    def test_live_decay_changes_state_fingerprint(self):
+        started = time.time() - 10
+        write_run(self.root, "live-run", [
+            {"event": "start", "platform": "opencode", "time": started},
+            {"event": "agent-start", "agent_id": "a1b2c3d4", "time": started + 1},
+        ])
+        store = Store(self.root)
+        first = store.state()
+        self.assertTrue(first["runs"][0]["live"])
+        with mock.patch("tools.dashboard.ACTIVE_WINDOW", 0):
+            second = store.state()
+        self.assertFalse(second["runs"][0]["live"])
+        self.assertNotEqual(first["fingerprint"], second["fingerprint"])
+
     def test_policy_change_invalidates_cached_verification(self):
         policy_hash = write_policy(self.root)
         started = time.time() - 200
@@ -211,10 +245,10 @@ class DashboardHTTPTests(unittest.TestCase):
         self.thread.join(timeout=5)
         self.tmp.cleanup()
 
-    def request(self, method: str, path: str):
+    def request(self, method: str, path: str, headers: dict | None = None):
         connection = http.client.HTTPConnection(self.host, self.port, timeout=5)
         try:
-            connection.request(method, path)
+            connection.request(method, path, headers=headers or {})
             response = connection.getresponse()
             body = response.read()
             return response, body
@@ -236,6 +270,33 @@ class DashboardHTTPTests(unittest.TestCase):
         self.assertEqual(detail["run"]["id"], "demo-verified")
         self.assertTrue(detail["run"]["verified"])
         self.assertGreaterEqual(len(detail["agents"]), 2)
+
+    def test_v71_office_assets_are_served(self):
+        for path in ("/assets/office.js", "/assets/i18n.js"):
+            response, body = self.request("GET", path)
+            self.assertEqual(response.status, 200, path)
+            self.assertGreater(len(body), 1000)
+            self.assertIn("text/javascript", response.getheader("Content-Type"))
+        response, body = self.request("GET", "/")
+        self.assertIn(b"/assets/office.js", body)
+        self.assertIn(b"/assets/i18n.js", body)
+
+    def test_rejects_dns_rebinding_hosts_and_cross_site_origins(self):
+        response, _ = self.request("GET", "/api/state", {"Host": "attacker.example"})
+        self.assertEqual(response.status, 403)
+        host, port = self.host, self.port
+        response, _ = self.request("GET", "/api/state", {
+            "Origin": f"http://attacker.example:{port}",
+        })
+        self.assertEqual(response.status, 403)
+        response, _ = self.request("GET", "/api/state", {
+            "Sec-Fetch-Site": "cross-site",
+        })
+        self.assertEqual(response.status, 403)
+        response, _ = self.request("GET", "/api/state", {
+            "Origin": f"http://127.0.0.1:{port}",
+        })
+        self.assertEqual(response.status, 200)
 
     def test_rejects_writes_traversal_and_invalid_ids(self):
         response, _ = self.request("POST", "/api/state")

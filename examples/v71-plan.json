@@ -1,0 +1,64 @@
+{
+  "run_id": "checkout-retry",
+  "max_parallel": 2,
+  "native_supervision": false,
+  "require_review": false,
+  "tasks": [
+    {
+      "id": "schema",
+      "role": "explorer",
+      "objective": "Map the checkout retry contract and list every write path that can duplicate a charge.",
+      "acceptance": [
+        "The current retry path is documented with file and symbol references.",
+        "Every duplicate-charge write path has a named owner for the next task."
+      ],
+      "read_scope": ["src/checkout/", "docs/"],
+      "write_scope": [],
+      "timeout_seconds": 900,
+      "max_retries": 1
+    },
+    {
+      "id": "api",
+      "role": "implementer",
+      "objective": "Make checkout retries idempotent behind the existing feature flag without changing the public API.",
+      "depends_on": ["schema"],
+      "acceptance": [
+        "Duplicate webhook delivery does not create a second charge.",
+        "The existing retry API remains backward compatible.",
+        "Targeted tests pass with a native integer exit code of zero."
+      ],
+      "read_scope": ["src/checkout/"],
+      "write_scope": ["src/checkout/"],
+      "timeout_seconds": 1800,
+      "max_retries": 2
+    },
+    {
+      "id": "tests",
+      "role": "tester",
+      "objective": "Add regression coverage for duplicate webhook delivery and failed retry recovery.",
+      "depends_on": ["api"],
+      "acceptance": [
+        "A regression test fails if the idempotency guard is removed.",
+        "The focused suite passes and the command is recorded."
+      ],
+      "read_scope": ["src/checkout/"],
+      "write_scope": ["tests/checkout/"],
+      "timeout_seconds": 900,
+      "max_retries": 1
+    },
+    {
+      "id": "docs",
+      "role": "implementer",
+      "objective": "Document the retry contract and the safe rollback path for operators.",
+      "depends_on": ["api"],
+      "acceptance": [
+        "The rollback path names the exact feature flag and expected state.",
+        "The document links to the implemented test command."
+      ],
+      "read_scope": ["src/checkout/"],
+      "write_scope": ["docs/checkout/"],
+      "timeout_seconds": 900,
+      "max_retries": 1
+    }
+  ]
+}

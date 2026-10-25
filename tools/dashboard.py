@@ -11,11 +11,14 @@ import argparse
 import gzip
 import hashlib
 import json
+import math
 import os
+import queue
 import re
 import sqlite3
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import webbrowser
@@ -33,7 +36,18 @@ except ModuleNotFoundError:  # Running as ``python tools/dashboard.py``.
     from perf import analyze, diagnose, observed_overlap, path_for
     from quality_gate import assess, load_policy
 
+try:
+    from tools import event_stream, office_model, project_registry
+except ModuleNotFoundError:  # Installed copies may only contain dashboard.py.
+    try:
+        import event_stream
+        import office_model
+        import project_registry
+    except ModuleNotFoundError:
+        event_stream = office_model = project_registry = None
+
 ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$")
+PROJECT_ID = re.compile(r"^p_[0-9a-f]{16}$")
 RUN_LIMIT = 500
 EVENT_LIMIT = 10000
 LOG_LIMIT = 8 * 1024 * 1024
@@ -43,6 +57,8 @@ ASSETS = {
     "/index.html": ("index.html", "text/html; charset=utf-8"),
     "/assets/app.css": ("app.css", "text/css; charset=utf-8"),
     "/assets/app.js": ("app.js", "text/javascript; charset=utf-8"),
+    "/assets/office.js": ("office.js", "text/javascript; charset=utf-8"),
+    "/assets/i18n.js": ("i18n.js", "text/javascript; charset=utf-8"),
 }
 ACTIVE_WINDOW = 180.0
 STATE_WORKERS = max(1, min(os.cpu_count() or 1, 8))
@@ -58,7 +74,10 @@ class DashboardError(ValueError):
 
 
 def _number(value):
-    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        number = float(value)
+        return number if math.isfinite(number) else None
+    return None
 
 
 def _ident(value):
@@ -138,10 +157,14 @@ def _read_jsonl(path: Path) -> tuple[list[dict], bool]:
     lines = [line for line in text.splitlines() if line.strip()]
     events = []
     partial = False
+
+    def reject_constant(_value):
+        raise ValueError("non-finite JSON number")
+
     for index, line in enumerate(lines):
         try:
-            value = json.loads(line)
-        except ValueError:
+            value = json.loads(line, parse_constant=reject_constant)
+        except (ValueError, RecursionError):
             if index == len(lines) - 1:
                 partial = True
                 break
@@ -178,6 +201,13 @@ def _run_fingerprint(path: Path, root: Path) -> str:
     return f"{stat.st_mtime_ns}:{stat.st_size}:{_policy_signature(root)}"
 
 
+def _safe_run_fingerprint(path: Path, root: Path) -> str:
+    try:
+        return _run_fingerprint(path, root)
+    except OSError:
+        return f"vanished:{_policy_signature(root)}"
+
+
 def _refresh_live(summary: dict) -> None:
     """Decay the display-only live flag without re-reading the log."""
     if summary.get("status") == "open":
@@ -208,7 +238,9 @@ def _agent_spans(events: list[dict], end_time: float) -> tuple[list[dict], int]:
     for span in spans:
         span["short_id"] = span["id"][:8]
         span["duration"] = round(max(0.0, span["end"] - span["start"]), 3)
-        span["native_hash_short"] = _short(span.pop("native_hash"), 12)
+        native_hash = _short(span.pop("native_hash"), 64)
+        span["native_hash"] = native_hash
+        span["native_hash_short"] = _short(native_hash, 12)
     concurrency = 0
     if spans:
         points = []
@@ -233,8 +265,10 @@ def _checks(events: list[dict]) -> list[dict]:
         code = event.get("exit_code")
         if check_id is None or at is None or type(code) is not int:
             continue
+        source = "native-tool" if event.get("source") == "native-tool" else "recorded"
         result.append({"id": check_id, "at": at, "exit_code": code,
-                       "passed": code == 0, "source": "native-tool"})
+                       "passed": code == 0, "source": source,
+                       "native": source == "native-tool"})
     return result
 
 
@@ -320,10 +354,10 @@ def _summary(root: Path, run_id: str, path: Path) -> dict:
             "checks_passed": 0, "checks_failed": 0, "mutation_count": 0,
             "diagnostics": [], "route": None, "routing_advice_followed": None,
             "has_valid_estimate": False, "reason": str(exc),
-            "fingerprint": _run_fingerprint(path, root),
+            "fingerprint": _safe_run_fingerprint(path, root),
             "partial": False,
         }
-    fingerprint = _run_fingerprint(path, root)
+    fingerprint = _safe_run_fingerprint(path, root)
     return _build_summary(root, run_id, events, partial, fingerprint)
 
 
@@ -386,7 +420,7 @@ def _build_summary(root: Path, run_id: str, events: list[dict], partial: bool,
         "reason": reason,
         "route": route,
         "routing_advice_followed": _adherence(route, native_starts, max_concurrency),
-        "checks_passed": sum(check["passed"] for check in checks),
+        "checks_passed": sum(check["passed"] and check.get("native") for check in checks),
         "checks_failed": sum(not check["passed"] for check in checks),
         "mutation_count": sum(event.get("event") == "mutation" for event in events),
         "diagnostics": diagnostics,
@@ -426,7 +460,7 @@ def _event_view(event: dict, started: float) -> dict:
 
 def _detail(root: Path, run_id: str, path: Path) -> dict:
     events, partial = _read_jsonl(path)
-    fingerprint = _run_fingerprint(path, root)
+    fingerprint = _safe_run_fingerprint(path, root)
     summary = _build_summary(root, run_id, events, partial, fingerprint)
     return _detail_payload(run_id, events, summary, partial=partial)
 
@@ -438,7 +472,12 @@ def _run_files(root: Path) -> list[Path]:
                  if path.is_file() and not path.is_symlink() and ID.fullmatch(path.stem)]
     except OSError:
         return []
-    return sorted(paths, key=lambda path: (path.stat().st_mtime_ns, path.name), reverse=True)[:RUN_LIMIT]
+    def sort_key(path):
+        try:
+            return (path.stat().st_mtime_ns, path.name)
+        except OSError:
+            return (0, path.name)
+    return sorted(paths, key=sort_key, reverse=True)[:RUN_LIMIT]
 
 
 def _fingerprint(root: Path, paths: list[Path]) -> str:
@@ -550,11 +589,16 @@ def _supervisor(root: Path) -> dict:
             bindings = {}
             if "native_bindings" in {r[0] for r in connection.execute(
                     "SELECT name FROM sqlite_master WHERE type='table'")}:
+                columns = {row["name"] for row in connection.execute(
+                    "PRAGMA table_info(native_bindings)")}
+                started = "started" if "started" in columns else "0"
                 try:
                     bindings = {
-                        (row["task_id"], row["attempt"]): bool(row["stopped"])
+                        (row["task_id"], row["attempt"]): (bool(row["started"]),
+                                                           bool(row["stopped"]))
                         for row in connection.execute(
-                            "SELECT task_id, attempt, stopped FROM native_bindings WHERE run_id=?",
+                            f"SELECT task_id, attempt, {started} AS started, stopped "
+                            "FROM native_bindings WHERE run_id=?",
                             (run["id"],),
                         )
                     }
@@ -605,7 +649,11 @@ def _supervisor(root: Path) -> dict:
                     "review_attested": bool(task.get("reviewed")) if "reviewed" in task_columns else False,
                     "review_digest": _short(task.get("review_digest"), 12)
                     if "review_digest" in task_columns else None,
-                    "native_stop_observed": bool(bindings.get((task.get("id"), task.get("attempts")), False))
+                    "native_start_observed": bool(
+                        bindings.get((task.get("id"), task.get("attempts")), (False, False))[0])
+                    if task.get("state") != "pending" else False,
+                    "native_stop_observed": bool(
+                        bindings.get((task.get("id"), task.get("attempts")), (False, False))[1])
                     if task.get("state") != "pending" else False,
                     "result": result,
                 })
@@ -662,6 +710,7 @@ def _overview(runs: list[dict]) -> dict:
 class Store:
     root: Path
     demo: bool = False
+    demo_profile: str = "ai"
     _cache: dict[str, tuple[str, dict]] = field(default_factory=dict)
     _lock: threading.Lock = field(default_factory=threading.Lock)
     _detail_cache: dict[str, tuple[str, dict]] = field(default_factory=dict)
@@ -673,7 +722,7 @@ class Store:
     def __post_init__(self):
         self.root = self.root.resolve()
         if self.demo:
-            self._demo_runs, self._demo_state = _demo_data()
+            self._demo_runs, self._demo_state = _demo_data(self.demo_profile)
 
     def _files(self) -> list[Path]:
         return [] if self.demo else _run_files(self.root)
@@ -711,7 +760,8 @@ class Store:
             for run in data["runs"]:
                 _refresh_live(run)
             data["overview"] = _overview(data["runs"])
-            data["generated_at"] = time.time()
+            live = ",".join(f"{run['id']}:{int(bool(run.get('live')))}" for run in data["runs"])
+            data["fingerprint"] = "demo-v1:" + hashlib.sha256(live.encode()).hexdigest()[:8]
             return data
         files = self._files()
         summaries_by_id: dict[str, dict] = {}
@@ -750,16 +800,20 @@ class Store:
         summaries.sort(key=lambda item: (item.get("last_event_at") or 0), reverse=True)
         for summary in summaries:
             _refresh_live(summary)
+        live_signature = ",".join(
+            f"{summary['id']}:{int(bool(summary.get('live')))}"
+            for summary in summaries
+        )
         supervisor = self._supervisor_snapshot()
         worktrees = self._worktrees_snapshot()
         return {
             "version": 1,
             "demo": False,
-            "generated_at": time.time(),
             "project": str(self.root),
             "fingerprint": _fingerprint(self.root, files)
             + ":" + hashlib.sha256(json.dumps(supervisor, sort_keys=True, default=str).encode()).hexdigest()[:8]
-            + ":" + hashlib.sha256(json.dumps(worktrees, sort_keys=True, default=str).encode()).hexdigest()[:8],
+            + ":" + hashlib.sha256(json.dumps(worktrees, sort_keys=True, default=str).encode()).hexdigest()[:8]
+            + ":" + hashlib.sha256(live_signature.encode()).hexdigest()[:8],
             "overview": _overview(summaries),
             "runs": summaries[:RUN_LIMIT],
             "supervisor": supervisor,
@@ -775,7 +829,6 @@ class Store:
             _, stored = self._demo_runs[run_id]
             data = json.loads(json.dumps(stored))
             _refresh_live(data["run"])
-            data["run"]["generated_at"] = time.time()
             return data
         path = path_for(self.root, run_id)
         if path.is_symlink() or not path.is_file():
@@ -798,9 +851,25 @@ class Store:
         return payload
 
 
-def _demo_data() -> tuple[dict[str, tuple[dict, dict]], dict]:
+def _demo_hash(profile: str, label: str) -> str:
+    return hashlib.sha256(
+        f"auto-orchestrator-demo|{profile}|{label}".encode("utf-8")).hexdigest()
+
+
+def _demo_data(profile: str = "ai") -> tuple[dict[str, tuple[dict, dict]], dict]:
+    """Clearly synthetic demo evidence. This function never writes to disk."""
+    if profile not in ("ai", "security", "web"):
+        profile = "ai"
     now = time.time()
     runs: dict[str, tuple[dict, dict]] = {}
+    prefix = "" if profile == "ai" else f"{profile}-"
+    run_ids = {
+        "verified": f"{prefix}demo-verified",
+        "unverified": f"{prefix}demo-unverified",
+        "incomplete": f"{prefix}demo-incomplete",
+        "failed": f"{prefix}demo-failed",
+    }
+    supervisor_run = "demo-project" if profile == "ai" else f"demo-{profile}"
 
     def add(run_id, platform, age, spans, finish, checks=(), mutations=(), route=None,
             verified=False, diagnostics=()):
@@ -812,8 +881,11 @@ def _demo_data() -> tuple[dict[str, tuple[dict, dict]], dict]:
                            "selected_count": route.get("selected_count", 1),
                            "latency_ms": route.get("latency_ms", 14)})
         for span in spans:
-            events.append({"event": "agent-start", "agent_id": span["id"],
-                           "time": started + span["start"]})
+            payload = {"event": "agent-start", "agent_id": span["id"],
+                       "time": started + span["start"]}
+            if span.get("native_hash"):
+                payload["native_hash"] = span["native_hash"]
+            events.append(payload)
             if not span.get("open"):
                 events.append({"event": "agent-stop", "agent_id": span["id"],
                                "time": started + span["end"]})
@@ -836,59 +908,74 @@ def _demo_data() -> tuple[dict[str, tuple[dict, dict]], dict]:
         detail = _detail_payload(run_id, events, summary)
         runs[run_id] = (summary, detail)
 
-    add("demo-verified", "opencode", 90,
-        [{"id": "a1f4c9e2b7d01358", "start": 0, "end": 24},
+    add(run_ids["verified"], "opencode", 90,
+        [{"id": "a1f4c9e2b7d01358", "start": 0, "end": 24,
+          "native_hash": _demo_hash(profile, "verified-0")},
          {"id": "b82d4e6a91c3f057", "start": 18, "end": 62},
          {"id": "c93e5f7b22a4d168", "start": 50, "end": 76}],
         ("success", 80), checks=[("unit", 0, 66), ("lint", 0, 70)],
         mutations=[22, 40, 55, 61], route={"mode": "consider-parallel", "max_agents": 3,
                                           "selected_count": 1, "latency_ms": 18},
         verified=True)
-    add("demo-unverified", "codex", 1500,
-        [{"id": "d04f6a8c33b5e279", "start": 0, "end": 64},
+    add(run_ids["unverified"], "codex", 1500,
+        [{"id": "d04f6a8c33b5e279", "start": 0, "end": 64,
+          "native_hash": _demo_hash(profile, "unverified-0")},
          {"id": "e15a7b9d44c6f380", "start": 22, "end": 81}],
         ("success", 84), checks=[("unit", 1, 70)], mutations=[18, 44],
         route={"mode": "single", "max_agents": 1, "selected_count": 0, "latency_ms": 9})
-    add("demo-incomplete", "antigravity", 100,
-        [{"id": "f26b8c0e55d70491", "start": 0, "end": 55, "open": True}],
+    add(run_ids["incomplete"], "antigravity", 100,
+        [{"id": "f26b8c0e55d70491", "start": 0, "end": 55, "open": True,
+          "native_hash": _demo_hash(profile, "open-0")}],
         None, mutations=[26, 48],
         diagnostics=[("event_stream_closed", 56)])
-    add("demo-failed", "cursor", 7200,
-        [{"id": "073c9d1f66e815a2", "start": 0, "end": 51},
+    add(run_ids["failed"], "cursor", 7200,
+        [{"id": "073c9d1f66e815a2", "start": 0, "end": 51,
+          "native_hash": _demo_hash(profile, "failed-0")},
          {"id": "184d0e2a77f926b3", "start": 14, "end": 73}],
         ("failed", 76), checks=[("unit", 2, 74)], mutations=[12, 39, 65])
 
+    def task(task_id, role, objective, state, dependencies, read_scope, write_scope,
+             attempts, max_retries, timeout_seconds, review_attested, review_digest,
+             native_start, native_stop, dependencies_met, result, reason=None):
+        return {"id": task_id, "role": role, "objective": objective, "state": state,
+                "dependencies": dependencies, "read_scope": read_scope,
+                "write_scope": write_scope, "attempts": attempts,
+                "max_retries": max_retries, "timeout_seconds": timeout_seconds,
+                "review_attested": review_attested, "review_digest": review_digest,
+                "native_start_observed": native_start,
+                "native_stop_observed": native_stop,
+                "dependencies_met": dependencies_met, "result": result,
+                **({"reason": reason} if reason else {})}
+
     supervisor = {"available": True, "runs": [{
-        "id": "demo-project", "created": now - 900, "max_parallel": 3,
+        "id": supervisor_run, "created": now - 900, "max_parallel": 3,
         "native_supervision": True, "require_review": True, "complete": False,
         "tasks": [
-            {"id": "schema", "role": "explorer", "objective": "Map the billing schema and expose contract risks to the implementation tasks.",
-             "state": "completed", "dependencies": [], "read_scope": ["db/"], "write_scope": [],
-             "attempts": 1, "max_retries": 2, "timeout_seconds": 900, "review_attested": True,
-             "review_digest": "4d9e02c7a13f", "native_stop_observed": True, "dependencies_met": True,
-             "result": {"summary": "Contract mapped; no migration required.", "changed_files": [],
-                        "tests": [{"name": "schema-contract", "status": "passed"}]}},
-            {"id": "api", "role": "implementer", "objective": "Implement idempotent invoice retry handling behind the existing feature flag.",
-             "state": "completed", "dependencies": ["schema"], "read_scope": ["db/"], "write_scope": ["src/billing/"],
-             "attempts": 2, "max_retries": 2, "timeout_seconds": 1200, "review_attested": True,
-             "review_digest": "9ab3c41d7e02", "native_stop_observed": True, "dependencies_met": True,
-             "result": {"summary": "Retry queue is idempotent; 4 unit tests added.", "changed_files": ["src/billing/retry.ts"],
-                        "tests": [{"name": "billing-retry", "status": "passed"}]}},
-            {"id": "tests", "role": "tester", "objective": "Add regression coverage for duplicate webhook delivery and verify the retry path end to end.",
-             "state": "running", "dependencies": ["api"], "read_scope": ["src/"], "write_scope": ["tests/"],
-             "attempts": 1, "max_retries": 1, "timeout_seconds": 900, "review_attested": False,
-             "review_digest": None, "native_stop_observed": False, "dependencies_met": True,
-             "result": None},
-            {"id": "review", "role": "reviewer", "objective": "Independently review the integrated diff, with no access to the implementer history.",
-             "state": "pending", "dependencies": ["api", "tests"], "read_scope": ["src/", "tests/"], "write_scope": [],
-             "attempts": 0, "max_retries": 0, "timeout_seconds": 600, "review_attested": False,
-             "review_digest": None, "native_stop_observed": False, "dependencies_met": False,
-             "result": None},
-            {"id": "docs", "role": "implementer", "objective": "Document the retry contract and the operational rollback path.",
-             "state": "failed", "dependencies": ["api"], "read_scope": ["src/"], "write_scope": ["docs/"],
-             "attempts": 2, "max_retries": 2, "timeout_seconds": 600, "review_attested": False,
-             "review_digest": None, "native_stop_observed": True, "dependencies_met": True,
-             "result": None, "reason": "Retry limit reached after a broken link check."},
+            task("schema", "explorer",
+                 "Map the billing schema and expose contract risks to the implementation tasks.",
+                 "completed", [], ["db/"], [], 1, 2, 900, True, "4d9e02c7a13f", True, True,
+                 True, {"summary": "Contract mapped; no migration required.", "changed_files": [],
+                        "tests": [{"name": "schema-contract", "status": "passed"}]}),
+            task("api", "implementer",
+                 "Implement idempotent invoice retry handling behind the existing feature flag.",
+                 "completed", ["schema"], ["db/"], ["src/billing/"], 2, 2, 1200, True,
+                 "9ab3c41d7e02", True, True, True,
+                 {"summary": "Retry queue is idempotent; 4 unit tests added.",
+                  "changed_files": ["src/billing/retry.ts"],
+                  "tests": [{"name": "billing-retry", "status": "passed"}]}),
+            task("tests", "tester",
+                 "Add regression coverage for duplicate webhook delivery and verify the retry path end to end.",
+                 "running", ["api"], ["src/"], ["tests/"], 1, 1, 900, False, None,
+                 False, False, True, None),
+            task("review", "reviewer",
+                 "Independently review the integrated diff, with no access to the implementer history.",
+                 "pending", ["api", "tests"], ["src/", "tests/"], [], 0, 0, 600, False, None,
+                 False, False, False, None),
+            task("docs", "implementer",
+                 "Document the retry contract and the operational rollback path.",
+                 "failed", ["api"], ["src/"], ["docs/"], 2, 2, 600, False, None,
+                 True, True, True, None,
+                 reason="Retry limit reached after a broken link check."),
         ],
     }]}
     worktrees = [
@@ -900,8 +987,9 @@ def _demo_data() -> tuple[dict[str, tuple[dict, dict]], dict]:
     summaries = [summary for summary, _ in runs.values()]
     summaries.sort(key=lambda item: item["last_event_at"], reverse=True)
     state = {
-        "version": 1, "demo": True, "generated_at": now, "project": "demo-project",
-        "fingerprint": "demo-v1", "overview": _overview(summaries),
+        "version": 1, "demo": True, "project": supervisor_run,
+        "fingerprint": "demo-v1" if profile == "ai" else f"demo-{profile}-v1",
+        "overview": _overview(summaries),
         "runs": summaries, "supervisor": supervisor, "worktrees": worktrees,
     }
     return runs, state
@@ -956,7 +1044,7 @@ def _summary_from_events(run_id: str, events: list[dict]) -> dict:
         "reason": "Demo observation; not a benchmark",
         "route": route,
         "routing_advice_followed": _adherence(route, native_starts, max_concurrency),
-        "checks_passed": sum(check["passed"] for check in checks),
+        "checks_passed": sum(check["passed"] and check.get("native") for check in checks),
         "checks_failed": sum(not check["passed"] for check in checks),
         "mutation_count": sum(event.get("event") == "mutation" for event in events),
         "diagnostics": diagnostics,
@@ -977,21 +1065,32 @@ def _detail_payload(run_id: str, events: list[dict], summary: dict,
     for span in spans:
         span["start_offset"] = round(max(0.0, span["start"] - started), 3)
         span["end_offset"] = round(max(0.0, span["end"] - started), 3)
+    finish_at = _number(finish.get("time")) if finish else None
+    verified_at = _number(verified_event.get("time")) if verified_event else None
+    mutations = []
+    for event in events:
+        if event.get("event") != "mutation":
+            continue
+        at = _number(event.get("time"))
+        if at is not None:
+            mutations.append(round(max(0.0, at - started), 3))
     return {
         "run": summary, "agents": spans,
         "checks": [{**check, "offset": round(max(0.0, check["at"] - started), 3)}
                    for check in checks],
         "route": _route(events),
-        "finish": {"at": finish.get("time"), "offset": round(max(0.0, finish["time"] - started), 3),
+        "finish": {"at": finish_at,
+                   "offset": round(max(0.0, finish_at - started), 3)
+                   if finish_at is not None else None,
                    "status": finish.get("status"), "verified": bool(finish.get("verified"))}
         if finish else None,
-        "verified_event": {"at": verified_event.get("time"),
-                           "offset": round(max(0.0, verified_event["time"] - started), 3),
+        "verified_event": {"at": verified_at,
+                           "offset": round(max(0.0, verified_at - started), 3)
+                           if verified_at is not None else None,
                            "source": verified_event.get("source"),
                            "check_ids": [x for x in verified_event.get("check_ids", [])
                                          if isinstance(x, str)]} if verified_event else None,
-        "mutations": [round(max(0.0, event["time"] - started), 3)
-                      for event in events if event.get("event") == "mutation"],
+        "mutations": mutations,
         "markers": [{"at": check["at"], "offset": round(max(0.0, check["at"] - started), 3),
                      "id": check["id"], "passed": check["passed"], "exit_code": check["exit_code"]}
                     for check in checks],
@@ -1002,13 +1101,514 @@ def _detail_payload(run_id: str, events: list[dict], summary: dict,
     }
 
 
+def _project_meta_digest(meta: dict) -> str:
+    try:
+        encoded = json.dumps(meta, sort_keys=True, ensure_ascii=False, default=str)
+    except (TypeError, ValueError):
+        encoded = str(meta)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()[:12]
+
+
+def _project_id_for(root: Path) -> str:
+    """Deterministic project id, matching ``project_registry`` when present."""
+    if project_registry is not None:
+        return project_registry.project_id_for(root)
+    key = os.path.normcase(os.path.abspath(os.fspath(root)))
+    digest = hashlib.sha256(("auto-orchestrator|project|" + key).encode()).hexdigest()
+    return "p_" + digest[:16]
+
+
+@dataclass
+class CatalogProject:
+    project: dict
+    store: Store
+    bindings: list[dict] = field(default_factory=list)
+    error: str | None = None
+    bindings_error: str | None = None
+
+
+@dataclass
+class Catalog:
+    """Multi-project view over per-project Stores plus the local registry."""
+
+    projects: dict[str, CatalogProject]
+    default_id: str
+    registry: object | None = None
+    registry_path: Path | None = None
+    demo: bool = False
+    _lock: threading.Lock = field(default_factory=threading.Lock)
+    _streams: object | None = None
+
+    def __post_init__(self):
+        if event_stream is not None:
+            self._streams = event_stream.StreamManager(self._provider)
+
+    # -- constructors ---------------------------------------------------
+    @classmethod
+    def from_store(cls, store: Store) -> "Catalog":
+        """Compatibility wrapper for the legacy single-project server."""
+        root = store.root
+        project_id = _project_id_for(root)
+        name = "Demo Project" if store.demo else (root.name or "Default project")
+        description = ("Synthetic demo evidence; not a benchmark."
+                       if store.demo else "")
+        project = {
+            "project_id": project_id,
+            "name": name,
+            "description": description,
+            "root": str(root),
+            "theme": "ai" if store.demo else "custom",
+            "created_at": 0,
+            "updated_at": 0,
+            "agents": [],
+        }
+        bindings: list[dict] = []
+        bindings_error = None
+        if not store.demo and project_registry is not None:
+            try:
+                bindings = project_registry.load_bindings(root)["bindings"]
+            except (project_registry.RegistryError, OSError, ValueError) as exc:
+                bindings_error = str(exc)[:200]
+        entry = CatalogProject(project=project, store=store, bindings=bindings,
+                               bindings_error=bindings_error)
+        return cls({project_id: entry}, project_id, demo=store.demo)
+
+    @classmethod
+    def load(cls, registry_path=None, *, root=None, no_register=False) -> "Catalog":
+        if project_registry is None:
+            raise DashboardError("Project registry support is not installed")
+        registry = project_registry.ProjectRegistry(registry_path)
+        try:
+            meta_list = registry.load()["projects"]
+        except (project_registry.RegistryError, OSError) as exc:
+            if root is not None and no_register:
+                meta_list = []
+            else:
+                raise DashboardError(f"Registry is invalid: {exc}") from exc
+
+        default_id = None
+        if root is not None:
+            try:
+                canonical = project_registry.canonical_root(root)
+            except project_registry.RegistryError as exc:
+                raise DashboardError(str(exc)) from exc
+            default_id = project_registry.project_id_for(canonical)
+            if no_register:
+                existing = None
+                try:
+                    existing = registry.find_by_root(canonical)
+                except (project_registry.RegistryError, OSError):
+                    existing = None
+                if existing is not None:
+                    default_id = existing["project_id"]
+                else:
+                    meta_list = meta_list + [{
+                        "project_id": default_id,
+                        "name": canonical.name or "default",
+                        "description": "",
+                        "root": str(canonical),
+                        "theme": "custom",
+                        "created_at": 0,
+                        "updated_at": 0,
+                        "agents": [],
+                    }]
+            else:
+                try:
+                    project, _ = registry.add(canonical)
+                except (project_registry.RegistryError, OSError) as exc:
+                    raise DashboardError(f"Cannot register project root: {exc}") from exc
+                default_id = project["project_id"]
+                meta_list = registry.load()["projects"]
+        if not meta_list:
+            try:
+                canonical = Path.cwd().resolve(strict=True)
+                if no_register:
+                    project_id = project_registry.project_id_for(canonical)
+                    meta_list = [{
+                        "project_id": project_id, "name": canonical.name or "default",
+                        "description": "", "root": str(canonical), "theme": "custom",
+                        "created_at": 0, "updated_at": 0, "agents": [],
+                    }]
+                    default_id = project_id
+                else:
+                    project, _ = registry.add(canonical)
+                    meta_list = registry.load()["projects"]
+                    default_id = project["project_id"]
+            except (project_registry.RegistryError, OSError) as exc:
+                raise DashboardError(f"Cannot initialise a project: {exc}") from exc
+        if default_id is None:
+            default_id = meta_list[0]["project_id"]
+        if not any(item["project_id"] == default_id for item in meta_list):
+            raise DashboardError("Default project is not registered")
+
+        projects: dict[str, CatalogProject] = {}
+        for meta in meta_list:
+            entry_root = Path(meta["root"])
+            store = Store(entry_root)
+            error = None
+            if not entry_root.is_dir():
+                error = "Project root is unavailable"
+            bindings: list[dict] = []
+            bindings_error = None
+            if error is None:
+                try:
+                    bindings = registry.load_bindings(entry_root)["bindings"]
+                except (project_registry.RegistryError, OSError) as exc:
+                    bindings_error = str(exc)[:200]
+            projects[meta["project_id"]] = CatalogProject(
+                project=meta, store=store, bindings=bindings, error=error,
+                bindings_error=bindings_error)
+        return cls(projects, default_id, registry=registry,
+                   registry_path=registry.path, demo=False)
+
+    # -- lookup ---------------------------------------------------------
+    @property
+    def default_store(self) -> Store:
+        return self.projects[self.default_id].store
+
+    def _entry(self, project_id: str) -> CatalogProject:
+        if not isinstance(project_id, str) or not PROJECT_ID.fullmatch(project_id):
+            raise DashboardError("Unknown project")
+        entry = self.projects.get(project_id)
+        if entry is None:
+            raise DashboardError("Unknown project")
+        return entry
+
+    def project_meta(self, project_id: str) -> dict:
+        return self._entry(project_id).project
+
+    def project_state(self, project_id: str, *, legacy=False) -> dict:
+        entry = self._entry(project_id)
+        if entry.error:
+            raise DashboardError(entry.error)
+        data = entry.store.state()
+        if legacy:
+            data["project_id"] = project_id
+            data["project_meta"] = entry.project
+            data["demo"] = bool(entry.store.demo or self.demo)
+        else:
+            data["project_id"] = project_id
+            data["project"] = entry.project
+            data["root"] = entry.project["root"]
+            data["demo"] = bool(entry.store.demo or self.demo)
+        return data
+
+    # Keep the historical name used by the legacy handler.
+    state = project_state
+
+    def project_detail(self, project_id: str, run_id: str, *, legacy=False) -> dict:
+        entry = self._entry(project_id)
+        if entry.error:
+            raise DashboardError(entry.error)
+        data = dict(entry.store.detail(run_id))
+        if not legacy:
+            data["project_id"] = project_id
+            data["project"] = entry.project
+        return data
+
+    def bindings(self, project_id: str) -> list[dict]:
+        entry = self._entry(project_id)
+        if self.demo:
+            return list(entry.bindings)
+        if entry.error or project_registry is None:
+            if entry.bindings_error:
+                raise DashboardError("Binding evidence is unavailable")
+            return list(entry.bindings)
+        try:
+            return project_registry.load_bindings(entry.project["root"])["bindings"]
+        except (project_registry.RegistryError, OSError, ValueError) as exc:
+            raise DashboardError("Binding evidence is unavailable") from exc
+
+    # -- aggregate views ------------------------------------------------
+    def global_overview(self) -> dict:
+        entries = list(self.projects.items())
+
+        def build(item: tuple[str, CatalogProject]) -> tuple[dict, str]:
+            project_id, entry = item
+            meta = entry.project if isinstance(entry.project, dict) else {}
+            agent_list = meta.get("agents")
+            agent_count = len(agent_list) if isinstance(agent_list, list) else 0
+            fingerprint = f"error:{project_id}"
+            base = {
+                "project_id": project_id,
+                "name": meta.get("name"),
+                "description": meta.get("description", ""),
+                "root": meta.get("root"),
+                "theme": meta.get("theme", "custom"),
+                "overview": {
+                    "runs": 0, "verified": 0, "open": 0, "live": 0, "agents": 0,
+                    "tasks": 0, "active_tasks": 0, "blockers": 0,
+                    "last_activity": None, "verified_rate": 0,
+                },
+                "agent_count": agent_count,
+                "linked_agent_count": 0,
+                "status": "ok",
+                "error": None,
+            }
+            try:
+                state = self.project_state(project_id)
+                runs = state.get("runs") or []
+                overview = state.get("overview") or {}
+                supervisor = state.get("supervisor") or {}
+                tasks = [task for run in supervisor.get("runs") or []
+                         for task in run.get("tasks") or []]
+                active = sum(task.get("state") in ("running", "cancel_requested",
+                                                   "timed_out") for task in tasks)
+                blockers = sum(task.get("state") in ("failed", "timed_out")
+                               for task in tasks)
+                stamps = [run.get("last_event_at") or 0 for run in runs]
+                stamps.extend(task.get("finished") or task.get("started") or 0
+                              for task in tasks)
+                stamps.extend(run.get("created") or 0 for run in supervisor.get("runs") or [])
+                last = max(stamps) if stamps else None
+                bindings = self.bindings(project_id)
+                linked = {binding.get("agent_definition_id") for binding in bindings}
+                agent_ids = {agent.get("agent_definition_id")
+                             for agent in meta.get("agents") or []}
+                base["overview"] = {
+                    "runs": overview.get("runs", 0),
+                    "verified": overview.get("verified", 0),
+                    "open": overview.get("open", 0),
+                    "live": overview.get("live", 0),
+                    "agents": overview.get("agents", 0),
+                    "tasks": len(tasks),
+                    "active_tasks": active,
+                    "blockers": blockers,
+                    "last_activity": last or None,
+                    "verified_rate": overview.get("verified_rate", 0),
+                }
+                base["linked_agent_count"] = len(linked & agent_ids)
+                fingerprint = str(state.get("fingerprint") or f"ok:{project_id}")
+            except Exception as exc:
+                base["status"] = "error"
+                base["error"] = str(exc)[:200]
+                base["linked_agent_count"] = 0
+            return base, fingerprint
+
+        if len(entries) > 1 and STATE_WORKERS > 1:
+            with ThreadPoolExecutor(max_workers=min(STATE_WORKERS, len(entries))) as pool:
+                built = list(pool.map(build, entries))
+        else:
+            built = [build(item) for item in entries]
+        rows = [row for row, _ in built]
+        totals = {
+            "projects": len(rows),
+            "runs": sum(row["overview"]["runs"] for row in rows),
+            "verified": sum(row["overview"]["verified"] for row in rows),
+            "open": sum(row["overview"]["open"] for row in rows),
+            "agents": sum(row["overview"]["agents"] for row in rows),
+            "active_tasks": sum(row["overview"]["active_tasks"] for row in rows),
+            "blockers": sum(row["overview"]["blockers"] for row in rows),
+            "errors": sum(row["status"] == "error" for row in rows),
+        }
+        digest = hashlib.sha256()
+        for (project_id, entry), (_, fingerprint) in zip(entries, built):
+            row = next((item for item in rows if item["project_id"] == project_id), {})
+            digest.update(f"{project_id}:{fingerprint}:"
+                          f"{entry.project.get('name')}:{entry.project.get('theme')}:"
+                          f"{len(entry.project.get('agents') or [])}:"
+                          f"{row.get('linked_agent_count', 0)}:"
+                          f"{entry.project.get('description', '')}:"
+                          f"{row.get('error') or ''};".encode())
+        return {
+            "version": 1,
+            "fingerprint": digest.hexdigest()[:24],
+            "demo": bool(self.demo),
+            "totals": totals,
+            "projects": rows,
+        }
+
+    def projects_metadata(self) -> dict:
+        rows = [{**meta.project} for meta in self.projects.values()]
+        return {
+            "version": 1,
+            "registry_path": str(self.registry_path) if self.registry_path else None,
+            "projects": rows,
+        }
+
+    # -- office / inspector --------------------------------------------
+    def office(self, project_id: str) -> dict:
+        if office_model is None:
+            raise DashboardError("Agent office support is not installed")
+        entry = self._entry(project_id)
+        if entry.error:
+            raise DashboardError(entry.error)
+        state = self.project_state(project_id)
+        return office_model.build_office(
+            entry.project, state, bindings=self.bindings(project_id),
+            detail_provider=entry.store.detail)
+
+    def inspector(self, project_id: str, agent_definition_id: str) -> dict:
+        if office_model is None:
+            raise DashboardError("Agent office support is not installed")
+        entry = self._entry(project_id)
+        if entry.error:
+            raise DashboardError(entry.error)
+        state = self.project_state(project_id)
+        try:
+            return office_model.build_inspector(
+                entry.project, agent_definition_id, state,
+                bindings=self.bindings(project_id),
+                detail_provider=entry.store.detail)
+        except office_model.OfficeModelError as exc:
+            raise DashboardError(str(exc)) from exc
+
+    # -- live events ----------------------------------------------------
+    def _provider(self, project_id: str):
+        return lambda: self.project_state(project_id)
+
+    def stream_hub(self, project_id: str):
+        entry = self._entry(project_id)
+        if entry.error:
+            raise DashboardError(entry.error)
+        if self._streams is None:
+            raise DashboardError("Live event streaming is not installed")
+        return self._streams.hub(project_id)
+
+    def close(self) -> None:
+        if self._streams is not None:
+            self._streams.close()
+
+
+def _demo_catalog() -> Catalog:
+    """Three fixed synthetic projects. Never reads or writes evidence."""
+    base = Path(tempfile.gettempdir()) / "auto-orchestrator-demo"
+    profiles = (
+        {
+            "slug": "ai-lab", "profile": "ai", "name": "AI Research Lab", "theme": "ai",
+            "description": "Synthetic demo: retrieval experiments and evaluation runs.",
+            "agents": [
+                ("a_000000000001", "Ada", "RAG Engineer", "opencode", None, "#7dd3fc"),
+                ("a_000000000002", "Grace", "Evaluation Lead", "codex", None, "#fbbf24"),
+                ("a_000000000003", "Linus", "Runtime Engineer", "antigravity", None, "#34d399"),
+                ("a_000000000004", "Margaret", "Research Director", "cursor", None, "#c084fc"),
+            ],
+            "bindings": [
+                ("a_000000000001", "task", "api"),
+                ("a_000000000002", "task", "tests"),
+                ("a_000000000003", "hash", "open-0"),
+            ],
+        },
+        {
+            "slug": "security-lab", "profile": "security", "name": "Security Lab",
+            "theme": "security",
+            "description": "Synthetic demo: patch verification and incident review.",
+            "agents": [
+                ("a_000000000011", "Mira", "Security Engineer", "cursor", None, "#f87171"),
+                ("a_000000000012", "Kai", "AppSec Reviewer", "opencode", None, "#fbbf24"),
+                ("a_000000000013", "Tomas", "Threat Modeler", "codex", None, "#60a5fa"),
+            ],
+            "bindings": [
+                ("a_000000000011", "hash", "failed-0"),
+                ("a_000000000012", "hash", "unverified-0"),
+            ],
+        },
+        {
+            "slug": "web-studio", "profile": "web", "name": "Web Studio", "theme": "web",
+            "description": "Synthetic demo: interface work and release verification.",
+            "agents": [
+                ("a_000000000021", "Noor", "Frontend Engineer", "opencode", None, "#34d399"),
+                ("a_000000000022", "Ravi", "Accessibility Lead", "codex", None, "#7dd3fc"),
+                ("a_000000000023", "Ines", "Design Engineer", "antigravity", None, "#c084fc"),
+            ],
+            "bindings": [
+                ("a_000000000021", "hash", "verified-0"),
+            ],
+        },
+    )
+    projects: dict[str, CatalogProject] = {}
+    default_id = None
+    for spec in profiles:
+        root = base / spec["slug"]
+        project_id = _project_id_for(root)
+        if default_id is None:
+            default_id = project_id
+        agents = [
+            {
+                "agent_definition_id": agent_id,
+                "name": name,
+                "role": role,
+                "platform": platform,
+                "model": model,
+                "color": color,
+                "created_at": 0,
+            }
+            for agent_id, name, role, platform, model, color in spec["agents"]
+        ]
+        project = {
+            "project_id": project_id,
+            "name": spec["name"],
+            "description": "DEMO — " + spec["description"],
+            "root": str(root),
+            "theme": spec["theme"],
+            "created_at": 0,
+            "updated_at": 0,
+            "agents": agents,
+        }
+        supervisor_run = "demo-project" if spec["profile"] == "ai" \
+            else f"demo-{spec['profile']}"
+        run_ids = {
+            "verified": ("demo-verified" if spec["profile"] == "ai"
+                         else f"{spec['profile']}-demo-verified"),
+            "unverified": ("demo-unverified" if spec["profile"] == "ai"
+                           else f"{spec['profile']}-demo-unverified"),
+            "incomplete": ("demo-incomplete" if spec["profile"] == "ai"
+                           else f"{spec['profile']}-demo-incomplete"),
+            "failed": ("demo-failed" if spec["profile"] == "ai"
+                       else f"{spec['profile']}-demo-failed"),
+        }
+        hash_runs = {"open-0": run_ids["incomplete"], "failed-0": run_ids["failed"],
+                     "unverified-0": run_ids["unverified"], "verified-0": run_ids["verified"]}
+        bindings = []
+        for agent_id, kind, label in spec["bindings"]:
+            digest = _demo_hash(spec["profile"], label)
+            if kind == "task":
+                bindings.append({
+                    "agent_definition_id": agent_id,
+                    "native_hash": digest,
+                    "run_id": supervisor_run,
+                    "session_id": None,
+                    "task_id": label,
+                    "bound_at": 0,
+                })
+            else:
+                bindings.append({
+                    "agent_definition_id": agent_id,
+                    "native_hash": digest,
+                    "run_id": hash_runs[label],
+                    "session_id": None,
+                    "task_id": None,
+                    "bound_at": 0,
+                })
+        store = Store(root, demo=True, demo_profile=spec["profile"])
+        projects[project_id] = CatalogProject(project=project, store=store,
+                                              bindings=bindings)
+    return Catalog(projects, default_id, registry=None, registry_path=None, demo=True)
+
+
 class DashboardServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-    def __init__(self, address, store: Store):
-        self.store = store
+    def __init__(self, address, store: Store | None = None, *,
+                 catalog: Catalog | None = None):
+        if catalog is None:
+            if store is None:
+                raise DashboardError("A Store or Catalog is required")
+            catalog = Catalog.from_store(store)
+        self.catalog = catalog
+        self.store = store if store is not None else catalog.default_store
+        self.stopping = threading.Event()
         super().__init__(address, DashboardHandler)
+
+    def shutdown(self):
+        self.stopping.set()
+        super().shutdown()
+
+    def server_close(self):
+        self.stopping.set()
+        self.catalog.close()
+        super().server_close()
 
 
 class DashboardHandler(BaseHTTPRequestHandler):
@@ -1032,6 +1632,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if etag:
             self.send_header("ETag", etag)
         self.send_header("Cache-Control", cache)
+        self._security_headers()
+        self.end_headers()
+
+    def _security_headers(self):
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Referrer-Policy", "no-referrer")
@@ -1040,7 +1644,6 @@ class DashboardHandler(BaseHTTPRequestHandler):
             "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
             "connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'",
         )
-        self.end_headers()
 
     def _accepts_gzip(self) -> bool:
         header = self.headers.get("Accept-Encoding")
@@ -1118,34 +1721,190 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if body:
             self.wfile.write(data)
 
+    def _trusted_request(self) -> bool:
+        """Reject DNS-rebinding hosts and cross-site browser requests."""
+        port = str(self.server.server_address[1])
+        allowed = {f"127.0.0.1:{port}", f"localhost:{port}", f"[::1]:{port}"}
+        host = (self.headers.get("Host") or "").strip().lower()
+        if host not in allowed:
+            return False
+        origin = self.headers.get("Origin")
+        if origin:
+            parsed = urlparse(origin)
+            if parsed.scheme != "http" or (parsed.netloc or "").lower() not in allowed:
+                return False
+        site = self.headers.get("Sec-Fetch-Site")
+        if site and site not in ("same-origin", "none"):
+            return False
+        return True
+
     def do_GET(self):
+        if not self._trusted_request():
+            return self._error(HTTPStatus.FORBIDDEN, "Untrusted Host or Origin")
         parsed = urlparse(self.path)
         route = parsed.path
         if route in ASSETS:
             filename, content_type = ASSETS[route]
             return self._asset(filename, content_type)
+        if route == "/api/health":
+            return self._json({"ok": True})
         if route == "/api/state":
+            return self._legacy_state()
+        if route.startswith("/api/run/"):
+            return self._legacy_detail(route)
+        if route == "/api/global":
+            return self._global_state()
+        if route == "/api/projects":
+            return self._json(self.server.catalog.projects_metadata())
+        if route.startswith("/api/projects/"):
+            return self._project_route(route)
+        return self._error(HTTPStatus.NOT_FOUND, "Not found")
+
+    # -- legacy single-project routes ----------------------------------
+    def _legacy_state(self):
+        catalog = self.server.catalog
+        try:
+            state = catalog.project_state(catalog.default_id, legacy=True)
+        except (OSError, ValueError) as exc:
+            return self._error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+        meta = catalog.project_meta(catalog.default_id)
+        etag = f'"legacy-{state["fingerprint"]}-{_project_meta_digest(meta)}"'
+        if self._if_none_match(etag):
+            return self._not_modified(etag)
+        return self._json(state, etag=etag)
+
+    def _legacy_detail(self, route: str):
+        run_id = unquote(route[len("/api/run/"):])
+        try:
+            return self._json(self.server.catalog.project_detail(
+                self.server.catalog.default_id, run_id, legacy=True))
+        except DashboardError as exc:
+            return self._error(HTTPStatus.NOT_FOUND, str(exc))
+        except (OSError, ValueError) as exc:
+            return self._error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+
+    # -- aggregate ------------------------------------------------------
+    def _global_state(self):
+        try:
+            payload = self.server.catalog.global_overview()
+        except (OSError, ValueError) as exc:
+            return self._error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+        etag = f'"g-{payload["fingerprint"]}"'
+        if self._if_none_match(etag):
+            return self._not_modified(etag)
+        return self._json(payload, etag=etag)
+
+    # -- project-scoped routes -----------------------------------------
+    def _project_failure(self, project_id: str, exc):
+        entry = self.server.catalog.projects.get(project_id)
+        if entry is not None and entry.error:
+            return self._error(HTTPStatus.SERVICE_UNAVAILABLE, str(exc))
+        return self._error(HTTPStatus.NOT_FOUND, str(exc))
+
+    def _project_route(self, route: str):
+        parts = route[len("/api/projects/"):].split("/")
+        project_id = unquote(parts[0]) if parts else ""
+        if not PROJECT_ID.fullmatch(project_id):
+            return self._error(HTTPStatus.NOT_FOUND, "Unknown project")
+        catalog = self.server.catalog
+        if project_id not in catalog.projects:
+            return self._error(HTTPStatus.NOT_FOUND, "Unknown project")
+        if len(parts) == 2 and parts[1] == "state":
             try:
-                state = self.server.store.state()
+                state = catalog.project_state(project_id)
+            except DashboardError as exc:
+                return self._project_failure(project_id, exc)
             except (OSError, ValueError) as exc:
                 return self._error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
-            etag = f'"{state["fingerprint"]}"'
+            etag = (f'"project-{state["fingerprint"]}-'
+                    f'{_project_meta_digest(catalog.project_meta(project_id))}"')
             if self._if_none_match(etag):
                 return self._not_modified(etag)
             return self._json(state, etag=etag)
-        if route.startswith("/api/run/"):
-            run_id = unquote(route[len("/api/run/"):])
+        if len(parts) == 2 and parts[1] == "office":
             try:
-                return self._json(self.server.store.detail(run_id))
+                return self._json(catalog.office(project_id))
             except DashboardError as exc:
-                return self._error(HTTPStatus.NOT_FOUND, str(exc))
+                return self._project_failure(project_id, exc)
             except (OSError, ValueError) as exc:
                 return self._error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
-        if route == "/api/health":
-            return self._json({"ok": True})
+        if len(parts) == 2 and parts[1] == "events":
+            return self._events(project_id)
+        if len(parts) == 3 and parts[1] == "runs":
+            run_id = unquote(parts[2])
+            try:
+                return self._json(catalog.project_detail(project_id, run_id))
+            except DashboardError as exc:
+                return self._project_failure(project_id, exc)
+            except (OSError, ValueError) as exc:
+                return self._error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+        if len(parts) == 3 and parts[1] == "agents":
+            agent_id = unquote(parts[2])
+            try:
+                return self._json(catalog.inspector(project_id, agent_id))
+            except DashboardError as exc:
+                return self._project_failure(project_id, exc)
+            except (OSError, ValueError) as exc:
+                return self._error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
         return self._error(HTTPStatus.NOT_FOUND, "Not found")
 
+    # -- Server-Sent Events --------------------------------------------
+    def _events(self, project_id: str):
+        if event_stream is None:
+            return self._error(HTTPStatus.SERVICE_UNAVAILABLE,
+                               "Live event streaming is not installed")
+        try:
+            hub = self.server.catalog.stream_hub(project_id)
+        except DashboardError as exc:
+            return self._project_failure(project_id, exc)
+        except (OSError, ValueError) as exc:
+            return self._error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+        try:
+            subscriber = hub.subscribe(self.headers.get("Last-Event-ID"))
+        except event_stream.StreamError as exc:
+            return self._error(HTTPStatus.SERVICE_UNAVAILABLE, str(exc))
+        self.close_connection = True
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "keep-alive")
+        self.send_header("X-Accel-Buffering", "no")
+        self._security_headers()
+        self.end_headers()
+        heartbeat = subscriber.heartbeat
+        try:
+            self.connection.settimeout(max(5.0, heartbeat * 2))
+            self.wfile.write(event_stream.RETRY_FRAME)
+            self.wfile.flush()
+            for event in subscriber.initial:
+                self.wfile.write(event.encode())
+            self.wfile.flush()
+            next_beat = time.monotonic() + heartbeat
+            while not self.server.stopping.is_set():
+                now = time.monotonic()
+                timeout = max(0.05, min(1.0, next_beat - now))
+                try:
+                    item = subscriber.next(timeout)
+                except queue.Empty:
+                    if time.monotonic() >= next_beat:
+                        self.wfile.write(event_stream.HEARTBEAT_FRAME)
+                        self.wfile.flush()
+                        next_beat = time.monotonic() + heartbeat
+                    continue
+                if item is None:
+                    break
+                self.wfile.write(item.encode())
+                self.wfile.flush()
+                next_beat = time.monotonic() + heartbeat
+        except (BrokenPipeError, ConnectionResetError, OSError, ValueError,
+                TypeError):
+            pass
+        finally:
+            subscriber.close()
+
     def do_HEAD(self):
+        if not self._trusted_request():
+            return self._error(HTTPStatus.FORBIDDEN, "Untrusted Host or Origin")
         parsed = urlparse(self.path)
         if parsed.path in ASSETS:
             filename, content_type = ASSETS[parsed.path]
@@ -1153,32 +1912,52 @@ class DashboardHandler(BaseHTTPRequestHandler):
         return self._error(HTTPStatus.METHOD_NOT_ALLOWED, "HEAD is limited to static assets")
 
     def do_POST(self):
+        if not self._trusted_request():
+            return self._error(HTTPStatus.FORBIDDEN, "Untrusted Host or Origin")
         return self._error(HTTPStatus.METHOD_NOT_ALLOWED, "Dashboard is read-only")
 
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--root", default=".", type=Path, help="Project directory (default: current directory)")
+    parser.add_argument("--root", default=None, type=Path,
+                        help="Default project directory (auto-registered); omit to use the first registered project")
+    parser.add_argument("--registry", default=None, type=Path,
+                        help="Project registry (default: $AUTO_ORCHESTRATOR_HOME/projects.json)")
+    parser.add_argument("--no-register", action="store_true",
+                        help="Serve --root without writing it to the registry")
     parser.add_argument("--port", default=8765, type=int, help="Loopback port (default: 8765)")
     parser.add_argument("--demo", action="store_true", help="Serve clearly labelled synthetic sample evidence")
     parser.add_argument("--open", action="store_true", help="Open the dashboard in the default browser")
     args = parser.parse_args(argv)
     if not 0 <= args.port <= 65535:
         parser.error("--port must be between 0 and 65535")
-    root = args.root.resolve()
-    if not root.is_dir():
-        parser.error(f"Project directory does not exist: {root}")
-    store = Store(root, demo=args.demo)
+    if args.root is not None:
+        root = args.root.expanduser()
+        if not root.is_dir():
+            parser.error(f"Project directory does not exist: {root}")
+    else:
+        root = None
     try:
-        server = DashboardServer(("127.0.0.1", args.port), store)
+        catalog = _demo_catalog() if args.demo else Catalog.load(
+            args.registry, root=root, no_register=args.no_register)
+    except (DashboardError, OSError, ValueError) as exc:
+        print(f"DASHBOARD ERROR: {exc}", file=sys.stderr)
+        return 1
+    try:
+        server = DashboardServer(("127.0.0.1", args.port), catalog.default_store,
+                                 catalog=catalog)
     except OSError as exc:
+        catalog.close()
         print(f"DASHBOARD ERROR: cannot bind 127.0.0.1:{args.port}: {exc}", file=sys.stderr)
         return 1
     host, port = server.server_address[:2]
     url = f"http://{host}:{port}/"
     print("Auto-Orchestrator dashboard — read-only, loopback only")
     print(f"  {url}")
-    print(f"  root: {root}")
+    print(f"  default project: {catalog.project_meta(catalog.default_id)['root']}")
+    print(f"  projects: {len(catalog.projects)}")
+    if catalog.registry_path is not None:
+        print(f"  registry: {catalog.registry_path}")
     print(f"  mode: {'DEMO (synthetic, not a benchmark)' if args.demo else 'live evidence'}")
     print("  Ctrl-C to stop")
     if args.open:
@@ -1188,7 +1967,9 @@ def main(argv=None) -> int:
     except KeyboardInterrupt:
         print("\nStopped.")
     finally:
+        server.stopping.set()
         server.server_close()
+        catalog.close()
     return 0
 
 

@@ -296,3 +296,42 @@ adds a small, conservative long-tail domain ontology and
 skill selection rates. None of this proves live IDE reliability or speedup
 until matched native runs are repeated. See
 [execution reliability](docs/V64_RELIABILITY.md).
+
+## V7.1 — Multi-project evidence console and Virtual Office
+
+V7.1 adds a local project registry, a fleet overview and a project-scoped evidence console without weakening the read-only boundary. Every project keeps its evidence under its own `.auto-orchestrator/`; identical `run_id` values in two projects stay separate. The dashboard remains loopback-only and never starts, stops or messages an agent.
+
+![Global overview with three synthetic projects](docs/assets/global-overview-demo.png)
+
+![Virtual Agent Office with evidence-derived desks](docs/assets/agent-office-demo.png)
+
+```bash
+# Register/serve a project (auto-registers unless --no-register)
+python tools/dashboard.py --root /path/to/project --open
+python tools/project_registry.py add --root /path/to/project --name "Research Lab" --theme ai
+python tools/project_registry.py list
+
+# Conservative, evidence-based native capability matrix
+python tools/capabilities.py show
+python tools/capabilities.py show --platform cursor --json
+```
+
+The **Virtual Office** draws one desk per registered agent definition. Status comes from explicit bindings and observed native spans/tasks; an agent with no binding is **Unknown/Unlinked**, never “idle”. The **Agent Inspector** separates identity, activity, files, verification, native-stop evidence and terminal support. There is no authenticated live terminal stream, so it reports `terminal.supported: false` instead of rendering simulated output.
+
+- [Multi-project registry, isolation, migration and HTTP/SSE API](docs/MULTIPROJECT.md)
+- [Virtual Office, Agent Inspector, themes, i18n and accessibility](docs/VIRTUAL_OFFICE.md)
+- [Native capability matrix and simulated-vs-real test limits](docs/CAPABILITY_MATRIX.md)
+- [Controlled planner/executor with acceptance evidence](docs/CONTROLLED_EXECUTION.md)
+
+A deterministic planner/executor layer adds acceptance criteria to the existing
+Supervisor DAG, rejects unordered write-scope overlap, emits a dispatch manifest
+for the native IDE and refuses completion until every criterion has passed
+evidence. It never spawns a native agent or merges a worktree.
+
+```bash
+python tools/project_planner.py validate --plan examples/v71-plan.json
+python tools/project_planner.py init --plan examples/v71-plan.json
+python tools/executor.py next --run-id checkout-retry --json
+```
+
+The core server remains stdlib-only; FastAPI is not a dependency. An optional OpenTelemetry adapter (`tools/telemetry.py`) is a no-op when OpenTelemetry is absent, never requires a collector, and exports only whitelisted attributes. Native capability values are deliberately conservative: external spawn, cancel, background tracking, resume and live terminal support are not claimed for any platform. Deterministic tests replay documented payloads; they are **not** authenticated native IDE end-to-end evidence.
