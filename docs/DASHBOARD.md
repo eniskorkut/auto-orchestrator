@@ -1,6 +1,6 @@
 # Evidence dashboard — read-only local console
 
-> V7.1 adds a project registry, Global Overview and Virtual Agent Office on top of this console. See [MULTIPROJECT.md](MULTIPROJECT.md) and [VIRTUAL_OFFICE.md](VIRTUAL_OFFICE.md). The single-project behavior below remains available and backward compatible.
+> V7.2 adds a continuous Canvas 2D Virtual Office, room filters and a layout editor on top of this console; V7.1 added the project registry and Global Overview. See [MULTIPROJECT.md](MULTIPROJECT.md) and [VIRTUAL_OFFICE.md](VIRTUAL_OFFICE.md). The single-project behavior below remains available and backward compatible.
 
 The Auto-Orchestrator dashboard is a local, read-only web view over the evidence your native IDE sessions already leave on disk. It joins run JSONL, Supervisor SQLite state and managed-worktree manifests into one inspection surface, while keeping claims, observations and missing evidence visibly separate.
 
