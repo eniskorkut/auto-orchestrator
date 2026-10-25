@@ -1,0 +1,172 @@
+from __future__ import annotations
+
+import tempfile
+import unittest
+from pathlib import Path
+
+from tools.project_planner import validate_rich_plan
+from tools.teamwork import PATTERNS, TeamworkEngine, validate_teamwork_plan
+from tools.teamwork_planner import (
+    TeamworkPlannerError,
+    plan_request,
+)
+
+PROJECT_ID = "p_" + "a" * 16
+
+
+def by_milestone(plan):
+    result = {}
+    for task in plan["tasks"]:
+        result.setdefault(task["milestone"], []).append(task)
+    return result
+
+
+class PlannerTests(unittest.TestCase):
+    def test_full_deterministic_plan_has_m1_to_m5(self):
+        plan = plan_request(
+            "Build a backend API and a frontend UI",
+            run_id="plan-1", project_id=PROJECT_ID, max_parallel=3,
+            model="opencode-go/deepseek-v4.1-flash")
+        self.assertEqual(plan["run_id"], "plan-1")
+        self.assertEqual(plan["project_id"], PROJECT_ID)
+        self.assertEqual(plan["pattern"], "distributed_coding")
+        self.assertEqual([m["id"] for m in plan["milestones"]],
+                         ["M1", "M2", "M3", "M4", "M5"])
+        groups = by_milestone(plan)
+        self.assertEqual([task["role"] for task in groups["M1"]], ["explorer"])
+        self.assertEqual([task["role"] for task in groups["M2"]],
+                         ["implementer", "implementer"])
+        self.assertEqual({task["department"] for task in groups["M2"]},
+                         {"backend", "frontend"})
+        self.assertEqual({task["id"] for task in groups["M2"]},
+                         {"build-backend", "build-frontend"})
+        self.assertEqual(groups["M2"][0]["depends_on"],
+                         groups["M2"][1]["depends_on"])
+        self.assertEqual([task["role"] for task in groups["M3"]], ["tester"])
+        self.assertEqual([task["role"] for task in groups["M4"]],
+                         ["reviewer", "challenger", "auditor"])
+        self.assertEqual([task["role"] for task in groups["M5"]],
+                         ["success-auditor"])
+        self.assertTrue(all(task["phase"] == "verify" for task in
+                            groups["M3"] + groups["M4"] + groups["M5"]))
+        self.assertEqual(plan["milestones"][0]["verification_policy"]["require_roles"], [])
+        self.assertEqual(plan["milestones"][2]["verification_policy"]["require_roles"],
+                         ["tester"])
+        self.assertEqual(plan["milestones"][3]["verification_policy"]["require_roles"],
+                         ["reviewer", "challenger", "auditor"])
+        self.assertEqual(plan["milestones"][4]["verification_policy"]["require_roles"],
+                         ["success-auditor"])
+        self.assertEqual([m["depends_on"] for m in plan["milestones"]],
+                         [[], ["M1"], ["M2"], ["M3"], ["M4"]])
+        for task in plan["tasks"]:
+            self.assertIn(task["milestone"], {"M1", "M2", "M3", "M4", "M5"})
+            self.assertIn(task["phase"], ("build", "verify", "repair"))
+            self.assertTrue(task["acceptance"])
+            self.assertTrue(task["verify_commands"])
+            self.assertEqual(task["provider"], "opencode")
+            self.assertEqual(task["model"], "opencode-go/deepseek-v4.1-flash")
+        self.assertEqual(plan_request(
+            "Build a backend API and a frontend UI",
+            run_id="plan-1", project_id=PROJECT_ID, max_parallel=3,
+            model="opencode-go/deepseek-v4.1-flash"), plan)
+
+    def test_full_plan_validates_and_initializes(self):
+        plan = plan_request("Build a backend API and a frontend UI",
+                            run_id="plan-init")
+        validate_teamwork_plan(plan)
+        rich = validate_rich_plan(plan)
+        self.assertEqual(len(rich["tasks"]), 8)
+        with tempfile.TemporaryDirectory() as temp:
+            engine = TeamworkEngine(Path(temp))
+            try:
+                state = engine.init(plan)
+                self.assertEqual(state["milestone_count"], 5)
+                self.assertEqual(state["task_count"], 8)
+                self.assertEqual(state["verified_progress"], 0.0)
+                self.assertIsNone(state["estimated_progress"])
+                self.assertEqual(state["milestones"][0]["status"], "ready")
+                self.assertEqual(state["milestones"][1]["status"], "planned")
+            finally:
+                engine.close()
+
+    def test_research_uses_one_milestone(self):
+        plan = plan_request("Research the current architecture and compare options",
+                            run_id="research-1")
+        self.assertEqual(plan["pattern"], "research")
+        self.assertEqual(len(plan["milestones"]), 1)
+        self.assertEqual(plan["milestones"][0]["id"], "M1")
+        self.assertEqual([task["role"] for task in plan["tasks"]], ["explorer"])
+        self.assertEqual(plan["tasks"][0]["milestone"], "M1")
+        validate_rich_plan(plan)
+
+    def test_single_backend_uses_three_milestones(self):
+        plan = plan_request("Implement a backend endpoint for authentication",
+                            run_id="backend-1")
+        self.assertEqual([m["id"] for m in plan["milestones"]],
+                         ["M1", "M2", "M3"])
+        self.assertEqual([task["role"] for task in plan["tasks"]],
+                         ["implementer", "tester", "auditor"])
+        self.assertEqual(plan["tasks"][0]["id"], "build-backend")
+        self.assertEqual(plan["tasks"][0]["milestone"], "M1")
+        self.assertEqual(plan["tasks"][1]["milestone"], "M2")
+        self.assertEqual(plan["tasks"][2]["milestone"], "M3")
+        self.assertNotIn("build-frontend", {task["id"] for task in plan["tasks"]})
+        self.assertEqual([m["depends_on"] for m in plan["milestones"]],
+                         [[], ["M1"], ["M2"]])
+        validate_rich_plan(plan)
+
+    def test_fix_request_selects_review_and_repair_without_extra_milestones(self):
+        plan = plan_request("Fix a bug in the backend API", run_id="repair-1")
+        self.assertEqual(plan["pattern"], "review_and_repair")
+        self.assertEqual(len(plan["milestones"]), 3)
+        self.assertIn("Repair", plan["tasks"][0]["objective"])
+
+    def test_explicit_patterns_are_honoured(self):
+        for pattern in PATTERNS:
+            with self.subTest(pattern=pattern):
+                plan = plan_request("do the work", run_id="pattern-1",
+                                    pattern=pattern)
+                self.assertEqual(plan["pattern"], pattern)
+                validate_teamwork_plan(plan)
+
+    def test_repository_dependent_fields_are_explicit(self):
+        plan = plan_request("Build a backend API and a frontend UI",
+                            run_id="markers-1")
+        self.assertTrue(plan["requires_repo"])
+        self.assertTrue(plan["repo_inputs"])
+        self.assertIn("tasks[].verify_commands", plan["repo_dependent_fields"])
+        self.assertTrue(any("no LLM" in note for note in plan["notes"]))
+        for task in plan["tasks"]:
+            self.assertTrue(task["requires_repo"])
+            self.assertIn("verify_commands", task["repo_dependent_fields"])
+            self.assertTrue(task["acceptance"])
+
+    def test_invalid_arguments_are_rejected(self):
+        cases = [
+            dict(request="x", run_id=""),
+            dict(request="x", run_id="../escape"),
+            dict(request="x", run_id="ok", project_id="not-a-project"),
+            dict(request="x", run_id="ok", max_parallel=0),
+            dict(request="x", run_id="ok", max_parallel=4),
+            dict(request="x", run_id="ok", max_parallel=True),
+            dict(request="x", run_id="ok", model=""),
+            dict(request="x", run_id="ok", model="x" * 201),
+            dict(request="x", run_id="ok", pattern="made_up"),
+        ]
+        for case in cases:
+            request = case.pop("request")
+            with self.subTest(case=case), self.assertRaises(TeamworkPlannerError):
+                plan_request(request, **case)
+        for request in ("", "   ", None, 42, "x" * 20001):
+            with self.subTest(request=request), self.assertRaises(TeamworkPlannerError):
+                plan_request(request, run_id="ok")
+
+    def test_object_request_is_supported_deterministically(self):
+        first = plan_request({"text": "Research two options"}, run_id="object-1")
+        second = plan_request({"text": "Research two options"}, run_id="object-1")
+        self.assertEqual(first, second)
+        self.assertEqual(first["pattern"], "research")
+
+
+if __name__ == "__main__":
+    unittest.main()
