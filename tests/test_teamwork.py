@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import os
 import stat
 import tempfile
 import unittest
@@ -559,7 +560,8 @@ class TeamworkEngineTests(TeamworkTestCase):
         path = Path(first["path"])
         self.assertTrue(path.is_file())
         self.assertEqual(path.name, "team-run-M1.v1.json")
-        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+        if os.name != "nt":
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
         self.assertEqual(first["sha256"],
                          hashlib.sha256(path.read_bytes()).hexdigest())
         payload = json.loads(path.read_text(encoding="utf-8"))
