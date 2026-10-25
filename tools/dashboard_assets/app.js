@@ -57,6 +57,11 @@
     officeLoading: false,
     officeSignature: '',
     officeToken: 0,
+    milestones: null,
+    milestoneError: null,
+    milestoneToken: 0,
+    lastMilestoneFetch: 0,
+    milestoneFilter: null,
     arranging: false,
     reducedMotion: false,
     language: 'en',
@@ -1227,6 +1232,10 @@
     state.demo = false;
     state.lastFetch = 0;
     state.lastOfficeFetch = 0;
+    state.lastMilestoneFetch = 0;
+    state.milestones = null;
+    state.milestoneError = null;
+    state.milestoneFilter = null;
     state.arranging = false;
     state.inspector = {
       open: false,
@@ -1255,6 +1264,8 @@
     if (window.AOOffice?.destroyOffice) window.AOOffice.destroyOffice();
     clear($('#office-root'));
     clear($('#office-summary'));
+    clear($('#office-milestones'));
+    clear($('#board-milestones'));
     ['runs', 'board', 'workspaces'].forEach((name) => {
       const counter = $(`#tab-${name}-count`);
       if (counter) counter.textContent = '—';
@@ -1371,6 +1382,7 @@
     await Promise.all([
       loadState({ force: true }),
       loadOffice({ force: true }),
+      loadMilestones({ force: true }),
     ]);
     if (state.projectId !== projectId) return;
     await syncDetail();
@@ -1581,6 +1593,169 @@
     });
   }
 
+  async function loadMilestones(options = {}) {
+    const projectId = state.projectId;
+    if (!projectId) return false;
+    const token = ++state.milestoneToken;
+    try {
+      const response = await requestJSON(`/api/projects/${encodeURIComponent(projectId)}/milestones`);
+      if (token !== state.milestoneToken || projectId !== state.projectId) return false;
+      if (!response.ok || !response.data || typeof response.data !== 'object') {
+        throw new Error(t('errors.invalidResponse'));
+      }
+      state.milestones = response.data;
+      state.milestoneError = null;
+      state.lastMilestoneFetch = Date.now() / 1000;
+      if (state.milestoneFilter) {
+        const stillThere = (response.data.runs || []).some((run) =>
+          run.run_id === state.milestoneFilter.runId
+          && (run.milestones || []).some((item) => item.id === state.milestoneFilter.milestoneId));
+        if (!stillThere) state.milestoneFilter = null;
+      }
+      renderMilestones();
+      if (state.tab === 'board') renderBoard();
+      return true;
+    } catch (error) {
+      if (token !== state.milestoneToken || projectId !== state.projectId) return false;
+      state.milestoneError = error;
+      renderMilestones();
+      return false;
+    }
+  }
+
+  function milestoneStatusLabel(status) {
+    return t(`milestone.status.${status || 'planned'}`);
+  }
+
+  function selectMilestone(run, milestone) {
+    if (!run || !milestone) return;
+    const current = state.milestoneFilter;
+    if (current && current.runId === run.run_id && current.milestoneId === milestone.id) {
+      state.milestoneFilter = null;
+    } else {
+      state.milestoneFilter = {
+        runId: run.run_id, milestoneId: milestone.id,
+        taskIds: (milestone.tasks || []).map((task) => task.id),
+      };
+      state.boardRun = run.run_id;
+    }
+    renderMilestones();
+    setTab('board');
+    renderBoard();
+  }
+
+  function milestoneCard(run, milestone, options = {}) {
+    const tasks = milestone.tasks || [];
+    const completed = tasks.filter((task) => task.state === 'completed').length;
+    const running = tasks.filter((task) => ['running', 'cancel_requested'].includes(task.state)).length;
+    const failed = tasks.filter((task) => ['failed', 'cancelled', 'timed_out'].includes(task.state)).length;
+    const selected = state.milestoneFilter?.runId === run.run_id
+      && state.milestoneFilter?.milestoneId === milestone.id;
+    const roleList = milestone.require_roles || [];
+    const handoff = milestone.handoff || null;
+    return h('button', {
+      class: `milestone-card${selected ? ' selected' : ''}`,
+      type: 'button', 'data-status': milestone.status,
+      'aria-pressed': String(Boolean(selected)),
+      onclick: () => selectMilestone(run, milestone),
+    },
+      h('span', { class: 'milestone-top' },
+        h('span', { class: 'milestone-id', text: milestone.id }),
+        h('span', { class: 'milestone-status', 'data-status': milestone.status, text: milestoneStatusLabel(milestone.status) }),
+      ),
+      h('strong', { class: 'milestone-objective', text: milestone.objective || milestone.id }),
+      h('span', { class: 'milestone-metrics' },
+        h('span', { text: t('milestone.tasksCount', { done: completed, total: tasks.length }) }),
+        running ? h('span', { class: 'milestone-running', text: t('milestone.runningCount', { count: running }) }) : null,
+        failed ? h('span', { class: 'milestone-failed', text: t('milestone.failedCount', { count: failed }) }) : null,
+        handoff ? h('span', { class: 'milestone-handoff', text: t('milestone.handoff') }) : null,
+      ),
+      roleList.length
+        ? h('span', { class: 'milestone-roles', text: t('milestone.roles', { roles: roleList.join(', ') }) })
+        : null,
+      options.compact ? null : h('span', {
+        class: 'milestone-acceptance',
+        text: (milestone.acceptance || []).slice(0, 2).join(' · '),
+      }),
+    );
+  }
+
+  function renderMilestones() {
+    const boardHost = $('#board-milestones');
+    const officeHost = $('#office-milestones');
+    if (!boardHost && !officeHost) return;
+    const payload = state.milestones;
+    const demo = Boolean(payload?.demo);
+    const runs = payload?.runs || [];
+    const activeRun = runs.find((run) => run.run_id === payload?.current_run_id) || runs[0] || null;
+    if (boardHost) {
+      clear(boardHost);
+      if (!activeRun) {
+        boardHost.append(h('div', { class: 'milestone-empty' },
+          h('p', { text: state.milestoneError ? t('milestone.error') : t('milestone.empty') }),
+          h('p', { class: 'milestone-note', text: t('milestone.emptyHint') }),
+        ));
+      } else {
+        const head = h('div', { class: 'milestone-head' },
+          h('div', {},
+            h('div', { class: 'eyebrow', text: t('milestone.eyebrow') }),
+            h('h2', { text: t('milestone.title') }),
+          ),
+          h('div', { class: 'milestone-progress' },
+            demo ? h('span', { class: 'demo-chip', text: 'DEMO DATA' }) : null,
+            h('span', {
+              text: t('milestone.verifiedProgress', {
+                passed: activeRun.passed_milestones,
+                total: activeRun.milestone_count,
+                percent: Math.round((activeRun.verified_progress || 0) * 100),
+              }),
+            }),
+            h('span', { class: 'milestone-estimate', text: t('milestone.estimateNotShown') }),
+            state.milestoneFilter
+              ? h('button', {
+                class: 'text-btn', type: 'button', text: t('milestone.clearFilter'),
+                onclick: () => { state.milestoneFilter = null; renderMilestones(); renderBoard(); },
+              })
+              : null,
+          ),
+        );
+        boardHost.append(head);
+        const list = h('div', { class: 'milestone-list', role: 'list' });
+        for (const milestone of activeRun.milestones || []) {
+          list.append(h('div', { role: 'listitem' }, milestoneCard(activeRun, milestone)));
+        }
+        boardHost.append(list);
+      }
+    }
+    if (officeHost) {
+      clear(officeHost);
+      if (!activeRun) return;
+      const current = (activeRun.milestones || []).find((item) =>
+        ['running', 'verifying', 'repairing', 'ready'].includes(item.status))
+        || [...(activeRun.milestones || [])].reverse().find((item) => item.status === 'passed')
+        || (activeRun.milestones || [])[0];
+      if (!current) return;
+      officeHost.append(
+        h('div', { class: 'office-milestone-strip' },
+          h('span', { class: 'office-milestone-label', text: t('milestone.current') }),
+          h('button', {
+            class: 'office-milestone-open', type: 'button',
+            onclick: () => selectMilestone(activeRun, current),
+          },
+            h('strong', { text: `${current.id} · ${current.objective}` }),
+            h('span', {
+              text: t('milestone.verifiedShort', {
+                passed: activeRun.passed_milestones,
+                total: activeRun.milestone_count,
+              }),
+            }),
+          ),
+          h('span', { class: 'office-milestone-status', 'data-status': current.status, text: milestoneStatusLabel(current.status) }),
+        ),
+      );
+    }
+  }
+
   function renderOffice() {
     const focusedDesk = document.activeElement?.closest?.('.desk-card')?.querySelector('.desk-open')?.dataset.deskKey
       || document.activeElement?.dataset?.deskKey
@@ -1611,6 +1786,7 @@
       callbacks: {
         onInspect: (agent, trigger) => openAgentInspector(agent, trigger),
         onInspectSession: (session, trigger) => openUnlinkedInspector(session, trigger),
+        onInspectManaged: (managed, trigger) => openManagedInspector(managed, trigger),
         onTrigger: (element) => { state.inspector.trigger = element; },
         onMove: (key, delta) => moveDesk(key, delta),
         onRetry: () => loadOffice({ force: true }),
@@ -1622,7 +1798,8 @@
       root?.querySelector(`[data-desk-key="${CSS.escape(focusedDesk)}"]`)?.focus();
     }
     const count = state.office
-      ? (state.office.summary?.agents ?? state.office.agents?.length ?? 0)
+      ? ((state.office.summary?.agents ?? state.office.agents?.length ?? 0)
+         + (state.office.summary?.managed || 0))
       : null;
     const counter = $('#tab-office-count');
     if (counter) counter.textContent = count == null ? '—' : fmtNumber(count);
@@ -1862,6 +2039,7 @@
     renderFilters();
     renderRunList();
     renderBoard();
+    renderMilestones();
     renderWorkspaces();
     renderDetail();
     updateLiveBadge();
@@ -2731,7 +2909,11 @@
     }
 
     const run = runs.find((item) => item.id === state.boardRun) || runs[0];
-    const tasks = run.tasks || [];
+    let tasks = run.tasks || [];
+    if (state.milestoneFilter && state.milestoneFilter.runId === run.id) {
+      const allowed = new Set(state.milestoneFilter.taskIds || []);
+      tasks = tasks.filter((task) => allowed.has(task.id));
+    }
     const groups = { ready: [], running: [], blocked: [], done: [], attention: [] };
     for (const task of tasks) groups[taskGroup(task)].push(task);
     const completed = tasks.filter((task) => task.state === 'completed').length;
@@ -3008,6 +3190,21 @@
     await loadInspector();
   }
 
+  function openManagedInspector(managed, trigger) {
+    if (!managed || typeof managed !== 'object') return;
+    const details = managed.managed && typeof managed.managed === 'object' ? managed.managed : {};
+    openUnlinkedInspector({
+      ...managed,
+      ...details,
+      managed: true,
+      open: details.status === 'running' || managed.status === 'working',
+      platform: managed.provider || managed.platform || details.provider,
+      name: managed.name || details.task_id,
+      run_id: details.run_id || managed.run_id,
+      task_id: details.task_id || managed.task_id,
+    }, trigger);
+  }
+
   function openUnlinkedInspector(session, trigger) {
     state.inspector = {
       open: true,
@@ -3103,6 +3300,7 @@
     if (state.mode === 'project' && state.projectId) {
       if (state.live.mode !== 'sse' && !state.stateLoading) loadState();
       if ((state.live.mode !== 'sse' || state.tab === 'office') && now - state.lastOfficeFetch > 7) loadOffice();
+      if ((state.tab === 'board' || state.tab === 'office') && now - state.lastMilestoneFetch > 7) loadMilestones();
     }
   }
 

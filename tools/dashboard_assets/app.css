@@ -2012,3 +2012,62 @@ body.inspector-open .office-stage { height: min(760px, calc(100vh - 180px)); }
   body.inspector-open .inspector-field { padding: 8px 10px; }
   body.inspector-open .inspector-body { padding: 16px 16px 24px; }
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   V7.3 — Teamwork milestone panel and office progress strip
+   ══════════════════════════════════════════════════════════════════════════ */
+.office-milestones { margin: 0 0 12px; }
+.office-milestone-strip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--accent);
+  border-radius: 9px;
+  background: var(--panel);
+}
+.office-milestone-label { color: var(--faint); font: 600 8px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; white-space: nowrap; }
+.office-milestone-open { appearance: none; display: flex; align-items: baseline; gap: 10px; min-width: 0; border: 0; background: transparent; color: var(--text); text-align: left; cursor: pointer; }
+.office-milestone-open strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 11px/1.3 var(--sans); }
+.office-milestone-open span { color: var(--faint); font: 9px/1.2 var(--mono); white-space: nowrap; }
+.office-milestone-status { margin-left: auto; padding: 4px 7px; border-radius: 4px; background: var(--panel-2); color: var(--muted); font: 600 8px/1 var(--mono); text-transform: uppercase; letter-spacing: .06em; }
+.office-milestone-status[data-status="passed"] { color: var(--ok); background: color-mix(in oklab, var(--ok) 10%, var(--panel)); }
+.office-milestone-status[data-status="running"], .office-milestone-status[data-status="verifying"], .office-milestone-status[data-status="repairing"] { color: var(--accent); background: color-mix(in oklab, var(--accent) 10%, var(--panel)); }
+.office-milestone-status[data-status="failed"], .office-milestone-status[data-status="blocked"] { color: var(--bad); background: color-mix(in oklab, var(--bad) 10%, var(--panel)); }
+
+.board-milestones { margin: 0 0 14px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+.milestone-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 12px; }
+.milestone-head h2 { margin: 4px 0 0; font: 600 15px/1.2 var(--sans); }
+.milestone-progress { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; color: var(--muted); font: 9px/1.4 var(--mono); }
+.milestone-estimate { color: var(--faint); }
+.milestone-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 8px; }
+.milestone-card { appearance: none; min-width: 0; display: grid; gap: 7px; padding: 11px; border: 1px solid var(--line); border-left: 2px solid var(--line-strong); border-radius: 8px; background: var(--panel-2); color: var(--text); text-align: left; cursor: pointer; }
+.milestone-card:hover { border-color: var(--line-strong); background: var(--panel-3); }
+.milestone-card.selected { border-color: color-mix(in oklab, var(--accent) 55%, var(--line)); border-left-color: var(--accent); background: color-mix(in oklab, var(--accent) 6%, var(--panel-2)); }
+.milestone-card[data-status="passed"] { border-left-color: var(--ok); }
+.milestone-card[data-status="running"], .milestone-card[data-status="verifying"], .milestone-card[data-status="repairing"] { border-left-color: var(--accent); }
+.milestone-card[data-status="failed"], .milestone-card[data-status="blocked"] { border-left-color: var(--bad); }
+.milestone-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.milestone-id { color: var(--faint); font: 600 8px/1 var(--mono); letter-spacing: .1em; }
+.milestone-status { padding: 3px 5px; border-radius: 3px; background: var(--panel); color: var(--muted); font: 600 7px/1 var(--mono); text-transform: uppercase; }
+.milestone-status[data-status="passed"] { color: var(--ok); }
+.milestone-status[data-status="running"], .milestone-status[data-status="verifying"], .milestone-status[data-status="repairing"] { color: var(--accent); }
+.milestone-status[data-status="failed"], .milestone-status[data-status="blocked"] { color: var(--bad); }
+.milestone-objective { font: 600 10px/1.4 var(--sans); }
+.milestone-metrics { display: flex; gap: 8px; flex-wrap: wrap; color: var(--faint); font: 8px/1.3 var(--mono); }
+.milestone-running { color: var(--accent); }
+.milestone-failed { color: var(--bad); }
+.milestone-handoff { color: var(--ok); }
+.milestone-roles, .milestone-acceptance { color: var(--faint); font: 8px/1.4 var(--mono); overflow-wrap: anywhere; }
+.milestone-acceptance { color: var(--muted); }
+.milestone-empty { padding: 12px; border: 1px dashed var(--line-strong); border-radius: 8px; color: var(--muted); }
+.milestone-empty p { margin: 0 0 5px; font-size: 11px; }
+.milestone-note { color: var(--faint); font-size: 9px; }
+@media (max-width: 700px) {
+  .office-milestone-strip { flex-wrap: wrap; }
+  .office-milestone-status { margin-left: 0; }
+  .milestone-head { flex-direction: column; }
+  .milestone-progress { justify-content: flex-start; }
+}

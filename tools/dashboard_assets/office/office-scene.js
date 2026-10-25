@@ -1256,6 +1256,7 @@
       if (!entry || typeof entry !== 'object') return {};
       if (entry.kind === 'agent' && entry.agent && typeof entry.agent === 'object') return entry.agent;
       if (entry.kind === 'session' && entry.session && typeof entry.session === 'object') return entry.session;
+      if (entry.kind === 'managed' && entry.managed && typeof entry.managed === 'object') return entry.managed;
       return entry;
     }
 

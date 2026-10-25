@@ -80,6 +80,10 @@
   function canSpawn(entry) {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return false;
     if (entry.spawnable === false) return false;
+    if (entry.kind === 'managed' || entry.managed) {
+      return text(entry.session_key || entry.key || '') !== ''
+        && Boolean(entry.managed && (entry.managed.session_hash || entry.managed.status));
+    }
     const raw = unwrap(entry);
     if (isSessionEntry(entry) || isSessionEntry(raw)) {
       const source = raw || entry;
@@ -244,6 +248,10 @@
   }
 
   function evidenceOpen(entry) {
+    if (entry && (entry.kind === 'managed' || entry.managed)) {
+      const status = normalizedStatus(entry.managed?.status || entry.status);
+      return status === 'starting' || status === 'running';
+    }
     const raw = unwrap(entry) || {};
     const evidence = raw.evidence && typeof raw.evidence === 'object' ? raw.evidence : {};
     const current = raw.current && typeof raw.current === 'object' ? raw.current : {};
