@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <meta name="description" content="Read-only evidence console for Auto-Orchestrator native agent runs.">
+  <title>Auto-Orchestrator — Evidence Console</title>
+  <link rel="stylesheet" href="/assets/app.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <svg class="svg-defs" aria-hidden="true" focusable="false">
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 6.7M20 5v6h-6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4 8.5 8.5 0 1 0 20 14.5Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3" fill="none" stroke="currentColor" stroke-width="1.6"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-branch" viewBox="0 0 24 24"><circle cx="7" cy="5" r="2" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="7" cy="19" r="2" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="17" cy="9" r="2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M7 7v10M17 11c0 3-3 4-6 4H7" fill="none" stroke="currentColor" stroke-width="1.6"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 5 6v5c0 4.6 3 8 7 10 4-2 7-5.4 7-10V6l-7-3Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="m9 12 2 2 4-4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4 3 20h18L12 4Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M12 10v4M12 17.2v.1" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M12 7.5V12l3 2" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  </svg>
+
+  <div class="ambient" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+      <div class="brand-text">
+        <div class="brand-title">AUTO<span>/</span>ORCHESTRATOR</div>
+        <div class="brand-sub">evidence console</div>
+      </div>
+    </div>
+    <div class="project" title="Dashboard root">
+      <span class="project-label">root</span>
+      <span id="project-path" class="project-path">—</span>
+    </div>
+    <div class="top-actions">
+      <span id="demo-badge" class="demo-badge hidden">DEMO DATA</span>
+      <span id="live-badge" class="live-badge" data-state="connecting">
+        <span class="pulse" aria-hidden="true"></span>
+        <span id="live-text">connecting</span>
+      </span>
+      <button id="refresh" class="icon-btn" type="button" title="Refresh now" aria-label="Refresh now">
+        <svg class="icon"><use href="#i-refresh"/></svg>
+      </button>
+      <button id="theme" class="icon-btn" type="button" title="Switch theme" aria-label="Switch theme">
+        <svg class="icon theme-moon"><use href="#i-moon"/></svg>
+        <svg class="icon theme-sun"><use href="#i-sun"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <nav class="tabs" aria-label="Console sections" role="tablist">
+    <button class="tab" type="button" role="tab" data-tab="runs" aria-selected="true">
+      Runs <span id="tab-runs-count" class="tab-count">0</span>
+    </button>
+    <button class="tab" type="button" role="tab" data-tab="board" aria-selected="false">
+      Task board <span id="tab-board-count" class="tab-count">0</span>
+    </button>
+    <button class="tab" type="button" role="tab" data-tab="workspaces" aria-selected="false">
+      Workspaces <span id="tab-workspaces-count" class="tab-count">0</span>
+    </button>
+    <button class="tab" type="button" role="tab" data-tab="method" aria-selected="false">
+      Method
+    </button>
+    <span class="tabs-spacer"></span>
+    <span id="updated" class="updated" aria-live="polite">waiting for evidence</span>
+  </nav>
+
+  <main id="main">
+    <section id="view-runs" class="view" role="tabpanel" aria-label="Runs">
+      <div id="overview" class="overview" aria-label="Fleet overview"></div>
+      <div class="runs-layout">
+        <aside class="run-rail" aria-label="Recorded runs">
+          <div class="rail-controls">
+            <label class="search-box">
+              <span class="search-icon" aria-hidden="true"></span>
+              <input id="run-search" type="search" placeholder="Filter runs…" autocomplete="off" spellcheck="false" aria-label="Filter runs">
+              <kbd>/</kbd>
+            </label>
+            <div id="filters" class="filters" role="group" aria-label="Run filters"></div>
+          </div>
+          <div id="run-list" class="run-list"></div>
+        </aside>
+        <section id="run-detail" class="run-detail" aria-live="polite" aria-label="Run detail"></section>
+      </div>
+    </section>
+
+    <section id="view-board" class="view hidden" role="tabpanel" aria-label="Task board">
+      <div class="page-head">
+        <div>
+          <div class="eyebrow">Supervisor / durable plan</div>
+          <h1>Task board</h1>
+          <p class="page-lead">Columns are derived from task state, dependencies and native-stop evidence. A lease is never sent to this page.</p>
+        </div>
+        <div id="board-runs" class="board-runs" role="group" aria-label="Supervisor runs"></div>
+      </div>
+      <div id="board-kpis" class="board-kpis"></div>
+      <div id="board" class="board"></div>
+    </section>
+
+    <section id="view-workspaces" class="view hidden" role="tabpanel" aria-label="Workspaces">
+      <div class="page-head">
+        <div>
+          <div class="eyebrow">Git isolation</div>
+          <h1>Managed worktrees</h1>
+          <p class="page-lead">Read directly from Auto-Orchestrator worktree manifests. The console never merges, cleans or deletes a branch.</p>
+        </div>
+      </div>
+      <div class="notice notice-warn">
+        <svg class="icon"><use href="#i-alert"/></svg>
+        <div><strong>Preview only.</strong> A clean worktree is not a tested merge. Integration still requires the main agent's review and tests.</div>
+      </div>
+      <div id="workspaces" class="workspace-grid"></div>
+    </section>
+
+    <section id="view-method" class="view hidden" role="tabpanel" aria-label="Method">
+      <div class="page-head">
+        <div>
+          <div class="eyebrow">What the console can and cannot prove</div>
+          <h1>Method</h1>
+          <p class="page-lead">This is an evidence viewer, not a control plane. It shows recorded facts, separates claims from attestations, and refuses to turn overlap into a time-saving claim.</p>
+        </div>
+      </div>
+
+      <div class="method-grid">
+        <article class="method-card">
+          <div class="eyebrow">Inputs</div>
+          <h2>Three local sources</h2>
+          <ul class="method-list">
+            <li><strong>Run JSONL</strong> in <code>.auto-orchestrator/runs/</code> — lifecycle events, opaque agent IDs and native tool spans.</li>
+            <li><strong>Supervisor SQLite</strong> in <code>.auto-orchestrator/supervisor.sqlite3</code> — durable task states, dependencies, scopes, attempts and review attestations.</li>
+            <li><strong>Worktree manifests</strong> in <code>.git/auto-orchestrator/worktrees/</code> — branch, base commit and workspace path.</li>
+          </ul>
+          <p class="method-note">No external font, script, analytics or network call is used. The server binds to <code>127.0.0.1</code> and rejects writes.</p>
+        </article>
+
+        <article class="method-card">
+          <div class="eyebrow">Status semantics</div>
+          <h2>Four different truths</h2>
+          <dl class="def-list">
+            <div><dt><span class="dot dot-verified"></span>Gate verified</dt><dd>A quality-gate event was re-checked against the current verification policy and its check IDs matched. This is evidence about the configured checks, not proof of full correctness.</dd></div>
+            <div><dt><span class="dot dot-claimed"></span>Self-reported</dt><dd>A terminal record carries a verification flag without gate attestation. It is displayed as a claim, never counted in the verified total.</dd></div>
+            <div><dt><span class="dot dot-open"></span>Open / no terminal</dt><dd>No finish event was recorded. Open agent spans are shown with dashed ends; the console does not pretend the process is still alive.</dd></div>
+            <div><dt><span class="dot dot-failed"></span>Failed / rejected</dt><dd>The terminal status is failed or cancelled, or verification evidence was stale, duplicated or incomplete.</dd></div>
+          </dl>
+        </article>
+
+        <article class="method-card">
+          <div class="eyebrow">Arithmetic</div>
+          <h2>Overlap is not saved time</h2>
+          <p>The timeline shows the union of observed native tool spans. Two overlapping spans increase <em>observed overlap</em>; they do not establish that a serial run would have taken longer.</p>
+          <p class="formula">estimated overlap = Σ agent wall time − run wall time</p>
+          <p class="method-note">A positive value is a scheduling indicator, qualified by the CLI as <strong>not benchmarked human time saved</strong>. Only matched serial/orchestrated repeats produce a speedup claim.</p>
+        </article>
+
+        <article class="method-card">
+          <div class="eyebrow">Delegation</div>
+          <h2>Advice is advisory</h2>
+          <p>The Router may recommend <code>single</code> or <code>consider-parallel</code> with a cap of 2–3 agents. The console compares that advice with the native starts actually observed.</p>
+          <p class="method-note">“Followed” is a routing observation, not proof of independent work, correctness or efficiency.</p>
+        </article>
+
+        <article class="method-card">
+          <div class="eyebrow">Cost</div>
+          <h2>No invented cost</h2>
+          <p>The current evidence schema has no token or price field. This console therefore shows <strong>zero cost figures</strong>. Adding cost later requires an explicit, reviewable input per platform and model; subscription and usage-based plans must not be mixed silently.</p>
+          <p class="method-note">The honest product metric remains: verified successful tasks per unit of measured cost, with unknown cost shown as unknown.</p>
+        </article>
+
+        <article class="method-card">
+          <div class="eyebrow">Security</div>
+          <h2>Read-only by construction</h2>
+          <ul class="method-list">
+            <li>Only <code>GET</code> is accepted; writes return <code>405</code>.</li>
+            <li>Run IDs are validated; symlinked logs and assets are rejected.</li>
+            <li>Supervisor leases and raw native IDs are never serialized to the browser.</li>
+            <li>Content is local-only; the UI has no external dependencies or telemetry.</li>
+          </ul>
+        </article>
+      </div>
+
+      <div class="method-commands">
+        <div class="eyebrow">Commands</div>
+        <h2>Open the console</h2>
+        <pre><code>python tools/dashboard.py --root . --open
+python tools/dashboard.py --demo --open
+python tools/perf.py --root . audit --json</code></pre>
+        <p class="method-note">Use <code>--demo</code> for a clearly labelled synthetic dataset. Demo never writes to disk and never counts as a benchmark.</p>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <div id="tooltip" class="tooltip" role="tooltip"></div>
+  <script src="/assets/app.js" defer></script>
+</body>
+</html>

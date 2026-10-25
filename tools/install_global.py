@@ -52,11 +52,24 @@ def skill_files()->dict[str,bytes]:
     root=ROOT/'.agents/skills/auto-orchestrator'
     return {p.relative_to(root).as_posix():p.read_bytes() for p in root.rglob('*') if p.is_file() and not p.is_symlink() and not p.parent.is_symlink()}
 
+def dashboard_files()->dict[str,bytes]:
+    """Read the read-only dashboard runtime and its static assets."""
+    tools=ROOT/'tools'
+    assets=tools/'dashboard_assets'
+    result={'dashboard.py':(tools/'dashboard.py').read_bytes()}
+    for source in sorted(assets.rglob('*')):
+        if source.is_file() and not source.is_symlink():
+            result['dashboard_assets/'+source.relative_to(assets).as_posix()]=source.read_bytes()
+    return result
+
 def installed_map(home:Path,platforms:set[str],opencode_version:str,codex_model:str)->dict[Path,bytes]:
     files={}
     skills=skill_files()
     def skills_at(base):
         for path,content in skills.items(): files[base/path]=content
+    dashboard=dashboard_files()
+    def dashboard_at(base):
+        for path,content in dashboard.items(): files[base/path]=content
     if 'codex' in platforms:
         codex=home/'.codex'
         skills_at(codex/'skills/auto-orchestrator')
@@ -68,6 +81,7 @@ def installed_map(home:Path,platforms:set[str],opencode_version:str,codex_model:
         files[codex/'auto-orchestrator/tools/perf.py']=(ROOT/'tools/perf.py').read_bytes()
         for name in ('supervisor.py','router.py','router_eval.py','worktree.py','benchmark.py','quality_gate.py','review_gate.py'):
             files[codex/'auto-orchestrator/tools'/name]=(ROOT/'tools'/name).read_bytes()
+        dashboard_at(codex/'auto-orchestrator/tools')
         hooks_path=codex/'hooks.json'
         if not hooks_path.exists():
             hooks=json.loads((ROOT/'.codex/hooks.json').read_text(encoding='utf-8'))
@@ -99,6 +113,7 @@ def installed_map(home:Path,platforms:set[str],opencode_version:str,codex_model:
         files[oc/'auto-orchestrator/tools/perf.py']=(ROOT/'tools/perf.py').read_bytes()
         for name in ('supervisor.py','router.py','router_eval.py','worktree.py','benchmark.py','quality_gate.py','review_gate.py'):
             files[oc/'auto-orchestrator/tools'/name]=(ROOT/'tools'/name).read_bytes()
+        dashboard_at(oc/'auto-orchestrator/tools')
     if 'antigravity' in platforms:
         gemini=home/'.gemini'
         skills_at(gemini/'config/skills/auto-orchestrator')
@@ -110,6 +125,7 @@ def installed_map(home:Path,platforms:set[str],opencode_version:str,codex_model:
         files[gemini/'config/auto-orchestrator/tools/perf.py']=(ROOT/'tools/perf.py').read_bytes()
         for name in ('supervisor.py','router.py','router_eval.py','worktree.py','benchmark.py','quality_gate.py','review_gate.py'):
             files[gemini/'config/auto-orchestrator/tools'/name]=(ROOT/'tools'/name).read_bytes()
+        dashboard_at(gemini/'config/auto-orchestrator/tools')
         hooks_path=gemini/'config/hooks.json'
         if not hooks_path.exists():
             hooks=json.loads((ROOT/'.agents/hooks.json').read_text(encoding='utf-8'))
@@ -130,6 +146,7 @@ def installed_map(home:Path,platforms:set[str],opencode_version:str,codex_model:
             files[cursor/'agents'/source.name]=source.read_bytes()
         for name in ('supervisor.py','router.py','router_eval.py','worktree.py','quality_gate.py','review_gate.py','perf.py','hook_bridge.py'):
             files[cursor/'auto-orchestrator/tools'/name]=(ROOT/'tools'/name).read_bytes()
+        dashboard_at(cursor/'auto-orchestrator/tools')
     return files
 
 def native_hook_fragment(home: Path, platform: str) -> dict:

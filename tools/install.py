@@ -113,7 +113,9 @@ def install(target: Path, platform: str, codex_model: str, dry_run: bool, force_
     sources = [ROOT/'.agents/skills/auto-orchestrator/SKILL.md']
     sources.extend(sorted((ROOT/'.agents/skills/auto-orchestrator/references').glob('*.md')))
     sources += [ROOT/'tools/perf.py', ROOT/'tools/hook_bridge.py',
-                ROOT/'tools/supervisor.py', ROOT/'tools/router.py', ROOT/'tools/router_eval.py', ROOT/'tools/worktree.py', ROOT/'tools/benchmark.py', ROOT/'tools/quality_gate.py', ROOT/'tools/review_gate.py']
+                ROOT/'tools/supervisor.py', ROOT/'tools/router.py', ROOT/'tools/router_eval.py', ROOT/'tools/worktree.py', ROOT/'tools/benchmark.py', ROOT/'tools/quality_gate.py', ROOT/'tools/review_gate.py',
+                ROOT/'tools/dashboard.py']
+    sources.extend(sorted(p for p in (ROOT/'tools/dashboard_assets').rglob('*') if p.is_file()))
     if 'codex' in selected:
         sources.extend(sorted((ROOT/'.codex/agents').glob('*.toml')))
         sources.append(ROOT/'.codex/hooks.json')

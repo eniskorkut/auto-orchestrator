@@ -77,6 +77,26 @@ When 2+ subagent durations are complete, the task is verified, and the calculate
 
 Formula: `sum(agent wall times) - elapsed run wall time` (conservative approximation; may be negative). In case of insufficient evidence it prints **Not available**. This is a scheduling overlap indicator, **not** an experimental single-agent speedup measurement. Baseline benchmarking is a later milestone.
 
+## Evidence dashboard
+
+Inspect the same local evidence in a browser. The dashboard is a read-only viewer that binds to loopback on port 8765 by default and never starts, stops or mutates an agent.
+
+![Auto-Orchestrator evidence console showing a verified demo run, native agent timeline and evidence chain](docs/assets/dashboard-demo.png)
+
+```bash
+python tools/dashboard.py --root . --open
+# Clearly labelled synthetic data; writes nothing and is not a benchmark:
+python tools/dashboard.py --demo --open
+```
+
+- **Shows:** run timelines with completed and open native spans, observed overlap bands, evidence chains, native check results, Supervisor task state and managed worktree manifests.
+- **Can establish:** whether a recorded quality-gate claim still matches the current verification policy, and which native starts, stops and checks the evidence records as observed.
+- **Does not establish:** full task correctness, that an open span is still running, or that observed overlap equals human time saved. Only matched serial/orchestrated repeats establish a speedup.
+- **Does not control:** it cannot spawn or stop agents, claim or complete tasks, merge or clean worktrees, or replace `perf.py`, the Supervisor or `benchmark.py`.
+- **No invented cost:** the current evidence schema has no token or price fields, so the console shows no cost figures.
+
+See [docs/DASHBOARD.md](docs/DASHBOARD.md) for screens, verification semantics, the privacy model and troubleshooting.
+
 ## Caveats and roadmap
 
 - **Antigravity** native custom subagents are documented for **2.0/CLI**; IDE skill discovery is supported, but native subagent parity needs verification on installed IDE versions.
