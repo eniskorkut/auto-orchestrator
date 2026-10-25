@@ -553,7 +553,7 @@
     ));
   }
 
-  function renderOffice(root, summaryHost, options) {
+  function renderOfficeCards(root, summaryHost, options) {
     if (!root) return;
     const lang = options.lang;
     if (options.error) {
@@ -594,6 +594,365 @@
     const t = translator(lang);
     if (options.arranging) {
       root.append(h('p', { class: 'office-arrange-note', role: 'status', text: t('office.arrangeHint') }));
+    }
+  }
+
+  /* ── Canvas office map (V7.2) ───────────────────────────────────────────── */
+
+  const officeMapState = {
+    scene: null,
+    editor: null,
+    projectId: null,
+    theme: null,
+    lang: null,
+    layout: null,
+    payload: null,
+    entries: [],
+    activeRoom: null,
+    refs: null,
+  };
+
+  function roomLabel(roomId, lang) {
+    const i18n = ts();
+    if (i18n) {
+      const key = `office.room.${roomId}`;
+      const value = i18n.translate(lang || i18n.getLanguage(), key);
+      if (value && value !== key) return value;
+    }
+    const fallback = {
+      frontend: 'Frontend Room', backend: 'Backend Room', qa: 'QA / Test Lab',
+      review: 'Code Review Room', research: 'Research Lab', meeting: 'Meeting Room',
+      lobby: 'Spawn / Lobby',
+    };
+    return fallback[roomId] || roomId;
+  }
+
+  function localizeLayout(layout, lang) {
+    if (!layout || !Array.isArray(layout.rooms)) return layout;
+    return {
+      ...layout,
+      rooms: layout.rooms.map((room) => ({ ...room, name: roomLabel(room.department || room.id, lang) })),
+    };
+  }
+
+  function normalizedOfficeEntries(payload) {
+    const agents = (payload?.agents || []).map((agent, index) => {
+      const room = agent.room || (window.AORoomManager
+        ? window.AORoomManager.assign(agent).room
+        : 'lobby');
+      return {
+        kind: 'agent',
+        key: agent.session_key || agentKey(agent, index),
+        agent,
+        room,
+        status: agent.status,
+        spawnable: agent.spawnable !== false && Boolean(
+          agent.binding || agent.session_key || agent.current?.run_id || agent.current?.native_hash,
+        ),
+      };
+    });
+    const sessions = (payload?.unlinked_sessions || []).map((session, index) => ({
+      kind: 'session',
+      key: session.session_key || sessionKey(session, index),
+      session,
+      room: session.room || 'lobby',
+      status: session.status,
+      spawnable: true,
+    }));
+    return [...agents, ...sessions];
+  }
+
+  function buildOfficeShell(root, lang) {
+    const t = translator(lang);
+    const canvas = h('canvas', {
+      class: 'office-canvas', tabindex: '0',
+      'aria-label': t('office.mapAria'),
+      role: 'img',
+    });
+    const tooltip = h('div', { class: 'office-map-tooltip', hidden: true, 'aria-hidden': 'true' });
+    const editbar = h('div', { class: 'office-editbar', hidden: true },
+      h('span', { text: t('office.editorActive') }),
+      h('button', { class: 'btn btn-primary', type: 'button', 'data-office-save': 'true', text: t('office.editorSave') }),
+      h('button', { class: 'btn', type: 'button', 'data-office-reset': 'true', text: t('office.editorReset') }),
+    );
+    const stage = h('section', { class: 'office-stage', 'aria-label': t('office.mapAria') },
+      h('div', { class: 'office-map-toolbar' },
+        h('div', { class: 'office-roomchips', role: 'group', 'aria-label': t('office.rooms') }),
+        h('div', { class: 'office-map-actions' },
+          h('button', { class: 'map-btn', type: 'button', 'data-office-zoom': 'out', title: t('office.zoomOut'), text: '−' }),
+          h('button', { class: 'map-btn', type: 'button', 'data-office-zoom': 'reset', title: t('office.zoomReset'), text: '⤢' }),
+          h('button', { class: 'map-btn', type: 'button', 'data-office-zoom': 'in', title: t('office.zoomIn'), text: '+' }),
+        ),
+      ),
+      canvas,
+      tooltip,
+      h('div', { class: 'office-map-hint' },
+        h('span', { class: 'hint-pointer', text: t('office.mapHint') }),
+        h('span', { class: 'hint-touch', text: t('office.mapHintTouch') }),
+      ),
+      editbar,
+    );
+    const roster = h('aside', { class: 'office-roster', 'aria-label': t('office.roster') },
+      h('div', { class: 'office-roster-head' },
+        h('h2', { text: t('office.roster') }),
+        h('span', { class: 'office-roster-count' }),
+      ),
+      h('div', { class: 'office-roster-list', role: 'list' }),
+      h('p', { class: 'office-roster-note', text: t('office.rosterNote') }),
+    );
+    const shell = h('div', { class: 'office-shell' }, stage, roster);
+    clear(root);
+    root.append(shell);
+    root.querySelectorAll('[data-office-zoom]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const action = button.dataset.officeZoom;
+        if (!officeMapState.scene) return;
+        if (action === 'in') officeMapState.scene.zoomIn();
+        else if (action === 'out') officeMapState.scene.zoomOut();
+        else officeMapState.scene.resetView();
+      });
+    });
+    root.querySelector('[data-office-save]')?.addEventListener('click', () => {
+      if (officeMapState.editor?.save) officeMapState.editor.save();
+    });
+    root.querySelector('[data-office-reset]')?.addEventListener('click', () => {
+      if (officeMapState.editor?.reset) officeMapState.editor.reset();
+    });
+    officeMapState.refs = { shell, stage, canvas, tooltip, editbar, roster, chips: stage.querySelector('.office-roomchips'), list: roster.querySelector('.office-roster-list'), count: roster.querySelector('.office-roster-count') };
+    return officeMapState.refs;
+  }
+
+  function officeStatusText(entry, lang) {
+    const i18n = ts();
+    const status = entry.kind === 'session' ? entry.session?.status : entry.agent?.status;
+    return i18n ? i18n.statusLabel(status || 'unknown', lang) : String(status || 'Unknown');
+  }
+
+  function officeEntryName(entry) {
+    if (entry.kind === 'session') return translator(officeMapState.lang)('office.ghostName');
+    return entry.agent?.name || shortId(entry.agent?.agent_definition_id, 14);
+  }
+
+  function officeEntryRoom(entry) {
+    return entry.room || 'lobby';
+  }
+
+  function syncOfficeChips() {
+    const refs = officeMapState.refs;
+    if (!refs?.chips) return;
+    const t = translator(officeMapState.lang);
+    const rooms = window.AOOfficeLayouts?.rooms || ['frontend', 'backend', 'qa', 'review', 'research', 'meeting', 'lobby'];
+    clear(refs.chips);
+    const all = h('button', {
+      class: 'room-chip', type: 'button', 'aria-pressed': String(!officeMapState.activeRoom),
+      text: t('office.allRooms'),
+      onclick: () => setOfficeRoomFilter(null),
+    });
+    refs.chips.append(all);
+    for (const room of rooms) {
+      refs.chips.append(h('button', {
+        class: 'room-chip', type: 'button', 'aria-pressed': String(officeMapState.activeRoom === room),
+        text: roomLabel(room, officeMapState.lang),
+        onclick: () => setOfficeRoomFilter(officeMapState.activeRoom === room ? null : room),
+      }));
+    }
+  }
+
+  function setOfficeRoomFilter(room) {
+    officeMapState.activeRoom = room;
+    officeMapState.scene?.setRoomFilter?.(room);
+    syncOfficeChips();
+    renderOfficeRoster();
+    const message = room
+      ? translator(officeMapState.lang)('office.roomFiltered', { room: roomLabel(room, officeMapState.lang) })
+      : translator(officeMapState.lang)('office.roomFilterCleared');
+    const announcer = document.querySelector('#screen-reader-status');
+    if (announcer) announcer.textContent = message;
+  }
+
+  function renderOfficeRoster() {
+    const refs = officeMapState.refs;
+    if (!refs?.list) return;
+    const t = translator(officeMapState.lang);
+    const entries = officeMapState.entries.filter((entry) =>
+      !officeMapState.activeRoom || officeEntryRoom(entry) === officeMapState.activeRoom);
+    const visible = entries.slice(0, 64);
+    clear(refs.list);
+    refs.count.textContent = `${visible.length}/${officeMapState.entries.length}`;
+    if (!entries.length) {
+      refs.list.append(h('p', { class: 'office-roster-empty', text: t('office.noAgents') }));
+      return;
+    }
+    for (const entry of visible) {
+      const name = officeEntryName(entry);
+      const room = roomLabel(officeEntryRoom(entry), officeMapState.lang);
+      const status = officeStatusText(entry, officeMapState.lang);
+      const button = h('button', {
+        class: 'office-agent-row', type: 'button',
+        'aria-label': t('office.inspectStatus', { name, status }),
+        onclick: (event) => openOfficeEntry(entry, event.currentTarget),
+      },
+        h('span', { class: 'office-agent-dot', 'data-status': entry.kind === 'session' ? 'unknown' : entry.agent?.status }),
+        h('span', { class: 'office-agent-copy' },
+          h('strong', { text: name }),
+          h('span', { text: `${room} · ${status}` }),
+        ),
+        h('span', { class: 'office-agent-arrow', 'aria-hidden': 'true', text: '›' }),
+      );
+      refs.list.append(h('div', { role: 'listitem' }, button));
+    }
+  }
+
+  function openOfficeEntry(entry, trigger = officeMapState.refs?.canvas || null) {
+    if (!entry) return;
+    if (entry.kind === 'session') {
+      officeMapState.options?.callbacks?.onInspectSession?.(entry.session, trigger);
+    } else if (entry.agent) {
+      officeMapState.options?.callbacks?.onInspect?.(entry.agent, trigger);
+    }
+  }
+
+  function showOfficeTooltip(hit, point) {
+    const tooltip = officeMapState.refs?.tooltip;
+    if (!tooltip) return;
+    if (!hit) { tooltip.hidden = true; return; }
+    const entry = hit.entry || hit;
+    const name = officeEntryName(entry);
+    const room = roomLabel(officeEntryRoom(entry), officeMapState.lang);
+    const status = officeStatusText(entry, officeMapState.lang);
+    tooltip.textContent = `${name} · ${status} · ${room}`;
+    tooltip.hidden = false;
+    const stage = officeMapState.refs?.stage;
+    if (stage && point && Number.isFinite(point.x) && Number.isFinite(point.y)) {
+      const rect = stage.getBoundingClientRect();
+      tooltip.style.left = `${Math.max(8, Math.min(rect.width - 180, point.x + 14))}px`;
+      tooltip.style.top = `${Math.max(8, Math.min(rect.height - 36, point.y + 14))}px`;
+    }
+  }
+
+  /* Read-only diagnostics for browser tests and local debugging. It exposes no
+   * execution control: the scene is a renderer, never an orchestrator. */
+  function officeDebugState() {
+    return {
+      projectId: officeMapState.projectId,
+      theme: officeMapState.theme,
+      lang: officeMapState.lang,
+      activeRoom: officeMapState.activeRoom,
+      layout: officeMapState.layout,
+      entries: officeMapState.entries,
+      scene: officeMapState.scene,
+      editor: officeMapState.editor,
+    };
+  }
+
+  function destroyOffice() {
+    officeMapState.editor?.destroy?.();
+    officeMapState.scene?.destroy?.();
+    officeMapState.scene = null;
+    officeMapState.editor = null;
+    officeMapState.refs = null;
+    officeMapState.layout = null;
+    officeMapState.projectId = null;
+    officeMapState.theme = null;
+    officeMapState.lang = null;
+    officeMapState.payload = null;
+    officeMapState.entries = [];
+    officeMapState.activeRoom = null;
+  }
+
+  function ensureOfficeEditor(refs, options) {
+    if (!window.AOLayoutEditor || !officeMapState.scene) return;
+    if (!officeMapState.editor) {
+      officeMapState.editor = window.AOLayoutEditor.attach({
+        canvas: refs.canvas,
+        scene: officeMapState.scene,
+        getLayout: () => officeMapState.layout,
+        onChange: (layout) => {
+          officeMapState.layout = layout;
+          officeMapState.scene?.setLayout?.(layout);
+        },
+        onSave: () => {
+          if (!officeMapState.projectId || !officeMapState.layout) return;
+          const ok = window.AOOfficeLayouts?.save?.(officeMapState.projectId, officeMapState.layout);
+          const announcer = document.querySelector('#office-status');
+          if (announcer) announcer.textContent = translator(officeMapState.lang)(ok ? 'office.layoutSaved' : 'office.layoutSaveFailed');
+        },
+        onReset: () => {
+          if (!officeMapState.projectId) return;
+          window.AOOfficeLayouts?.reset?.(officeMapState.projectId);
+          const base = window.AOOfficeLayouts?.get?.(officeMapState.theme, officeMapState.projectId);
+          if (base) {
+            officeMapState.layout = localizeLayout(base, officeMapState.lang);
+            officeMapState.scene?.setLayout?.(officeMapState.layout);
+          }
+        },
+      });
+    }
+    officeMapState.scene?.editMode?.(Boolean(options.arranging));
+    officeMapState.editor.enable?.(Boolean(options.arranging));
+    refs.editbar.hidden = !options.arranging;
+  }
+
+  function renderOffice(root, summaryHost, options) {
+    const payload = options.payload;
+    const lang = options.lang || 'en';
+    officeMapState.options = options;
+    if (!root) return;
+    if (!payload || !Array.isArray(payload.agents)) {
+      if (options.error) {
+        renderOfficeError(root, summaryHost, options, options.error);
+      } else {
+        renderOfficeLoading(root, summaryHost, lang);
+      }
+      return;
+    }
+    if (!window.AOOfficeScene || !window.AOOfficeLayouts) {
+      renderOfficeError(root, summaryHost, options, { message: 'Office renderer is not installed' });
+      return;
+    }
+    const projectId = payload.project_id || payload.project?.project_id || options.project?.project_id || 'default';
+    const theme = options.theme || payload.theme || 'custom';
+    const projectChanged = officeMapState.projectId !== projectId || officeMapState.theme !== theme
+      || officeMapState.lang !== lang || !officeMapState.scene;
+    if (projectChanged) {
+      destroyOffice();
+      const refs = buildOfficeShell(root, lang);
+      const layout = localizeLayout(window.AOOfficeLayouts.load(projectId, theme), lang);
+      officeMapState.projectId = projectId;
+      officeMapState.theme = theme;
+      officeMapState.lang = lang;
+      officeMapState.layout = layout;
+      officeMapState.payload = payload;
+      officeMapState.scene = window.AOOfficeScene.create({
+        canvas: refs.canvas,
+        layout,
+        reducedMotion: options.reducedMotion,
+        onSelectAgent: (hit) => openOfficeEntry(hit?.entry || hit),
+        onSelectRoom: (room) => setOfficeRoomFilter(room || null),
+        onHover: (hit, point) => showOfficeTooltip(hit, point),
+        onLayoutChange: (layout) => { officeMapState.layout = layout; },
+      });
+    } else {
+      officeMapState.payload = payload;
+      officeMapState.layout = localizeLayout(officeMapState.layout || window.AOOfficeLayouts.load(projectId, theme), lang);
+      if (options.layout) officeMapState.scene.setLayout(options.layout);
+    }
+    officeMapState.entries = normalizedOfficeEntries(payload);
+    const drawable = officeMapState.entries.filter((entry) => entry.spawnable);
+    officeMapState.scene.syncAgents(drawable);
+    officeMapState.scene.setReducedMotion?.(Boolean(options.reducedMotion));
+    officeMapState.scene.resize?.();
+    renderSummary(summaryHost, payload, officeMapState.entries, lang);
+    syncOfficeChips();
+    renderOfficeRoster();
+    ensureOfficeEditor(officeMapState.refs, options);
+    if (!drawable.length) {
+      const refs = officeMapState.refs;
+      if (refs?.stage && !refs.stage.querySelector('.office-idle-note')) {
+        refs.stage.append(h('div', { class: 'office-idle-note', text: translator(lang)('office.mapIdle') }));
+      }
+    } else {
+      officeMapState.refs?.stage?.querySelector('.office-idle-note')?.remove();
     }
   }
 
@@ -1128,6 +1487,8 @@
     officeEntries,
     summaryCounts,
     renderOffice,
+    destroyOffice,
+    officeDebugState,
     renderInspector,
   };
 
