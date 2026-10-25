@@ -38,6 +38,7 @@ jobs:
             grep -E "FAIL:|ERROR:|Ran [0-9]+ tests|FAILED" unittest.log || true
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+          grep -E "^(FAIL|ERROR): " unittest.log | sed 's/^/::error title=Python failure::/' || true
       - name: Upload unittest log on failure
         if: failure()
         uses: actions/upload-artifact@v4
