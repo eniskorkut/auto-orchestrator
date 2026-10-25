@@ -46,6 +46,17 @@ jobs:
           name: unittest-${{ matrix.os }}-${{ matrix.python-version }}
           path: unittest.log
           if-no-files-found: ignore
+      - name: Annotate runner traceback on Windows
+        if: failure() && matrix.os == 'windows-latest'
+        shell: bash
+        run: |
+          python -m unittest tests.test_teamwork_runner -v > runner-traceback.log 2>&1 || true
+          python - <<'PY'
+          from pathlib import Path
+          text = Path('runner-traceback.log').read_text(encoding='utf-8', errors='replace')[-6000:]
+          encoded = text.replace('%', '%25').replace('\r', '').replace('\n', '%0A')
+          print('::error title=Windows runner traceback::' + encoded)
+          PY
 
   node:
     name: Node / ${{ matrix.os }}
