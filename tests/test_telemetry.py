@@ -133,6 +133,46 @@ class AvailabilityTests(TelemetryTestCase):
         self.assertFalse(telemetry._CONFIGURED)
 
 
+class TeamworkMetricTests(TelemetryTestCase):
+    def test_teamwork_metrics_are_whitelisted_without_prompt_or_secret_fields(self):
+        clean = telemetry.safe_attributes({
+            "milestone_id": "M2",
+            "pattern": "distributed_coding",
+            "workflow": "teamwork",
+            "benchmark_mode": "parallel",
+            "model": "opencode-go/deepseek-v4.1-flash",
+            "provider": "opencode",
+            "wall_time_ms": 1200,
+            "queue_wait_ms": 30,
+            "dispatch_latency_ms": 12,
+            "agent_start_latency_ms": 900,
+            "test_duration_ms": 5000,
+            "review_duration_ms": 700,
+            "repair_iterations": 1,
+            "retry_count": 0,
+            "parallel_overlap_ms": 450,
+            "verified_completion": True,
+            "verified_completion_rate": 1.0,
+            "success": True,
+            "failure": False,
+            "sse_reconnects": 1,
+            "ui_event_lag_ms": 85,
+            "usage_input": 1000,
+            "usage_output": 200,
+            "usage_cost": 0.012,
+            "prompt": "secret",
+            "raw_output": "secret",
+            "api_token": "secret",
+        })
+        self.assertNotIn("prompt", clean)
+        self.assertNotIn("raw_output", clean)
+        self.assertNotIn("api_token", clean)
+        for key in ("milestone_id", "pattern", "wall_time_ms", "parallel_overlap_ms",
+                    "verified_completion_rate", "usage_cost", "model"):
+            self.assertIn(key, clean)
+        self.assertEqual(clean["wall_time_ms"], 1200)
+        self.assertEqual(clean["usage_cost"], 0.012)
+
 class NoopSpanTests(TelemetryTestCase):
     def test_span_without_tracer_runs_body_and_yields_noop(self):
         entered = False
