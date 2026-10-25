@@ -457,6 +457,7 @@
     state.reducedMotion = Boolean(reduced);
     document.documentElement.dataset.motion = state.reducedMotion ? 'reduced' : 'full';
     if (options.persist !== false) writeStore(STORE_MOTION, state.reducedMotion ? '1' : '0');
+    window.AOOffice?.officeDebugState?.().scene?.setReducedMotion?.(state.reducedMotion);
     syncMotionControls();
   }
 
@@ -775,7 +776,9 @@
       badge.dataset.state = 'demo';
       const demoMode = mode === 'sse' ? t('live.demoLive')
         : mode === 'polling' ? t('live.demoPolling') : t('live.demoOffline');
-      text.textContent = compact ? demoMode.replace(/\s*·.*$/, '') : demoMode;
+      const demoCompact = mode === 'sse' ? t('live.liveShort')
+        : mode === 'polling' ? t('live.pollingShort') : t('live.offlineShort');
+      text.textContent = compact ? demoCompact : demoMode;
       badge.setAttribute('aria-label', t('live.statusAria', { mode: demoMode }));
       return;
     }
@@ -925,7 +928,6 @@
     syncProjectSelect();
     updateDemoBadge();
     renderGlobal();
-    probeDemoMode();
   }
 
   function probeDemoMode() {
@@ -1004,7 +1006,7 @@
     const error = globalProject?.error || null;
     const status = projectStatusMeta(globalProject);
     const blockers = Number(overview?.blockers || 0);
-    const errors = error ? 1 : 0;
+    const errors = overview?.errors != null ? Number(overview.errors) : (error ? 1 : 0);
     const tone = error || status?.tone === 'bad' ? 'bad' : blockers || errors ? 'warn' : 'ok';
     const theme = project.theme || globalProject?.theme || null;
     const runs = overview?.runs ?? null;
@@ -1250,6 +1252,7 @@
     clear($('#board-kpis'));
     clear($('#board-runs'));
     clear($('#workspaces'));
+    if (window.AOOffice?.destroyOffice) window.AOOffice.destroyOffice();
     clear($('#office-root'));
     clear($('#office-summary'));
     ['runs', 'board', 'workspaces'].forEach((name) => {
@@ -1326,6 +1329,7 @@
       await loadGlobal({ force: Boolean(options.refresh || !state.global) });
     }
     renderGlobal();
+    probeDemoMode();
     focusViewHeading();
   }
 
@@ -1605,8 +1609,8 @@
       arranging: state.arranging,
       reducedMotion: state.reducedMotion,
       callbacks: {
-        onInspect: (agent) => openAgentInspector(agent),
-        onInspectSession: (session) => openUnlinkedInspector(session),
+        onInspect: (agent, trigger) => openAgentInspector(agent, trigger),
+        onInspectSession: (session, trigger) => openUnlinkedInspector(session, trigger),
         onTrigger: (element) => { state.inspector.trigger = element; },
         onMove: (key, delta) => moveDesk(key, delta),
         onRetry: () => loadOffice({ force: true }),
@@ -3072,6 +3076,7 @@
         await loadRegistry();
         await loadGlobal({ force: true });
         renderGlobal();
+        probeDemoMode();
       } else if (state.projectId) {
         clearTimeout(state.officeRefreshTimer);
         await Promise.all([

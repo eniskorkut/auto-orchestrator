@@ -31,8 +31,9 @@ HASH_B = "b" * 64
 HASH_C = "c" * 64
 
 
-def agent(agent_id="a_000000000001", name="Ada", role="Engineer", platform="opencode"):
-    return {
+def agent(agent_id="a_000000000001", name="Ada", role="Engineer", platform="opencode",
+          **extra):
+    value = {
         "agent_definition_id": agent_id,
         "name": name,
         "role": role,
@@ -41,6 +42,8 @@ def agent(agent_id="a_000000000001", name="Ada", role="Engineer", platform="open
         "color": "#7dd3fc",
         "created_at": 0,
     }
+    value.update(extra)
+    return value
 
 
 def project(*agents, project_id=PROJECT_ID):
@@ -395,6 +398,152 @@ class InspectorTests(OfficeTestCase):
                               detail_provider=store.detail)
         self.assertEqual(len(office["unlinked_sessions"]), 1)
         self.assertEqual(office["agents"][0]["status"], "unknown")
+
+
+class OfficeRoomTests(OfficeTestCase):
+    def _state(self, tasks):
+        supervisor = Supervisor(self.root)
+        try:
+            supervisor.init("rooms-run", {"max_parallel": 3, "tasks": tasks})
+        finally:
+            supervisor.close()
+        return Store(self.root).state()
+
+    @staticmethod
+    def _task(task_id, role, **extra):
+        return {"id": task_id, "role": role, "objective": f"Work {task_id}",
+                "read_scope": [], "write_scope": [], **extra}
+
+    @staticmethod
+    def _binding(agent_id, task_id):
+        digest = hashlib.sha256(agent_id.encode()).hexdigest()
+        return binding(agent_id=agent_id, run_id="rooms-run",
+                       native_hash=digest, task_id=task_id)
+
+    def test_room_assignment_matrix(self):
+        tasks = [
+            self._task("explicit", "implementer", department="backend"),
+            self._task("assigned", "implementer", assigned_room="meeting"),
+            self._task("agent-default", "implementer"),
+            self._task("agent-assigned", "implementer"),
+            self._task("agent-over-role", "tester"),
+            self._task("tester", "tester"),
+            self._task("reviewer", "reviewer"),
+            self._task("explorer", "explorer"),
+            self._task("implementer", "implementer"),
+            self._task("unknown-dept", "implementer", department="billing"),
+        ]
+        agents = [
+            agent("a_000000000001", role="Frontend", default_room="frontend"),
+            agent("a_000000000002", role="Frontend", default_room="frontend"),
+            agent("a_000000000003", default_room="frontend"),
+            agent("a_000000000004", assigned_room="meeting"),
+            agent("a_000000000005", default_room="frontend"),
+            agent("a_000000000006"),
+            agent("a_000000000007"),
+            agent("a_000000000008"),
+            agent("a_000000000009"),
+            agent("a_000000000010"),
+        ]
+        bindings = [
+            self._binding(f"a_{index:012d}", task["id"])
+            for index, task in enumerate(tasks, start=1)
+        ]
+        office = build_office(project(*agents), self._state(tasks),
+                              bindings=bindings)
+        by_id = {entry["agent_definition_id"]: entry for entry in office["agents"]}
+        expected = {
+            "a_000000000001": ("backend", "task.department", "backend"),
+            "a_000000000002": ("meeting", "task.department", "meeting"),
+            "a_000000000003": ("frontend", "agent.default_room", None),
+            "a_000000000004": ("meeting", "agent.default_room", None),
+            "a_000000000005": ("frontend", "agent.default_room", None),
+            "a_000000000006": ("qa", "task.role", None),
+            "a_000000000007": ("review", "task.role", None),
+            "a_000000000008": ("research", "task.role", None),
+            "a_000000000009": ("lobby", "unassigned", None),
+            "a_000000000010": ("lobby", "unassigned", "billing"),
+        }
+        task_roles = {
+            "a_000000000001": "implementer",
+            "a_000000000006": "tester",
+            "a_000000000007": "reviewer",
+            "a_000000000008": "explorer",
+        }
+        for agent_id, (room, source, department) in expected.items():
+            entry = by_id[agent_id]
+            self.assertEqual(entry["room"], room, agent_id)
+            self.assertEqual(entry["room_source"], source, agent_id)
+            self.assertEqual(entry["current"]["department"], department, agent_id)
+            if agent_id in task_roles:
+                self.assertEqual(entry["current"]["task_role"], task_roles[agent_id])
+                self.assertEqual(entry["current"]["task_state"], "pending")
+            self.assertTrue(entry["spawnable"], agent_id)
+            self.assertTrue(entry["session_key"].startswith(agent_id + ":rooms-run:"))
+
+    def test_implementer_without_explicit_department_stays_in_lobby(self):
+        tasks = [self._task("work", "implementer")]
+        office = build_office(project(agent()), self._state(tasks),
+                              bindings=[self._binding("a_000000000001", "work")])
+        entry = office["agents"][0]
+        self.assertEqual((entry["room"], entry["room_source"]),
+                         ("lobby", "unassigned"))
+        self.assertEqual(entry["current"]["task_role"], "implementer")
+        self.assertEqual(entry["current"]["task_state"], "pending")
+
+    def test_unbound_registry_agent_has_no_spawnable_session(self):
+        office = build_office(project(agent(), agent(
+            "a_000000000002", name="Linus", default_room="backend")),
+            Store(self.root).state())
+        first, second = office["agents"]
+        self.assertEqual((first["room"], first["room_source"]), ("lobby", "unassigned"))
+        self.assertIsNone(first["session_key"])
+        self.assertFalse(first["spawnable"])
+        self.assertEqual((second["room"], second["room_source"]),
+                         ("backend", "agent.default_room"))
+        self.assertIsNone(second["session_key"])
+        self.assertFalse(second["spawnable"])
+
+    def test_bound_session_key_is_stable_and_prefixed(self):
+        office = build_office(project(agent()), Store(self.root).state(),
+                              bindings=[binding(run_id="run-1", native_hash=HASH_A)])
+        entry = office["agents"][0]
+        self.assertEqual(entry["session_key"],
+                         f"a_000000000001:run-1:{HASH_A[:12]}")
+        self.assertTrue(entry["spawnable"])
+
+    def test_unlinked_duplicate_events_share_one_session_key(self):
+        spans = [
+            {"id": "a1b2c3d4", "native_hash": HASH_A, "open": False,
+             "duration": 4.0},
+            {"id": "a1b2c3d4", "native_hash": HASH_A, "open": False,
+             "duration": 4.0},
+        ]
+        state = {"runs": [{"id": "dup-run", "agent_count": 2, "live": False,
+                           "status": "success", "last_event_at": 10}]}
+
+        def detail_provider(run_id):
+            return {"run": state["runs"][0], "agents": spans}
+
+        office = build_office(project(agent()), state, bindings=[],
+                              detail_provider=detail_provider)
+        self.assertEqual(len(office["unlinked_sessions"]), 1)
+        unlinked = office["unlinked_sessions"][0]
+        self.assertEqual(unlinked["session_key"], "s:dup-run:a1b2c3d4")
+        self.assertEqual((unlinked["room"], unlinked["room_source"]),
+                         ("lobby", "unlinked"))
+        self.assertTrue(unlinked["spawnable"])
+
+    def test_inspector_exposes_additive_room_fields(self):
+        tasks = [self._task("work", "tester", department="qa")]
+        state = self._state(tasks)
+        inspector = build_inspector(project(agent()), "a_000000000001", state,
+                                    bindings=[self._binding("a_000000000001", "work")])
+        self.assertEqual(inspector["agent"]["room"], "qa")
+        self.assertEqual(inspector["agent"]["room_source"], "task.department")
+        self.assertTrue(inspector["agent"]["spawnable"])
+        self.assertEqual(inspector["agent"]["current"]["task_role"], "tester")
+        self.assertEqual(inspector["agent"]["current"]["department"], "qa")
 
 
 class EventModelTests(unittest.TestCase):

@@ -59,6 +59,15 @@ ASSETS = {
     "/assets/app.js": ("app.js", "text/javascript; charset=utf-8"),
     "/assets/office.js": ("office.js", "text/javascript; charset=utf-8"),
     "/assets/i18n.js": ("i18n.js", "text/javascript; charset=utf-8"),
+    "/assets/favicon.svg": ("favicon.svg", "image/svg+xml"),
+    "/assets/office/tilemap.js": ("office/tilemap.js", "text/javascript; charset=utf-8"),
+    "/assets/office/pathfinding.js": ("office/pathfinding.js", "text/javascript; charset=utf-8"),
+    "/assets/office/office-layouts.js": ("office/office-layouts.js", "text/javascript; charset=utf-8"),
+    "/assets/office/room-manager.js": ("office/room-manager.js", "text/javascript; charset=utf-8"),
+    "/assets/office/agent-state-machine.js": ("office/agent-state-machine.js", "text/javascript; charset=utf-8"),
+    "/assets/office/agent-sprites.js": ("office/agent-sprites.js", "text/javascript; charset=utf-8"),
+    "/assets/office/office-scene.js": ("office/office-scene.js", "text/javascript; charset=utf-8"),
+    "/assets/office/layout-editor.js": ("office/layout-editor.js", "text/javascript; charset=utf-8"),
 }
 ACTIVE_WINDOW = 180.0
 STATE_WORKERS = max(1, min(os.cpu_count() or 1, 8))
@@ -637,6 +646,9 @@ def _supervisor(root: Path) -> dict:
                     "role": task.get("role"),
                     "objective": task.get("objective"),
                     "state": task.get("state"),
+                    "department": (task.get("department")
+                                   if "department" in task_columns
+                                   and isinstance(task.get("department"), str) else None),
                     "dependencies": task.get("dependencies", []),
                     "read_scope": task.get("read_scope", []),
                     "write_scope": task.get("write_scope", []),
@@ -936,8 +948,10 @@ def _demo_data(profile: str = "ai") -> tuple[dict[str, tuple[dict, dict]], dict]
 
     def task(task_id, role, objective, state, dependencies, read_scope, write_scope,
              attempts, max_retries, timeout_seconds, review_attested, review_digest,
-             native_start, native_stop, dependencies_met, result, reason=None):
+             native_start, native_stop, dependencies_met, result, reason=None,
+             department=None):
         return {"id": task_id, "role": role, "objective": objective, "state": state,
+                "department": department,
                 "dependencies": dependencies, "read_scope": read_scope,
                 "write_scope": write_scope, "attempts": attempts,
                 "max_retries": max_retries, "timeout_seconds": timeout_seconds,
@@ -955,27 +969,30 @@ def _demo_data(profile: str = "ai") -> tuple[dict[str, tuple[dict, dict]], dict]
                  "Map the billing schema and expose contract risks to the implementation tasks.",
                  "completed", [], ["db/"], [], 1, 2, 900, True, "4d9e02c7a13f", True, True,
                  True, {"summary": "Contract mapped; no migration required.", "changed_files": [],
-                        "tests": [{"name": "schema-contract", "status": "passed"}]}),
+                        "tests": [{"name": "schema-contract", "status": "passed"}]},
+                 department="research"),
             task("api", "implementer",
                  "Implement idempotent invoice retry handling behind the existing feature flag.",
                  "completed", ["schema"], ["db/"], ["src/billing/"], 2, 2, 1200, True,
                  "9ab3c41d7e02", True, True, True,
                  {"summary": "Retry queue is idempotent; 4 unit tests added.",
                   "changed_files": ["src/billing/retry.ts"],
-                  "tests": [{"name": "billing-retry", "status": "passed"}]}),
+                  "tests": [{"name": "billing-retry", "status": "passed"}]},
+                 department="backend"),
             task("tests", "tester",
                  "Add regression coverage for duplicate webhook delivery and verify the retry path end to end.",
                  "running", ["api"], ["src/"], ["tests/"], 1, 1, 900, False, None,
-                 False, False, True, None),
+                 False, False, True, None, department="qa"),
             task("review", "reviewer",
                  "Independently review the integrated diff, with no access to the implementer history.",
                  "pending", ["api", "tests"], ["src/", "tests/"], [], 0, 0, 600, False, None,
-                 False, False, False, None),
+                 False, False, False, None, department="review"),
             task("docs", "implementer",
                  "Document the retry contract and the operational rollback path.",
                  "failed", ["api"], ["src/"], ["docs/"], 2, 2, 600, False, None,
                  True, True, True, None,
-                 reason="Retry limit reached after a broken link check."),
+                 reason="Retry limit reached after a broken link check.",
+                 department="frontend"),
         ],
     }]}
     worktrees = [
@@ -1478,15 +1495,23 @@ def _demo_catalog() -> Catalog:
             "slug": "ai-lab", "profile": "ai", "name": "AI Research Lab", "theme": "ai",
             "description": "Synthetic demo: retrieval experiments and evaluation runs.",
             "agents": [
-                ("a_000000000001", "Ada", "RAG Engineer", "opencode", None, "#7dd3fc"),
-                ("a_000000000002", "Grace", "Evaluation Lead", "codex", None, "#fbbf24"),
-                ("a_000000000003", "Linus", "Runtime Engineer", "antigravity", None, "#34d399"),
-                ("a_000000000004", "Margaret", "Research Director", "cursor", None, "#c084fc"),
+                ("a_000000000001", "Ada", "RAG Engineer", "opencode", None, "#7dd3fc",
+                 None),
+                ("a_000000000002", "Grace", "Evaluation Lead", "codex", None, "#fbbf24",
+                 None),
+                ("a_000000000003", "Linus", "Runtime Engineer", "antigravity", None,
+                 "#34d399", "research"),
+                ("a_000000000004", "Margaret", "Research Director", "cursor", None,
+                 "#c084fc", None),
+                ("a_000000000005", "Sofia", "Release Engineer", "opencode", None,
+                 "#fb7185", None),
             ],
             "bindings": [
                 ("a_000000000001", "task", "api"),
                 ("a_000000000002", "task", "tests"),
                 ("a_000000000003", "hash", "open-0"),
+                ("a_000000000004", "task", "review"),
+                ("a_000000000005", "task", "docs"),
             ],
         },
         {
@@ -1494,9 +1519,12 @@ def _demo_catalog() -> Catalog:
             "theme": "security",
             "description": "Synthetic demo: patch verification and incident review.",
             "agents": [
-                ("a_000000000011", "Mira", "Security Engineer", "cursor", None, "#f87171"),
-                ("a_000000000012", "Kai", "AppSec Reviewer", "opencode", None, "#fbbf24"),
-                ("a_000000000013", "Tomas", "Threat Modeler", "codex", None, "#60a5fa"),
+                ("a_000000000011", "Mira", "Security Engineer", "cursor", None,
+                 "#f87171", None),
+                ("a_000000000012", "Kai", "AppSec Reviewer", "opencode", None,
+                 "#fbbf24", None),
+                ("a_000000000013", "Tomas", "Threat Modeler", "codex", None,
+                 "#60a5fa", None),
             ],
             "bindings": [
                 ("a_000000000011", "hash", "failed-0"),
@@ -1507,9 +1535,12 @@ def _demo_catalog() -> Catalog:
             "slug": "web-studio", "profile": "web", "name": "Web Studio", "theme": "web",
             "description": "Synthetic demo: interface work and release verification.",
             "agents": [
-                ("a_000000000021", "Noor", "Frontend Engineer", "opencode", None, "#34d399"),
-                ("a_000000000022", "Ravi", "Accessibility Lead", "codex", None, "#7dd3fc"),
-                ("a_000000000023", "Ines", "Design Engineer", "antigravity", None, "#c084fc"),
+                ("a_000000000021", "Noor", "Frontend Engineer", "opencode", None,
+                 "#34d399", None),
+                ("a_000000000022", "Ravi", "Accessibility Lead", "codex", None,
+                 "#7dd3fc", None),
+                ("a_000000000023", "Ines", "Design Engineer", "antigravity", None,
+                 "#c084fc", None),
             ],
             "bindings": [
                 ("a_000000000021", "hash", "verified-0"),
@@ -1532,8 +1563,9 @@ def _demo_catalog() -> Catalog:
                 "model": model,
                 "color": color,
                 "created_at": 0,
+                **({"default_room": default_room} if default_room else {}),
             }
-            for agent_id, name, role, platform, model, color in spec["agents"]
+            for agent_id, name, role, platform, model, color, default_room in spec["agents"]
         ]
         project = {
             "project_id": project_id,
@@ -1600,6 +1632,13 @@ class DashboardServer(ThreadingHTTPServer):
         self.store = store if store is not None else catalog.default_store
         self.stopping = threading.Event()
         super().__init__(address, DashboardHandler)
+
+    def handle_error(self, request, client_address):
+        """Browsers routinely reset SSE/keep-alive sockets; do not spam stderr."""
+        error = sys.exc_info()[1]
+        if isinstance(error, (BrokenPipeError, ConnectionResetError)):
+            return
+        super().handle_error(request, client_address)
 
     def shutdown(self):
         self.stopping.set()

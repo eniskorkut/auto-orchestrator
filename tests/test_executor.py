@@ -17,21 +17,25 @@ def plan():
         "tasks": [
             {
                 "id": "schema", "role": "explorer", "objective": "Map contract",
+                "department": "research",
                 "acceptance": ["Contract map exists"],
                 "read_scope": ["db/"], "write_scope": [],
             },
             {
                 "id": "api", "role": "implementer", "objective": "Implement API",
+                "department": "backend",
                 "depends_on": ["schema"], "acceptance": ["API test passes"],
                 "read_scope": ["db/"], "write_scope": ["src/"],
             },
             {
                 "id": "tests", "role": "tester", "objective": "Add tests",
+                "department": "qa",
                 "depends_on": ["api"], "acceptance": ["Regression suite passes"],
                 "read_scope": ["src/"], "write_scope": ["tests/"],
             },
             {
                 "id": "docs", "role": "implementer", "objective": "Write docs",
+                "department": "frontend",
                 "depends_on": ["api"], "acceptance": ["Docs cover the API"],
                 "read_scope": ["src/"], "write_scope": ["docs/"],
             },
@@ -75,6 +79,21 @@ class ExecutorTests(unittest.TestCase):
         manifest = json.loads(Path(output["manifest"]).read_text(encoding="utf-8"))
         self.assertEqual(manifest["run_id"], "exec-1")
         self.assertEqual(manifest["claimed"], ["schema"])
+
+    def test_manifest_and_status_preserve_department(self):
+        output = self.claim()
+        task = output["tasks"][0]
+        self.assertEqual(task["task"]["department"], "research")
+        manifest = json.loads(Path(output["manifest"]).read_text(encoding="utf-8"))
+        self.assertEqual(manifest["tasks"][0]["task"]["department"], "research")
+        self.executor.complete("exec-1", "schema", task["control"]["lease"],
+                               result("Contract map exists", [], "contract-map"))
+        second = self.claim()
+        self.assertEqual(second["tasks"][0]["task"]["department"], "backend")
+        status = self.executor.status("exec-1")
+        departments = {item["id"]: item["department"] for item in status["tasks"]}
+        self.assertEqual(departments, {"schema": "research", "api": "backend",
+                                       "tests": "qa", "docs": "frontend"})
 
     def test_completion_requires_acceptance_evidence(self):
         output = self.claim()

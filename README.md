@@ -1,4 +1,4 @@
-# Auto-Orchestrator — Native Multi-Agent Coordination (V6)
+# Auto-Orchestrator — Native Multi-Agent Coordination (V7.2)
 
 Portable, opt-in native-subagent coordination for **OpenCode**, **Codex**, **Cursor**, and **Google Antigravity**. Platform-native runtime capabilities and proof strength differ.
 
@@ -297,13 +297,26 @@ skill selection rates. None of this proves live IDE reliability or speedup
 until matched native runs are repeated. See
 [execution reliability](docs/V64_RELIABILITY.md).
 
+## V7.2 — Virtual Office 2.0
+
+V7.2 replaces the V7.1 workstation-card grid with **one continuous Canvas 2D pixel-art office per project**. Rooms, corridors, doors, furniture and a central spawn lobby share a single map; agents spawn only for observed native/managed sessions, walk through doors with A* pathfinding, sit at desks and change rooms when their task department changes. No card grid is rendered.
+
+![Virtual Office 2.0 — one continuous office with department rooms](docs/assets/agent-office-demo.png)
+
+- **Evidence before animation.** Registry agents without a binding stay in the roster and are never drawn as working. Unlinked native sessions are labelled ghosts. Demo sessions are synthetic and labelled `DEMO DATA`.
+- **Deterministic rooms.** `task.department`/`assigned_room` → agent `default_room` → `tester/reviewer/explorer` role mapping → Spawn/Lobby. Names and objectives never choose a room.
+- **Separate visual and execution state.** Spawning, walking and sitting are animation events; a dropped SSE connection cannot produce a completion, and stale native spans stay `unknown`.
+- **Per-project layouts.** Four complete floor plans (`ai`, `security`, `web`, `custom`) plus a versioned local override (`ao-office-layout:<project_id>`). Project changes destroy the old scene and never mix agents or positions.
+- **Agent Inspector** keeps the evidence model: identity, task, activity, files/worktree, quality gate, native stop, terminal support. The terminal remains explicitly unsupported and never renders fake output.
+- **Layout editor** for room, door and desk positions with grid snapping, validation, save and reset. It does not mutate evidence.
+- **Responsive and accessible.** Room filters, hover tooltip, keyboard roster, zoom/pan, mobile layout, reduced motion and a focus-trapped inspector.
+- **Browser coverage.** Playwright E2E and visual baselines at 1440×900, 1280×800, 768×1024 and 390×844 with the system Chrome channel; unit tests remain dependency-free Python and Node.
+
 ## V7.1 — Multi-project evidence console and Virtual Office
 
 V7.1 adds a local project registry, a fleet overview and a project-scoped evidence console without weakening the read-only boundary. Every project keeps its evidence under its own `.auto-orchestrator/`; identical `run_id` values in two projects stay separate. The dashboard remains loopback-only and never starts, stops or messages an agent.
 
 ![Global overview with three synthetic projects](docs/assets/global-overview-demo.png)
-
-![Virtual Agent Office with evidence-derived desks](docs/assets/agent-office-demo.png)
 
 ```bash
 # Register/serve a project (auto-registers unless --no-register)
@@ -316,7 +329,7 @@ python tools/capabilities.py show
 python tools/capabilities.py show --platform cursor --json
 ```
 
-The **Virtual Office** draws one desk per registered agent definition. Status comes from explicit bindings and observed native spans/tasks; an agent with no binding is **Unknown/Unlinked**, never “idle”. The **Agent Inspector** separates identity, activity, files, verification, native-stop evidence and terminal support. There is no authenticated live terminal stream, so it reports `terminal.supported: false` instead of rendering simulated output.
+The V7.1 **Virtual Office** introduced the project-scoped office, evidence-derived desk status and the Agent Inspector. V7.2 supersedes the desk grid with the continuous map described above; the evidence semantics and inspector remain.
 
 - [Multi-project registry, isolation, migration and HTTP/SSE API](docs/MULTIPROJECT.md)
 - [Virtual Office, Agent Inspector, themes, i18n and accessibility](docs/VIRTUAL_OFFICE.md)
