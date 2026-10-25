@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Tasks</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="app-header">
+        <h1>Tasks</h1>
+        <p class="app-subtitle">A tiny in-memory task manager.</p>
+      </header>
+
+      <form id="task-form" class="task-form" novalidate>
+        <label class="sr-only" for="task-title">Task title</label>
+        <input
+          id="task-title"
+          name="title"
+          type="text"
+          maxlength="80"
+          placeholder="What needs doing?"
+          autocomplete="off"
+          autocapitalize="sentences"
+          spellcheck="true"
+        />
+        <button id="task-submit" type="submit">Add task</button>
+      </form>
+
+      <p id="form-error" class="form-error" role="alert" hidden></p>
+      <p id="task-summary" class="task-summary" aria-live="polite"></p>
+
+      <p id="loading-state" class="empty-state">Loading tasks…</p>
+      <p id="empty-state" class="empty-state" hidden>
+        No tasks yet. Add your first one above.
+      </p>
+      <ul id="task-list" class="task-list" hidden></ul>
+    </main>
+
+    <script src="config.js"></script>
+    <script src="app.js" defer></script>
+  </body>
+</html>
