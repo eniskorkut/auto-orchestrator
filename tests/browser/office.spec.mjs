@@ -369,6 +369,7 @@ const VIEWPORTS = [
 
 for (const viewport of VIEWPORTS) {
   test(`visual office snapshot at ${viewport.name}`, async ({ page }) => {
+    test.skip(process.env.AO_SKIP_VISUALS === '1', 'visual baselines are macOS Chrome references; CI runs functional E2E');
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
     await openOffice(page, { reducedMotion: true });
     await waitForSettled(page);

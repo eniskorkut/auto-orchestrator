@@ -20,6 +20,12 @@ RUNTIME_MODULES = (
     "telemetry.py",
     "project_planner.py",
     "executor.py",
+    "teamwork.py",
+    "teamwork_planner.py",
+    "managed_exec.py",
+    "teamwork_runner.py",
+    "teamwork_benchmark.py",
+    "teamwork_cli.py",
 )
 PLATFORM_TOOLS = {
     "codex": ".codex/auto-orchestrator/tools",

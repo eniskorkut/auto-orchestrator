@@ -4,7 +4,7 @@
   "version": "7.2.0",
   "description": "Evidence-based multi-agent orchestration toolkit and read-only dashboard",
   "scripts": {
-    "test:js": "node --test tests/js/*.test.mjs tests/js/test_*.mjs",
+    "test:js": "node tests/js/run-all.mjs",
     "test:browser": "playwright test -c tests/browser/playwright.config.mjs",
     "test:browser:update": "playwright test -c tests/browser/playwright.config.mjs --update-snapshots"
   },

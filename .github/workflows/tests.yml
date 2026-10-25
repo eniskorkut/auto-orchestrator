@@ -2,37 +2,79 @@ name: Tests
 on:
   pull_request:
   push:
-    branches: [main]
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ['3.11', '3.12', '3.13']
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-      - name: Run unittest
-        run: python -m unittest discover -s tests -v
+    branches: [main, 'feat/v7.3-teamwork-engine']
+permissions:
+  contents: read
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
 
-  plugin-node:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      - run: node --test tests/js/test_opencode.mjs tests/js/test_opencode_v2.mjs
-  cross-platform:
+jobs:
+  python:
+    name: Python ${{ matrix.python-version }} / ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ['3.11', '3.12', '3.13']
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
+          python-version: ${{ matrix.python-version }}
+      - name: Unit and integration tests
+        run: python -m unittest discover -s tests -v
+
+  node:
+    name: Node / ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+      - name: All JavaScript tests
+        run: npm run test:js
+
+  browser:
+    name: Browser E2E (functional)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Playwright office E2E
+        env:
+          AO_BROWSER_CHANNEL: none
+          AO_SKIP_VISUALS: '1'
+          AO_PYTHON: python
+        run: npm run test:browser
+
+  security:
+    name: Build and dependency checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
           python-version: '3.12'
-      - run: python -m unittest discover -s tests -v
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Compile all Python sources
+        run: python -m compileall -q tools tests
+      - run: npm ci
+      - name: Audit development dependencies
+        run: npm audit --audit-level=high

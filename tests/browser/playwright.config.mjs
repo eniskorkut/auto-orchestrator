@@ -1,8 +1,13 @@
 import { defineConfig, devices } from '@playwright/test';
+import { fileURLToPath } from 'node:url';
 
 const PORT = Number(process.env.AO_TEST_PORT || 8799);
 const BASE_URL = `http://127.0.0.1:${PORT}`;
+const ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const PYTHON = process.env.AO_PYTHON || 'python3.11';
+const BROWSER_CHANNEL = process.env.AO_BROWSER_CHANNEL === 'none'
+  ? undefined
+  : (process.env.AO_BROWSER_CHANNEL || 'chrome');
 
 export default defineConfig({
   testDir: '.',
@@ -16,7 +21,7 @@ export default defineConfig({
   snapshotPathTemplate: '{testDir}/screenshots/{arg}{ext}',
   use: {
     baseURL: BASE_URL,
-    channel: 'chrome',
+    ...(BROWSER_CHANNEL ? { channel: BROWSER_CHANNEL } : {}),
     headless: true,
     viewport: { width: 1440, height: 900 },
     deviceScaleFactor: 1,
@@ -24,12 +29,12 @@ export default defineConfig({
     screenshot: 'only-on-failure',
   },
   projects: [
-    { name: 'chrome', use: { ...devices['Desktop Chrome'], channel: 'chrome', viewport: { width: 1440, height: 900 } } },
+    { name: 'chrome', use: { ...devices['Desktop Chrome'], ...(BROWSER_CHANNEL ? { channel: BROWSER_CHANNEL } : {}), viewport: { width: 1440, height: 900 } } },
   ],
   webServer: {
     command: `${PYTHON} tools/dashboard.py --demo --port ${PORT}`,
     url: `${BASE_URL}/`,
-    cwd: new URL('../..', import.meta.url).pathname,
+    cwd: ROOT,
     timeout: 30_000,
     reuseExistingServer: true,
     stdout: 'ignore',
