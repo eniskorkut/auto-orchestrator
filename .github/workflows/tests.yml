@@ -24,7 +24,27 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Unit and integration tests
-        run: python -m unittest discover -s tests -v
+        shell: bash
+        run: |
+          set -o pipefail
+          python -m unittest discover -s tests -v 2>&1 | tee unittest.log
+      - name: Capture failure diagnostics
+        if: failure()
+        shell: bash
+        run: |
+          {
+            echo "### Python test failures (${{ matrix.os }}, ${{ matrix.python-version }})"
+            echo '```'
+            grep -E "FAIL:|ERROR:|Ran [0-9]+ tests|FAILED" unittest.log || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload unittest log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unittest-${{ matrix.os }}-${{ matrix.python-version }}
+          path: unittest.log
+          if-no-files-found: ignore
 
   node:
     name: Node / ${{ matrix.os }}
