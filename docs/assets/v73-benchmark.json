@@ -1,0 +1,273 @@
+{
+  "serial": {
+    "label": "serial-single-agent",
+    "mode": "serial",
+    "wall_time_seconds": 180.818,
+    "verified": true,
+    "verified_tasks": 8,
+    "total_tasks": 8,
+    "tests_passed": 2,
+    "tests_total": 2,
+    "repairs": 0,
+    "retries": 0,
+    "cost_usd": 0.022225722,
+    "agent_intervals": [
+      {
+        "agent": "serial",
+        "start": 0,
+        "end": 180.818
+      }
+    ],
+    "model": "opencode-go/deepseek-v4.1-flash",
+    "hardware": "local macOS arm64",
+    "cache": "provider cache warm; no controlled cache normalization",
+    "acceptance": [
+      "backend API and validation",
+      "frontend UI",
+      "backend unit suite",
+      "browser E2E",
+      "config base",
+      "create/list/toggle",
+      "error path",
+      "clean tree"
+    ],
+    "managed": {
+      "status": "completed",
+      "tool_count": 33,
+      "tokens": {
+        "input": 43519,
+        "output": 16091,
+        "reasoning": 6259,
+        "cache_read": 762624,
+        "cache_write": 0,
+        "cache": {
+          "read": 762624,
+          "write": 0
+        }
+      },
+      "text": "Implemented the complete task manager and committed it as `8a35f3b`.\n\n### What was built\n- `backend/app.py` — Python 3.11 stdlib HTTP server with in-memory tasks, validation, PATCH toggling, static file serving, and `--port 0 --print-port`.\n- `frontend/` — responsive task UI with create, list, validation errors, done toggling, completion counter, and empty/loading states.\n- `tests/test_app.py` — 21 backend unit/API tests.\n- `e2e/check.cjs` — Playwright CommonJS E2E covering empty state, create, empty/whitespace rejection, toggle, and reload persistence.\n\n### Commands and results\n```sh\npython3.11 -m unittest discover -s tests -v\n# Ran 21 tests — OK\n\nNODE_PATH=/Users/eniskorkut/Desktop/auto-orchestrator/node_modules \\\nAO_CHROMIUM_EXECUTABLE=\"/Users/eniskorkut/Library/Caches/ms-playwright/chromium-1248/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing\" \\\nnode e2e/check.cjs\n# E2E PASS — all checks passed, no page JavaScript errors\n\npython3.11 -m py_compile backend/app.py tests/test_app.py\nnode --check frontend/app.js frontend/config.js e2e/check.cjs\n# Syntax checks passed\n```\n\nWorking tree is clean. `README.md` and `CONTRACT.md` were not modified, and nothing was pushed or deployed.",
+      "session_hash": "5a64162731d4"
+    },
+    "verification_commands": [
+      {
+        "name": "/Users/eniskorkut/.local/bin/python3.11 -m unittest discover -s tests -v",
+        "status": "passed",
+        "exit_code": 0,
+        "duration_ms": 608.6,
+        "output": "eate_accepts_internal_whitespace) ... [server] 127.0.0.1 \"POST /api/tasks HTTP/1.1\" 201 -\nok\ntest_create_accepts_maximum_length_title (test_app.TaskManagerTestCase.test_create_accepts_maximum_length_title) ... [server] 127.0.0.1 \"POST /api/tasks HTTP/1.1\" 201 -\nok\ntest_create_rejects_empty_title (test_app.TaskManagerTestCase.test_create_rejects_empty_title) ... [server] 127.0.0.1 \"POST /api/tasks HTTP/1.1\" 400 -\nok\ntest_create_rejects_json_array (test_app.TaskManagerTestCase.test_create_rejects_json_array) ... [server] 127.0.0.1 \"POST /api/tasks HTTP/1.1\" 400 -\nok\ntest_create_rejects_malformed_json (test_app.TaskManagerTestCase.test_create_rejects_malformed_json) ... [server] 127.0.0.1 \"POST /api/tasks HTTP/1.1\" 400 -\nok\ntest_create_rejects_missing_or_non_string_title (test_app.TaskManagerTestCase.test_create_rejects_missing_or_non_string_title) ... [server] 127.0.0.1 \"POST /api/tasks HTTP/1.1\" 400 -\n[server] 127.0.0.1 \"POST /api/tasks HTTP/1.1\" 400 -\n[server] 127.0.0.1 \"POST /api/tasks HTTP/1.1\" 400 -\n[server] 127.0.0.1 \"POST /api/tasks HTTP/1.1\" 400 -\nok\ntest_create_rejects_title_over_limit (test_app.TaskManagerTestCase.test_create_rejects_title_over_limit) ... [server] 127.0.0.1 \"POST /api/tasks HTTP/1.1\" 400 -\nok\ntest_create_rejects_whitespace_only_title (test_app.TaskManagerTestCase.test_create_rejects_whitespace_only_title) ... [server] 127.0.0.1 \"POST /api/tasks HTTP/1.1\" 400 -\nok\ntest_create_task_returns_created_task (test_app.TaskManagerTestCase.test_create_task_returns_created_task) ... [server] 127.0.0.1 \"POST /api/tasks HTTP/1.1\" 201 -\nok\ntest_create_trims_surrounding_whitespace (test_app.TaskManagerTestCase.test_create_trims_surrounding_whitespace) ... [server] 127.0.0.1 \"POST /api/tasks HTTP/1.1\" 201 -\nok\ntest_list_starts_empty (test_app.TaskManagerTestCase.test_list_starts_empty) ... [server] 127.0.0.1 \"GET /api/tasks HTTP/1.1\" 200 -\nok\ntest_patch_marks_task_done_and_back (test_app.TaskManagerTestCase.test_patch_marks_task_done_and_back) ... [server] 127.0.0.1 \"POST /api/tasks HTTP/1.1\" 201 -\n[server] 127.0.0.1 \"PATCH /api/tasks/1 HTTP/1.1\" 200 -\n[server] 127.0.0.1 \"PATCH /api/tasks/1 HTTP/1.1\" 200 -\nok\ntest_patch_missing_task_and_invalid_path (test_app.TaskManagerTestCase.test_patch_missing_task_and_invalid_path) ... [server] 127.0.0.1 \"PATCH /api/tasks/abc HTTP/1.1\" 404 -\n[server] 127.0.0.1 \"PATCH /api/tasks/ HTTP/1.1\" 404 -\nok\ntest_patch_rejects_non_boolean_done (test_app.TaskManagerTestCase.test_patch_rejects_non_boolean_done) ... [server] 127.0.0.1 \"POST /api/tasks HTTP/1.1\" 201 -\n[server] 127.0.0.1 \"PATCH /api/tasks/1 HTTP/1.1\" 400 -\n[server] 127.0.0.1 \"PATCH /api/tasks/1 HTTP/1.1\" 400 -\n[server] 127.0.0.1 \"PATCH /api/tasks/1 HTTP/1.1\" 400 -\nok\ntest_patch_unknown_task_returns_404 (test_app.TaskManagerTestCase.test_patch_unknown_task_returns_404) ... [server] 127.0.0.1 \"PATCH /api/tasks/999 HTTP/1.1\" 404 -\nok\ntest_root_serves_index_html (test_app.TaskManagerTestCase.test_root_serves_index_html) ... [server] 127.0.0.1 \"GET / HTTP/1.1\" 200 -\nok\ntest_static_assets_have_expected_content_types (test_app.TaskManagerTestCase.test_static_assets_have_expected_content_types) ... [server] 127.0.0.1 \"GET /app.js HTTP/1.1\" 200 -\n[server] 127.0.0.1 \"GET /styles.css HTTP/1.1\" 200 -\n[server] 127.0.0.1 \"GET /config.js HTTP/1.1\" 200 -\nok\ntest_tasks_accumulate_with_incrementing_ids (test_app.TaskManagerTestCase.test_tasks_accumulate_with_incrementing_ids) ... [server] 127.0.0.1 \"POST /api/tasks HTTP/1.1\" 201 -\n[server] 127.0.0.1 \"POST /api/tasks HTTP/1.1\" 201 -\n[server] 127.0.0.1 \"GET /api/tasks HTTP/1.1\" 200 -\nok\ntest_unknown_api_route_returns_404 (test_app.TaskManagerTestCase.test_unknown_api_route_returns_404) ... [server] 127.0.0.1 \"GET /api/unknown HTTP/1.1\" 404 -\nok\ntest_unknown_route_returns_404_json (test_app.TaskManagerTestCase.test_unknown_route_returns_404_json) ... [server] 127.0.0.1 \"GET /missing HTTP/1.1\" 404 -\nok\n\n----------------------------------------------------------------------\nRan 21 tests in 0.520s\n\nOK\n"
+      },
+      {
+        "name": "node e2e/check.cjs",
+        "status": "passed",
+        "exit_code": 0,
+        "duration_ms": 1973.2,
+        "output": "Backend ready on http://127.0.0.1:53978\nPASS initial empty state\nPASS create task\nPASS reject empty title\nPASS reject whitespace-only title\nPASS toggle done\nPASS done state persists after reload\nPASS no page JavaScript errors\nE2E PASS\n"
+      }
+    ],
+    "root": "/private/var/folders/sm/btb8_q_x5v71_ngxg6tkd43h0000gn/T/opencode/teamwork-serial-sample"
+  },
+  "parallel": {
+    "label": "teamwork-parallel",
+    "mode": "parallel",
+    "wall_time_seconds": 1566.142,
+    "verified": true,
+    "verified_tasks": 8,
+    "total_tasks": 8,
+    "tests_passed": 2,
+    "tests_total": 2,
+    "repairs": 2,
+    "retries": 2,
+    "cost_usd": 0.140372,
+    "agent_intervals": [
+      {
+        "agent": "explore",
+        "start": 0.0,
+        "end": 19.152
+      },
+      {
+        "agent": "frontend",
+        "start": 19.154,
+        "end": 364.287
+      },
+      {
+        "agent": "backend",
+        "start": 670.446,
+        "end": 873.994
+      },
+      {
+        "agent": "integrate",
+        "start": 874.119,
+        "end": 1086.645
+      },
+      {
+        "agent": "critic",
+        "start": 1086.809,
+        "end": 1204.718
+      },
+      {
+        "agent": "challenger",
+        "start": 1204.72,
+        "end": 1420.361
+      },
+      {
+        "agent": "auditor",
+        "start": 1420.363,
+        "end": 1525.402
+      },
+      {
+        "agent": "success",
+        "start": 1525.404,
+        "end": 1566.142
+      }
+    ],
+    "model": "opencode-go/deepseek-v4.1-flash",
+    "hardware": "local macOS arm64",
+    "cache": "provider cache warm; no controlled cache normalization",
+    "acceptance": [
+      "backend API and validation",
+      "frontend UI",
+      "backend unit suite",
+      "browser E2E",
+      "config base",
+      "create/list/toggle",
+      "error path",
+      "clean tree"
+    ]
+  },
+  "comparison": {
+    "version": 1,
+    "serial": {
+      "label": "serial-single-agent",
+      "mode": "serial",
+      "wall_time_seconds": 180.818,
+      "queue_wait_seconds": 0.0,
+      "verified": true,
+      "verified_tasks": 8,
+      "total_tasks": 8,
+      "tests_passed": 2,
+      "tests_total": 2,
+      "repairs": 0,
+      "retries": 0,
+      "cost_usd": 0.022225722,
+      "agent_intervals": [
+        {
+          "agent": "serial",
+          "start": 0.0,
+          "end": 180.818
+        }
+      ],
+      "model": "opencode-go/deepseek-v4.1-flash",
+      "hardware": "local macOS arm64",
+      "cache": "provider cache warm; no controlled cache normalization",
+      "acceptance": [
+        "backend API and validation",
+        "frontend UI",
+        "backend unit suite",
+        "browser E2E",
+        "config base",
+        "create/list/toggle",
+        "error path",
+        "clean tree"
+      ]
+    },
+    "parallel": {
+      "label": "teamwork-parallel",
+      "mode": "parallel",
+      "wall_time_seconds": 1566.142,
+      "queue_wait_seconds": 0.0,
+      "verified": true,
+      "verified_tasks": 8,
+      "total_tasks": 8,
+      "tests_passed": 2,
+      "tests_total": 2,
+      "repairs": 2,
+      "retries": 2,
+      "cost_usd": 0.140372,
+      "agent_intervals": [
+        {
+          "agent": "explore",
+          "start": 0.0,
+          "end": 19.152
+        },
+        {
+          "agent": "frontend",
+          "start": 19.154,
+          "end": 364.287
+        },
+        {
+          "agent": "backend",
+          "start": 670.446,
+          "end": 873.994
+        },
+        {
+          "agent": "integrate",
+          "start": 874.119,
+          "end": 1086.645
+        },
+        {
+          "agent": "critic",
+          "start": 1086.809,
+          "end": 1204.718
+        },
+        {
+          "agent": "challenger",
+          "start": 1204.72,
+          "end": 1420.361
+        },
+        {
+          "agent": "auditor",
+          "start": 1420.363,
+          "end": 1525.402
+        },
+        {
+          "agent": "success",
+          "start": 1525.404,
+          "end": 1566.142
+        }
+      ],
+      "model": "opencode-go/deepseek-v4.1-flash",
+      "hardware": "local macOS arm64",
+      "cache": "provider cache warm; no controlled cache normalization",
+      "acceptance": [
+        "backend API and validation",
+        "frontend UI",
+        "backend unit suite",
+        "browser E2E",
+        "config base",
+        "create/list/toggle",
+        "error path",
+        "clean tree"
+      ]
+    },
+    "observed": {
+      "serial_agent_span_seconds": 180.818,
+      "parallel_agent_span_seconds": 1259.686,
+      "parallel_minus_serial_span_seconds": 1078.868
+    },
+    "measured_wall_time": {
+      "serial_seconds": 180.818,
+      "parallel_seconds": 1566.142,
+      "difference_seconds": -1385.324
+    },
+    "verified_improvement": {
+      "comparable": true,
+      "wall_time_difference_seconds": -1385.324,
+      "reason": "measured wall-time difference for comparable, independently verified runs",
+      "human_time_saved_claim": false
+    },
+    "cost": {
+      "serial_usd": 0.022225722,
+      "parallel_usd": 0.140372,
+      "difference_usd": -0.118146
+    },
+    "quality": {
+      "serial_verified_tasks": 8,
+      "parallel_verified_tasks": 8,
+      "serial_test_pass_ratio": 1.0,
+      "parallel_test_pass_ratio": 1.0,
+      "serial_repairs": 0,
+      "parallel_repairs": 2
+    },
+    "disclaimer": "Measured values only. This is not human time saved and not a general performance guarantee."
+  }
+}

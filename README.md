@@ -1,4 +1,4 @@
-# Auto-Orchestrator — Native Multi-Agent Coordination (V7.2)
+# Auto-Orchestrator — Native Multi-Agent Coordination (V7.3)
 
 Portable, opt-in native-subagent coordination for **OpenCode**, **Codex**, **Cursor**, and **Google Antigravity**. Platform-native runtime capabilities and proof strength differ.
 
@@ -296,6 +296,38 @@ adds a small, conservative long-tail domain ontology and
 skill selection rates. None of this proves live IDE reliability or speedup
 until matched native runs are repeated. See
 [execution reliability](docs/V64_RELIABILITY.md).
+
+## V7.3 — Teamwork engine, managed execution and milestones
+
+V7.3 adds a real managed-session runtime on top of the V7.1 Supervisor and V7.2
+office. A single request is planned into milestones and a task DAG; implementers
+work in isolated worktrees through **real OpenCode sessions**; testers, critics,
+challengers, auditors and a success auditor verify the integrated result. A
+bounded repair loop reopens the relevant implementer when verification fails.
+
+- **Milestone state machine:** `planned → ready → running → verifying → passed`
+  plus `repairing`, `failed`, `blocked`, `cancelled`; restart is recovered from
+  the Supervisor SQLite database. Progress counts only verified passed
+  milestones and never shows an estimate as success.
+- **Managed execution:** OpenCode is live-verified via `opencode run --format
+  json`; Codex App-server is contract-tested only; Antigravity and Cursor
+  managed execution is not implemented. Native hook observation is unchanged
+  and managed completion is never claimed as a native stop.
+- **Real E2E:** a disposable task-manager project with backend, frontend, unit
+  tests and browser E2E was built by managed sessions, independently reviewed
+  and passed. A controlled frontend fault was detected, repaired and rerun.
+- **Virtual Office:** real managed sessions spawn as named task characters in
+  Backend/Frontend/QA/Review/Research rooms. Their inspector shows task,
+  provider, model, status, tool count, cost and a session hash; it explicitly
+  does not claim native stop proof or a terminal.
+- **Dashboard:** Task Board has a Milestones panel with role requirements,
+  handoffs, blockers and verified-only progress; clicking a milestone filters
+  the board. Office header shows the current milestone.
+- **CI:** Windows/macOS/Linux Python matrix, Node matrix, Playwright functional
+  E2E and dependency/compile checks. Windows path normalization and home
+  fallback regressions are fixed.
+
+See [Teamwork engine and real E2E evidence](docs/V73_TEAMWORK.md).
 
 ## V7.2 — Virtual Office 2.0
 

@@ -130,6 +130,20 @@ class CapabilityMatrixTests(unittest.TestCase):
         for description in document["field_descriptions"].values():
             self.assertTrue(description.strip())
 
+    def test_managed_execution_matrix_is_separate_and_honest(self):
+        document = capabilities.matrix()
+        managed = document["managed_execution"]
+        self.assertEqual(managed["platforms"]["opencode"]["status"], "live-verified-local")
+        self.assertTrue(managed["platforms"]["opencode"]["live_smoke_tested"])
+        self.assertFalse(managed["platforms"]["opencode"]["native_cancel_ack"])
+        self.assertEqual(managed["platforms"]["codex"]["status"], "contract-only")
+        self.assertFalse(managed["platforms"]["codex"]["live_smoke_tested"])
+        for key in ("antigravity", "cursor"):
+            self.assertEqual(managed["platforms"][key]["status"], "not-implemented")
+            self.assertFalse(managed["platforms"][key]["managed_session"])
+        filtered = capabilities.matrix("opencode")["managed_execution"]["platforms"]
+        self.assertEqual(list(filtered), ["opencode"])
+
     def test_platform_filter_and_unknown_platform(self):
         document = capabilities.matrix("CODEX")
         self.assertEqual(len(document["platforms"]), 1)

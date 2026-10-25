@@ -177,6 +177,18 @@ Router advice is either `single` or `consider-parallel`; parallel advice caps at
 
 The current evidence schema contains no token or price field. The dashboard therefore shows **no cost figures** and does not estimate them. Adding cost would require an explicit, reviewable input per platform and model; subscription and usage-based plans must not be mixed silently.
 
+## Teamwork milestones and managed sessions
+
+V7.3 adds:
+
+- `GET /api/projects/<project_id>/milestones` — project-scoped milestone runs,
+  verified progress, role verdicts, handoffs and managed-session summaries.
+- `GET /api/projects/<project_id>/milestones/<run_id>` — one milestone run.
+
+The API exposes a short session hash and task/provider/model/cost metadata, not
+raw managed session ids or event paths. Progress counts only passed milestones;
+`estimated_progress` is always `null`. See [V73_TEAMWORK.md](V73_TEAMWORK.md).
+
 ## Privacy and security model
 
 The dashboard is local by construction:

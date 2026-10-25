@@ -105,6 +105,65 @@ FIELD_DESCRIPTIONS = {
     ),
 }
 
+MANAGED_EXECUTION = {
+    "schema_version": 1,
+    "description": (
+        "Managed execution is separate from native hook observation. A managed "
+        "session is created by this repository through a documented CLI/API; "
+        "its completion is managed evidence, not a native subagent stop."
+    ),
+    "platforms": {
+        "opencode": {
+            "status": "live-verified-local",
+            "transport": "opencode run --format json",
+            "managed_session": True,
+            "event_stream": True,
+            "tool_activity": True,
+            "resume": True,
+            "native_cancel_ack": False,
+            "terminal_stream": False,
+            "live_smoke_tested": True,
+            "evidence": "real local OpenCode 2.1.1 session; adapter tests; V7.3 E2E run",
+        },
+        "codex": {
+            "status": "contract-only",
+            "transport": "codex app-server JSON-RPC",
+            "managed_session": False,
+            "event_stream": False,
+            "tool_activity": False,
+            "resume": False,
+            "native_cancel_ack": False,
+            "terminal_stream": False,
+            "live_smoke_tested": False,
+            "evidence": "fake app-server contract tests only; codex binary absent locally",
+        },
+        "antigravity": {
+            "status": "not-implemented",
+            "transport": None,
+            "managed_session": False,
+            "event_stream": False,
+            "tool_activity": False,
+            "resume": False,
+            "native_cancel_ack": False,
+            "terminal_stream": False,
+            "live_smoke_tested": False,
+            "evidence": "no documented external managed-session API integrated",
+        },
+        "cursor": {
+            "status": "not-implemented",
+            "transport": None,
+            "managed_session": False,
+            "event_stream": False,
+            "tool_activity": False,
+            "resume": False,
+            "native_cancel_ack": False,
+            "terminal_stream": False,
+            "live_smoke_tested": False,
+            "evidence": "no documented external managed-session API integrated",
+        },
+    },
+}
+
 DISCLAIMER = (
     "Capabilities describe adapters shipped in this repository and their "
     "documented native contracts. No live IDE smoke test is claimed here; "
@@ -418,6 +477,13 @@ def matrix(platform: str | None = None) -> dict:
         "field_descriptions": dict(FIELD_DESCRIPTIONS),
         "status_values": list(STATUS_VALUES),
         "platforms": [copy.deepcopy(_PLATFORMS[key]) for key in keys],
+        "managed_execution": {
+            **copy.deepcopy(MANAGED_EXECUTION),
+            "platforms": {
+                key: copy.deepcopy(MANAGED_EXECUTION["platforms"][key])
+                for key in keys
+            },
+        },
     }
 
 
@@ -449,6 +515,11 @@ def render_text(platform: str | None = None) -> str:
         "Strict boolean fields: " + ", ".join(document["boolean_fields"]),
         "",
     ]
+    lines.append("Managed execution (separate from native observation):")
+    for key in [record["platform"] for record in document["platforms"]]:
+        managed = document["managed_execution"]["platforms"][key]
+        lines.append(f"  {key}: {managed['status']} (live={str(managed['live_smoke_tested']).lower()})")
+    lines.append("")
     for record in document["platforms"]:
         lines.append(record["label"] + " (" + record["platform"] + ")")
         lines.append("-" * len(lines[-1]))
