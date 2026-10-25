@@ -22,6 +22,9 @@ GUIDANCE = """<!-- auto-orchestrator:begin -->
 For non-trivial coding tasks consult the installed auto-orchestrator skill. Delegate independent work to native subagents automatically (max three), protect shared files, and verify integrated results. Trivial tasks use one agent. Never invent model execution, tests, or human time savings.
 <!-- auto-orchestrator:end -->"""
 MANIFEST = 'auto-orchestrator-global-manifest.json'
+V71_MODULES = ('project_registry.py', 'event_stream.py', 'event_model.py',
+               'office_model.py', 'capabilities.py', 'telemetry.py',
+               'project_planner.py', 'executor.py')
 
 class InstallError(ValueError):
     pass
@@ -82,6 +85,8 @@ def installed_map(home:Path,platforms:set[str],opencode_version:str,codex_model:
         for name in ('supervisor.py','router.py','router_eval.py','worktree.py','benchmark.py','quality_gate.py','review_gate.py'):
             files[codex/'auto-orchestrator/tools'/name]=(ROOT/'tools'/name).read_bytes()
         dashboard_at(codex/'auto-orchestrator/tools')
+        for name in V71_MODULES:
+            files[codex/'auto-orchestrator/tools'/name]=(ROOT/'tools'/name).read_bytes()
         hooks_path=codex/'hooks.json'
         if not hooks_path.exists():
             hooks=json.loads((ROOT/'.codex/hooks.json').read_text(encoding='utf-8'))
@@ -114,6 +119,8 @@ def installed_map(home:Path,platforms:set[str],opencode_version:str,codex_model:
         for name in ('supervisor.py','router.py','router_eval.py','worktree.py','benchmark.py','quality_gate.py','review_gate.py'):
             files[oc/'auto-orchestrator/tools'/name]=(ROOT/'tools'/name).read_bytes()
         dashboard_at(oc/'auto-orchestrator/tools')
+        for name in V71_MODULES:
+            files[oc/'auto-orchestrator/tools'/name]=(ROOT/'tools'/name).read_bytes()
     if 'antigravity' in platforms:
         gemini=home/'.gemini'
         skills_at(gemini/'config/skills/auto-orchestrator')
@@ -126,6 +133,8 @@ def installed_map(home:Path,platforms:set[str],opencode_version:str,codex_model:
         for name in ('supervisor.py','router.py','router_eval.py','worktree.py','benchmark.py','quality_gate.py','review_gate.py'):
             files[gemini/'config/auto-orchestrator/tools'/name]=(ROOT/'tools'/name).read_bytes()
         dashboard_at(gemini/'config/auto-orchestrator/tools')
+        for name in V71_MODULES:
+            files[gemini/'config/auto-orchestrator/tools'/name]=(ROOT/'tools'/name).read_bytes()
         hooks_path=gemini/'config/hooks.json'
         if not hooks_path.exists():
             hooks=json.loads((ROOT/'.agents/hooks.json').read_text(encoding='utf-8'))
@@ -147,6 +156,8 @@ def installed_map(home:Path,platforms:set[str],opencode_version:str,codex_model:
         for name in ('supervisor.py','router.py','router_eval.py','worktree.py','quality_gate.py','review_gate.py','perf.py','hook_bridge.py'):
             files[cursor/'auto-orchestrator/tools'/name]=(ROOT/'tools'/name).read_bytes()
         dashboard_at(cursor/'auto-orchestrator/tools')
+        for name in V71_MODULES:
+            files[cursor/'auto-orchestrator/tools'/name]=(ROOT/'tools'/name).read_bytes()
     return files
 
 def native_hook_fragment(home: Path, platform: str) -> dict:

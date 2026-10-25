@@ -153,7 +153,7 @@ class DashboardPerfHTTPTests(unittest.TestCase):
         self.assertEqual(response.status, 200)
         state = json.loads(body)
         etag = response.getheader("ETag")
-        self.assertEqual(etag, f'"{state["fingerprint"]}"')
+        self.assertTrue(etag.startswith(f'"legacy-{state["fingerprint"]}-'))
         self.assertIn("Accept-Encoding", response.getheader("Vary"))
 
         response, body = self.request("/api/state", {

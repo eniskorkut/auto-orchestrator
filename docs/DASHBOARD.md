@@ -1,5 +1,7 @@
 # Evidence dashboard — read-only local console
 
+> V7.1 adds a project registry, Global Overview and Virtual Agent Office on top of this console. See [MULTIPROJECT.md](MULTIPROJECT.md) and [VIRTUAL_OFFICE.md](VIRTUAL_OFFICE.md). The single-project behavior below remains available and backward compatible.
+
 The Auto-Orchestrator dashboard is a local, read-only web view over the evidence your native IDE sessions already leave on disk. It joins run JSONL, Supervisor SQLite state and managed-worktree manifests into one inspection surface, while keeping claims, observations and missing evidence visibly separate.
 
 It is deliberately **not** a control plane. The dashboard never starts or stops an agent, claims or completes a task, merges a worktree, or replaces `perf.py`, the Supervisor or `benchmark.py`. It only reads and displays local records.
@@ -179,7 +181,7 @@ The current evidence schema contains no token or price field. The dashboard ther
 
 The dashboard is local by construction:
 
-- **Loopback only.** It binds to `127.0.0.1`; there is no host option. It is not reachable from another machine by design.
+- **Loopback only.** It binds to `127.0.0.1`; there is no host option. It is not reachable from another machine by design. Requests with an unexpected `Host`/`Origin`/`Sec-Fetch-Site` are rejected to reduce DNS-rebinding and cross-site browser reads.
 - **Read-only HTTP surface.** Evidence routes are `GET`; `POST` returns `405`; `HEAD` is limited to static assets. There is no write endpoint.
 - **Run ID validation.** Run IDs are checked against a strict pattern. Encoded traversal and invalid IDs return `404` rather than touching arbitrary paths.
 - **Symlink resistance.** Symlinked run logs, assets, policy files, the Supervisor database and worktree manifests are rejected or skipped. The SQLite database is opened with a read-only URI.

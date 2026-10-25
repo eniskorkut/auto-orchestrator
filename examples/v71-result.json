@@ -1,0 +1,28 @@
+{
+  "summary": "Checkout retries are idempotent behind the existing flag; duplicate delivery is covered by a regression test.",
+  "changed_files": ["src/checkout/retry.ts"],
+  "tests": [
+    {"name": "tests/checkout/retry.test.ts", "status": "passed"},
+    {"name": "typecheck", "status": "passed"}
+  ],
+  "findings": [
+    "The idempotency key is scoped to the merchant and original charge attempt."
+  ],
+  "acceptance": [
+    {
+      "criterion": "Duplicate webhook delivery does not create a second charge.",
+      "status": "passed",
+      "evidence": "tests/checkout/retry.test.ts covers duplicate delivery and passes."
+    },
+    {
+      "criterion": "The existing retry API remains backward compatible.",
+      "status": "passed",
+      "evidence": "The public request and response types are unchanged; typecheck passes."
+    },
+    {
+      "criterion": "Targeted tests pass with a native integer exit code of zero.",
+      "status": "passed",
+      "evidence": "The focused suite returned exit code 0 in the native shell."
+    }
+  ]
+}

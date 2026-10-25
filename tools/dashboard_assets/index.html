@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-theme="dark">
+<html lang="en" data-theme="dark" data-motion="full">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -8,8 +8,8 @@
   <title>Auto-Orchestrator — Evidence Console</title>
   <link rel="stylesheet" href="/assets/app.css">
 </head>
-<body>
-  <a class="skip-link" href="#main">Skip to content</a>
+<body data-mode="overview">
+  <a class="skip-link" href="#main" data-i18n="app.skip">Skip to content</a>
 
   <svg class="svg-defs" aria-hidden="true" focusable="false">
     <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 6.7M20 5v6h-6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>
@@ -22,181 +22,329 @@
     <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 5 6v5c0 4.6 3 8 7 10 4-2 7-5.4 7-10V6l-7-3Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="m9 12 2 2 4-4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>
     <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4 3 20h18L12 4Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M12 10v4M12 17.2v.1" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
     <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M12 7.5V12l3 2" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-office" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M8 20h8M12 16v4M7 12h3M13 12h4M7 8h2M12 8h5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M19 12a7 7 0 0 0-.15-1.45l2-1.55-2-3.46-2.36.95A7 7 0 0 0 14.8 5.3L14.5 2.8h-5l-.3 2.5a7 7 0 0 0-1.69 1.19l-2.36-.95-2 3.46 2 1.55A7 7 0 0 0 5 12c0 .5.05.98.15 1.45l-2 1.55 2 3.46 2.36-.95c.5.5 1.07.9 1.69 1.19l.3 2.5h5l.3-2.5a7 7 0 0 0 1.69-1.19l2.36.95 2-3.46-2-1.55c.1-.47.15-.95.15-1.45Z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></symbol>
+    <symbol id="i-terminal" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="m7 9 3 3-3 3M12.5 15H17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="1" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="13" y="4" width="7" height="7" rx="1" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="4" y="13" width="7" height="7" rx="1" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="13" y="13" width="7" height="7" rx="1" fill="none" stroke="currentColor" stroke-width="1.6"/></symbol>
   </svg>
 
   <div class="ambient" aria-hidden="true"></div>
 
   <header class="topbar">
-    <div class="brand">
+    <a class="brand" href="#/overview" aria-label="Auto-Orchestrator, all projects overview" data-i18n-aria-label="app.brandAria">
       <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
       <div class="brand-text">
         <div class="brand-title">AUTO<span>/</span>ORCHESTRATOR</div>
-        <div class="brand-sub">evidence console</div>
+        <div class="brand-sub" data-i18n="app.brandSub">agent workspace</div>
       </div>
-    </div>
-    <div class="project" title="Dashboard root">
-      <span class="project-label">root</span>
-      <span id="project-path" class="project-path">—</span>
+    </a>
+    <div class="project-picker">
+      <label class="project-label" for="project-select" data-i18n="top.project">Project</label>
+      <div class="select-shell">
+        <select id="project-select" class="project-select" aria-label="Select project" data-i18n-aria-label="top.selectProject">
+          <option value="" data-i18n="top.allProjects">All projects</option>
+        </select>
+        <svg class="icon select-chevron" aria-hidden="true"><use href="#i-chevron"/></svg>
+      </div>
+      <span id="project-path" class="project-path" title="">—</span>
     </div>
     <div class="top-actions">
-      <span id="demo-badge" class="demo-badge hidden">DEMO DATA</span>
-      <span id="live-badge" class="live-badge" data-state="connecting">
+      <span id="demo-badge" class="demo-badge hidden" data-i18n="top.demo" data-i18n-title="top.demoTitle">DEMO DATA</span>
+      <span id="live-badge" class="live-badge hidden" data-state="connecting" aria-live="polite" aria-label="Live connection" data-i18n-aria-label="nav.live">
         <span class="pulse" aria-hidden="true"></span>
-        <span id="live-text">connecting</span>
+        <span id="live-text" data-i18n="live.connecting">connecting</span>
       </span>
-      <button id="refresh" class="icon-btn" type="button" title="Refresh now" aria-label="Refresh now">
+      <button id="lang-toggle" class="text-btn" type="button" aria-label="Switch to Turkish" data-i18n-aria-label="top.languageSwitch" title="Language">EN</button>
+      <button id="refresh" class="icon-btn" type="button" title="Refresh now" aria-label="Refresh now" data-i18n-title="top.refresh" data-i18n-aria-label="top.refresh">
         <svg class="icon"><use href="#i-refresh"/></svg>
       </button>
-      <button id="theme" class="icon-btn" type="button" title="Switch theme" aria-label="Switch theme">
+      <button id="settings-toggle" class="icon-btn" type="button" title="Settings" aria-label="Settings" data-i18n-title="top.settings" data-i18n-aria-label="top.settings" aria-expanded="false" aria-controls="settings">
+        <svg class="icon"><use href="#i-settings"/></svg>
+      </button>
+      <button id="theme" class="icon-btn" type="button" title="Switch interface theme" aria-label="Switch interface theme" data-i18n-title="top.theme" data-i18n-aria-label="top.theme">
         <svg class="icon theme-moon"><use href="#i-moon"/></svg>
         <svg class="icon theme-sun"><use href="#i-sun"/></svg>
       </button>
     </div>
   </header>
 
-  <nav class="tabs" aria-label="Console sections" role="tablist">
-    <button class="tab" type="button" role="tab" data-tab="runs" aria-selected="true">
-      Runs <span id="tab-runs-count" class="tab-count">0</span>
-    </button>
-    <button class="tab" type="button" role="tab" data-tab="board" aria-selected="false">
-      Task board <span id="tab-board-count" class="tab-count">0</span>
-    </button>
-    <button class="tab" type="button" role="tab" data-tab="workspaces" aria-selected="false">
-      Workspaces <span id="tab-workspaces-count" class="tab-count">0</span>
-    </button>
-    <button class="tab" type="button" role="tab" data-tab="method" aria-selected="false">
-      Method
-    </button>
+  <nav id="project-tabs" class="tabs hidden" aria-label="Project sections" data-i18n-aria-label="nav.sections">
+    <a id="all-projects-link" class="back-link" href="#/overview" aria-label="All projects" data-i18n-aria-label="nav.back">
+      <svg class="icon" aria-hidden="true"><use href="#i-grid"/></svg>
+      <span data-i18n="nav.back">All projects</span>
+    </a>
+    <div class="tablist" role="tablist" aria-label="Project views" data-i18n-aria-label="nav.sections">
+      <button class="tab" type="button" role="tab" id="tab-office" data-tab="office" aria-controls="view-office" aria-selected="true">
+        <svg class="icon tab-icon" aria-hidden="true"><use href="#i-office"/></svg>
+        <span data-i18n="nav.office">Office</span> <span id="tab-office-count" class="tab-count">—</span>
+      </button>
+      <button class="tab" type="button" role="tab" id="tab-runs" data-tab="runs" aria-controls="view-runs" aria-selected="false">
+        <span data-i18n="nav.runs">Runs</span> <span id="tab-runs-count" class="tab-count">0</span>
+      </button>
+      <button class="tab" type="button" role="tab" id="tab-board" data-tab="board" aria-controls="view-board" aria-selected="false">
+        <span data-i18n="nav.board">Task Board</span> <span id="tab-board-count" class="tab-count">0</span>
+      </button>
+      <button class="tab" type="button" role="tab" id="tab-workspaces" data-tab="workspaces" aria-controls="view-workspaces" aria-selected="false">
+        <span data-i18n="nav.workspaces">Workspaces</span> <span id="tab-workspaces-count" class="tab-count">0</span>
+      </button>
+      <button class="tab" type="button" role="tab" id="tab-method" data-tab="method" aria-controls="view-method" aria-selected="false">
+        <span data-i18n="nav.method">Method</span>
+      </button>
+    </div>
     <span class="tabs-spacer"></span>
-    <span id="updated" class="updated" aria-live="polite">waiting for evidence</span>
+    <span id="updated" class="updated" data-i18n="live.notUpdated">waiting for evidence</span>
   </nav>
 
   <main id="main">
-    <section id="view-runs" class="view" role="tabpanel" aria-label="Runs">
+    <section id="view-overview" class="view" aria-label="All projects" data-i18n-aria-label="overview.title">
+      <div class="page-head overview-head">
+        <div>
+          <div class="eyebrow" data-i18n="overview.eyebrow">Global / agent workspace</div>
+          <h1 data-i18n="overview.title">All projects</h1>
+          <p class="page-lead" data-i18n="overview.lead">One read-only view of every registered project. Counts come from recorded run evidence and supervisor state; unknown stays unknown.</p>
+        </div>
+        <div id="registry-path" class="registry-path mono" hidden></div>
+      </div>
+
+      <div id="global-status" class="sr-only" role="status" aria-live="polite"></div>
+      <div id="overview-notice" class="overview-notice hidden" role="alert"></div>
+      <div id="global-totals" class="overview global-totals" aria-label="Fleet totals" data-i18n-aria-label="overview.totals"></div>
+      <div id="project-grid" class="project-grid" role="list" aria-label="Projects" data-i18n-aria-label="overview.projects"></div>
+      <div id="overview-state" class="overview-state"></div>
+    </section>
+
+    <section id="view-office" class="view hidden" role="tabpanel" aria-labelledby="tab-office">
+      <div class="page-head office-head">
+        <div class="office-head-copy">
+          <div class="eyebrow" data-i18n="office.eyebrow">Virtual agent office</div>
+          <h1 id="office-title" data-i18n="office.title">Agent office</h1>
+          <p id="office-lead" class="page-lead" data-i18n="office.lead">Desks follow explicit agent bindings and observed lifecycle evidence. Absence of evidence is shown as unknown, not as idle.</p>
+        </div>
+        <div class="office-tools" role="group" aria-label="Office settings">
+          <label class="tool-field" for="office-theme">
+            <span data-i18n="office.theme">Room theme</span>
+            <span class="select-shell compact">
+              <select id="office-theme" class="compact-select">
+                <option value="ai" data-i18n="office.theme.ai">Research lab</option>
+                <option value="security" data-i18n="office.theme.security">Security operations</option>
+                <option value="web" data-i18n="office.theme.web">Development studio</option>
+                <option value="custom" data-i18n="office.theme.custom">Custom room</option>
+              </select>
+              <svg class="icon select-chevron" aria-hidden="true"><use href="#i-chevron"/></svg>
+            </span>
+          </label>
+          <button id="office-arrange" class="btn" type="button" aria-pressed="false" data-i18n="office.arrange">Arrange desks</button>
+          <button id="office-motion" class="btn" type="button" aria-pressed="false" data-i18n="office.motion">Reduce motion</button>
+        </div>
+      </div>
+      <div id="office-summary" class="office-summary" role="group" aria-label="Office summary" data-i18n-aria-label="office.summaryAria"></div>
+      <div id="office-root" class="office-root"></div>
+      <div id="office-status" class="sr-only" role="status" aria-live="polite"></div>
+    </section>
+
+    <section id="view-runs" class="view hidden" role="tabpanel" aria-labelledby="tab-runs">
       <div id="overview" class="overview" aria-label="Fleet overview"></div>
       <div class="runs-layout">
         <aside class="run-rail" aria-label="Recorded runs">
           <div class="rail-controls">
             <label class="search-box">
               <span class="search-icon" aria-hidden="true"></span>
-              <input id="run-search" type="search" placeholder="Filter runs…" autocomplete="off" spellcheck="false" aria-label="Filter runs">
+              <input id="run-search" type="search" placeholder="Filter runs…" data-i18n-placeholder="runs.search" autocomplete="off" spellcheck="false" aria-label="Filter runs" data-i18n-aria-label="runs.search">
               <kbd>/</kbd>
             </label>
-            <div id="filters" class="filters" role="group" aria-label="Run filters"></div>
+            <div id="filters" class="filters" role="group" aria-label="Run filters" data-i18n-aria-label="runs.filters"></div>
           </div>
           <div id="run-list" class="run-list"></div>
         </aside>
-        <section id="run-detail" class="run-detail" aria-live="polite" aria-label="Run detail"></section>
+        <section id="run-detail" class="run-detail" aria-label="Run detail"></section>
       </div>
     </section>
 
-    <section id="view-board" class="view hidden" role="tabpanel" aria-label="Task board">
+    <section id="view-board" class="view hidden" role="tabpanel" aria-labelledby="tab-board">
       <div class="page-head">
         <div>
-          <div class="eyebrow">Supervisor / durable plan</div>
-          <h1>Task board</h1>
-          <p class="page-lead">Columns are derived from task state, dependencies and native-stop evidence. A lease is never sent to this page.</p>
+          <div class="eyebrow" data-i18n="board.eyebrow">Supervisor / durable plan</div>
+          <h1 data-i18n="board.title">Task board</h1>
+          <p class="page-lead" data-i18n="board.lead">Columns are derived from task state, dependencies and native-stop evidence. A lease is never sent to this page.</p>
         </div>
-        <div id="board-runs" class="board-runs" role="group" aria-label="Supervisor runs"></div>
+        <div id="board-runs" class="board-runs" role="group" aria-label="Supervisor runs" data-i18n-aria-label="board.runs"></div>
       </div>
       <div id="board-kpis" class="board-kpis"></div>
       <div id="board" class="board"></div>
     </section>
 
-    <section id="view-workspaces" class="view hidden" role="tabpanel" aria-label="Workspaces">
+    <section id="view-workspaces" class="view hidden" role="tabpanel" aria-labelledby="tab-workspaces">
       <div class="page-head">
         <div>
-          <div class="eyebrow">Git isolation</div>
-          <h1>Managed worktrees</h1>
-          <p class="page-lead">Read directly from Auto-Orchestrator worktree manifests. The console never merges, cleans or deletes a branch.</p>
+          <div class="eyebrow" data-i18n="workspaces.eyebrow">Git isolation</div>
+          <h1 data-i18n="workspaces.title">Managed worktrees</h1>
+          <p class="page-lead" data-i18n="workspaces.lead">Read directly from Auto-Orchestrator worktree manifests. The console never merges, cleans or deletes a branch.</p>
         </div>
       </div>
       <div class="notice notice-warn">
         <svg class="icon"><use href="#i-alert"/></svg>
-        <div><strong>Preview only.</strong> A clean worktree is not a tested merge. Integration still requires the main agent's review and tests.</div>
+        <div><strong data-i18n="workspaces.previewTitle">Preview only. </strong><span data-i18n="workspaces.previewBody">A clean worktree is not a tested merge. Integration still requires the main agent’s review and tests.</span></div>
       </div>
       <div id="workspaces" class="workspace-grid"></div>
     </section>
 
-    <section id="view-method" class="view hidden" role="tabpanel" aria-label="Method">
+    <section id="view-method" class="view hidden" role="tabpanel" aria-labelledby="tab-method">
       <div class="page-head">
         <div>
-          <div class="eyebrow">What the console can and cannot prove</div>
-          <h1>Method</h1>
-          <p class="page-lead">This is an evidence viewer, not a control plane. It shows recorded facts, separates claims from attestations, and refuses to turn overlap into a time-saving claim.</p>
+          <div class="eyebrow" data-i18n="method.eyebrow">What the console can and cannot prove</div>
+          <h1 data-i18n="method.title">Method</h1>
+          <p class="page-lead" data-i18n="method.lead">This is an evidence viewer, not a control plane. It shows recorded facts, separates claims from attestations, and refuses to turn overlap into a time-saving claim.</p>
         </div>
       </div>
 
       <div class="method-grid">
         <article class="method-card">
-          <div class="eyebrow">Inputs</div>
-          <h2>Three local sources</h2>
+          <div class="eyebrow" data-i18n="method.inputs.eyebrow">Inputs</div>
+          <h2 data-i18n="method.inputs.title">Three local sources</h2>
           <ul class="method-list">
-            <li><strong>Run JSONL</strong> in <code>.auto-orchestrator/runs/</code> — lifecycle events, opaque agent IDs and native tool spans.</li>
-            <li><strong>Supervisor SQLite</strong> in <code>.auto-orchestrator/supervisor.sqlite3</code> — durable task states, dependencies, scopes, attempts and review attestations.</li>
-            <li><strong>Worktree manifests</strong> in <code>.git/auto-orchestrator/worktrees/</code> — branch, base commit and workspace path.</li>
+            <li data-i18n="method.inputs.runLog">Run JSONL in .auto-orchestrator/runs/ — lifecycle events, opaque agent IDs and native tool spans.</li>
+            <li data-i18n="method.inputs.supervisor">Supervisor SQLite in .auto-orchestrator/supervisor.sqlite3 — durable task states, dependencies, scopes, attempts and review attestations.</li>
+            <li data-i18n="method.inputs.worktree">Worktree manifests in .git/auto-orchestrator/worktrees/ — branch, base commit and workspace path.</li>
           </ul>
-          <p class="method-note">No external font, script, analytics or network call is used. The server binds to <code>127.0.0.1</code> and rejects writes.</p>
+          <p class="method-note" data-i18n="method.inputs.note">No external font, script, analytics or network call is used. The server binds to 127.0.0.1 and rejects writes.</p>
         </article>
 
         <article class="method-card">
-          <div class="eyebrow">Status semantics</div>
-          <h2>Four different truths</h2>
+          <div class="eyebrow" data-i18n="method.status.eyebrow">Status semantics</div>
+          <h2 data-i18n="method.status.title">Four different truths</h2>
           <dl class="def-list">
-            <div><dt><span class="dot dot-verified"></span>Gate verified</dt><dd>A quality-gate event was re-checked against the current verification policy and its check IDs matched. This is evidence about the configured checks, not proof of full correctness.</dd></div>
-            <div><dt><span class="dot dot-claimed"></span>Self-reported</dt><dd>A terminal record carries a verification flag without gate attestation. It is displayed as a claim, never counted in the verified total.</dd></div>
-            <div><dt><span class="dot dot-open"></span>Open / no terminal</dt><dd>No finish event was recorded. Open agent spans are shown with dashed ends; the console does not pretend the process is still alive.</dd></div>
-            <div><dt><span class="dot dot-failed"></span>Failed / rejected</dt><dd>The terminal status is failed or cancelled, or verification evidence was stale, duplicated or incomplete.</dd></div>
+            <div><dt><span class="dot dot-verified"></span><span data-i18n="method.status.verified">Gate verified</span></dt><dd data-i18n="method.status.verifiedBody">A quality-gate event was re-checked against the current verification policy and its check IDs matched. This is evidence about the configured checks, not proof of full correctness.</dd></div>
+            <div><dt><span class="dot dot-claimed"></span><span data-i18n="method.status.claimed">Self-reported</span></dt><dd data-i18n="method.status.claimedBody">A terminal record carries a verification flag without gate attestation. It is displayed as a claim, never counted in the verified total.</dd></div>
+            <div><dt><span class="dot dot-open"></span><span data-i18n="method.status.open">Open / no terminal</span></dt><dd data-i18n="method.status.openBody">No finish event was recorded. Open agent spans are shown with dashed ends; the console does not pretend the process is still alive.</dd></div>
+            <div><dt><span class="dot dot-failed"></span><span data-i18n="method.status.failed">Failed / rejected</span></dt><dd data-i18n="method.status.failedBody">The terminal status is failed or cancelled, or verification evidence was stale, duplicated or incomplete.</dd></div>
           </dl>
         </article>
 
         <article class="method-card">
-          <div class="eyebrow">Arithmetic</div>
-          <h2>Overlap is not saved time</h2>
-          <p>The timeline shows the union of observed native tool spans. Two overlapping spans increase <em>observed overlap</em>; they do not establish that a serial run would have taken longer.</p>
-          <p class="formula">estimated overlap = Σ agent wall time − run wall time</p>
-          <p class="method-note">A positive value is a scheduling indicator, qualified by the CLI as <strong>not benchmarked human time saved</strong>. Only matched serial/orchestrated repeats produce a speedup claim.</p>
+          <div class="eyebrow" data-i18n="method.office.eyebrow">Agent office</div>
+          <h2 data-i18n="method.office.title">Desks are evidence, not theatre</h2>
+          <p data-i18n="method.office.body">A desk exists only for a registered agent definition. Its status comes from explicit bindings, native spans, run terminals and quality-gate evidence. An unbound native session becomes a ghost desk with no invented name or role.</p>
+          <p class="method-note" data-i18n="method.office.note">Open spans are shown with a start-observed / stop-missing warning. They are never presented as proof of liveness, and the console renders no simulated terminal.</p>
         </article>
 
         <article class="method-card">
-          <div class="eyebrow">Delegation</div>
-          <h2>Advice is advisory</h2>
-          <p>The Router may recommend <code>single</code> or <code>consider-parallel</code> with a cap of 2–3 agents. The console compares that advice with the native starts actually observed.</p>
-          <p class="method-note">“Followed” is a routing observation, not proof of independent work, correctness or efficiency.</p>
+          <div class="eyebrow" data-i18n="method.math.eyebrow">Arithmetic</div>
+          <h2 data-i18n="method.math.title">Overlap is not saved time</h2>
+          <p data-i18n="method.math.body">The timeline shows the union of observed native tool spans. Two overlapping spans increase observed overlap; they do not establish that a serial run would have taken longer.</p>
+          <p class="formula" data-i18n="method.math.formula">estimated overlap = Σ agent wall time − run wall time</p>
+          <p class="method-note" data-i18n="method.math.note">A positive value is a scheduling indicator, qualified by the CLI as not benchmarked human time saved. Only matched serial/orchestrated repeats produce a speedup claim.</p>
         </article>
 
         <article class="method-card">
-          <div class="eyebrow">Cost</div>
-          <h2>No invented cost</h2>
-          <p>The current evidence schema has no token or price field. This console therefore shows <strong>zero cost figures</strong>. Adding cost later requires an explicit, reviewable input per platform and model; subscription and usage-based plans must not be mixed silently.</p>
-          <p class="method-note">The honest product metric remains: verified successful tasks per unit of measured cost, with unknown cost shown as unknown.</p>
+          <div class="eyebrow" data-i18n="method.delegation.eyebrow">Delegation</div>
+          <h2 data-i18n="method.delegation.title">Advice is advisory</h2>
+          <p data-i18n="method.delegation.body">The Router may recommend single or consider-parallel with a cap of 2–3 agents. The console compares that advice with the native starts actually observed.</p>
+          <p class="method-note" data-i18n="method.delegation.note">“Followed” is a routing observation, not proof of independent work, correctness or efficiency.</p>
         </article>
 
         <article class="method-card">
-          <div class="eyebrow">Security</div>
-          <h2>Read-only by construction</h2>
+          <div class="eyebrow" data-i18n="method.cost.eyebrow">Cost</div>
+          <h2 data-i18n="method.cost.title">No invented cost</h2>
+          <p data-i18n="method.cost.body">The current evidence schema has no token or price field. This console therefore shows zero cost figures. Adding cost later requires an explicit, reviewable input per platform and model; subscription and usage-based plans must not be mixed silently.</p>
+          <p class="method-note" data-i18n="method.cost.note">The honest product metric remains: verified successful tasks per unit of measured cost, with unknown cost shown as unknown.</p>
+        </article>
+
+        <article class="method-card">
+          <div class="eyebrow" data-i18n="method.security.eyebrow">Security</div>
+          <h2 data-i18n="method.security.title">Read-only by construction</h2>
           <ul class="method-list">
-            <li>Only <code>GET</code> is accepted; writes return <code>405</code>.</li>
-            <li>Run IDs are validated; symlinked logs and assets are rejected.</li>
-            <li>Supervisor leases and raw native IDs are never serialized to the browser.</li>
-            <li>Content is local-only; the UI has no external dependencies or telemetry.</li>
+            <li data-i18n="method.security.onlyGet">Only GET is accepted; writes return 405.</li>
+            <li data-i18n="method.security.ids">Run IDs are validated; symlinked logs and assets are rejected.</li>
+            <li data-i18n="method.security.leases">Supervisor leases and raw native IDs are never serialized to the browser.</li>
+            <li data-i18n="method.security.local">Content is local-only; the UI has no external dependencies or telemetry.</li>
           </ul>
         </article>
       </div>
 
+      <div class="method-scope">
+        <div class="eyebrow" data-i18n="method.scope.eyebrow">Scope</div>
+        <p data-i18n="method.scoped.note">Project-scoped screens read only from /api/projects/&lt;project_id&gt;/state and /api/projects/&lt;project_id&gt;/runs/&lt;run_id&gt;. Switching projects clears the previous run list before new evidence arrives.</p>
+      </div>
+
       <div class="method-commands">
-        <div class="eyebrow">Commands</div>
-        <h2>Open the console</h2>
+        <div class="eyebrow" data-i18n="method.commands.eyebrow">Commands</div>
+        <h2 data-i18n="method.commands.title">Open the console</h2>
         <pre><code>python tools/dashboard.py --root . --open
 python tools/dashboard.py --demo --open
 python tools/perf.py --root . audit --json</code></pre>
-        <p class="method-note">Use <code>--demo</code> for a clearly labelled synthetic dataset. Demo never writes to disk and never counts as a benchmark.</p>
+        <p class="method-note" data-i18n="method.commands.note">Use --demo for a clearly labelled synthetic dataset. Demo never writes to disk and never counts as a benchmark.</p>
       </div>
     </section>
   </main>
 
+  <div id="settings" class="settings-popover" hidden role="dialog" aria-modal="true" aria-labelledby="settings-title">
+    <div class="settings-card">
+      <div class="settings-head">
+        <h2 id="settings-title" data-i18n="settings.title">Settings</h2>
+        <button id="settings-close" class="icon-btn" type="button" aria-label="Close settings" data-i18n-aria-label="settings.close">
+          <span class="close-glyph" aria-hidden="true">×</span>
+        </button>
+      </div>
+      <label class="settings-row" for="set-language">
+        <span class="settings-label" data-i18n="settings.language">Language</span>
+        <span class="select-shell compact">
+          <select id="set-language" class="compact-select">
+            <option value="en">English</option>
+            <option value="tr">Türkçe</option>
+          </select>
+          <svg class="icon select-chevron" aria-hidden="true"><use href="#i-chevron"/></svg>
+        </span>
+      </label>
+      <label class="settings-row" for="set-appearance">
+        <span class="settings-label" data-i18n="settings.appearance">Interface</span>
+        <span class="select-shell compact">
+          <select id="set-appearance" class="compact-select">
+            <option value="dark" data-i18n="settings.dark">Dark</option>
+            <option value="light" data-i18n="settings.light">Light</option>
+          </select>
+          <svg class="icon select-chevron" aria-hidden="true"><use href="#i-chevron"/></svg>
+        </span>
+      </label>
+      <label class="settings-row" for="set-office-theme">
+        <span class="settings-label" data-i18n="settings.officeTheme">Office theme</span>
+        <span class="select-shell compact">
+          <select id="set-office-theme" class="compact-select">
+            <option value="ai" data-i18n="office.theme.ai">Research lab</option>
+            <option value="security" data-i18n="office.theme.security">Security operations</option>
+            <option value="web" data-i18n="office.theme.web">Development studio</option>
+            <option value="custom" data-i18n="office.theme.custom">Custom room</option>
+          </select>
+          <svg class="icon select-chevron" aria-hidden="true"><use href="#i-chevron"/></svg>
+        </span>
+      </label>
+      <p id="settings-office-hint" class="settings-hint" data-i18n="settings.officeThemeProjectOnly">Select a project to change its room theme.</p>
+      <label class="settings-row settings-check" for="set-reduced-motion">
+        <span>
+          <span class="settings-label" data-i18n="settings.reducedMotion">Reduce motion</span>
+          <span class="settings-hint" data-i18n="settings.reducedMotionHint">Stops monitor glow, typing and bobbing animations. System preference is respected by default.</span>
+        </span>
+        <input id="set-reduced-motion" type="checkbox">
+      </label>
+      <p class="settings-note" data-i18n="settings.languageHint">Technical event names remain in English.</p>
+      <p class="settings-note settings-saved" data-i18n="settings.saved">Saved in this browser.</p>
+    </div>
+  </div>
+
+  <div id="inspector-shell" class="inspector-shell" hidden>
+    <div class="inspector-backdrop" data-inspector-close="true"></div>
+    <aside id="agent-inspector" class="inspector" role="dialog" aria-modal="true" aria-labelledby="inspector-title" tabindex="-1">
+      <div class="inspector-inner">
+        <nav id="inspector-pinned" class="inspector-pinned" aria-label="Agents in this office" data-i18n-aria-label="inspector.pinned"></nav>
+        <div id="inspector-content" class="inspector-content"></div>
+      </div>
+    </aside>
+  </div>
+
+  <div id="screen-reader-status" class="sr-only" role="status" aria-live="polite"></div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <div id="tooltip" class="tooltip" role="tooltip"></div>
+  <script src="/assets/i18n.js" defer></script>
+  <script src="/assets/office.js" defer></script>
   <script src="/assets/app.js" defer></script>
 </body>
 </html>
