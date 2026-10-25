@@ -161,7 +161,9 @@ class RunnerExecutionTests(unittest.TestCase):
         self.assertTrue((self.root / ".auto-orchestrator" / "handoffs").is_dir())
         evidence = list((self.root / ".auto-orchestrator" / "evidence" / "runner-test").glob("*.json"))
         self.assertGreater(len(evidence), 0)
-        state = TeamworkEngine(self.root).status("runner-test")
+        inspect = TeamworkEngine(self.root)
+        self.addCleanup(inspect.close)
+        state = inspect.status("runner-test")
         self.assertTrue(state["complete"])
         self.assertEqual(len(state["managed_sessions"]), 3)
         self.assertTrue(all(item["status"] == "completed"
@@ -174,7 +176,9 @@ class RunnerExecutionTests(unittest.TestCase):
         self.addCleanup(runner.close)
         summary = runner.run()
         self.assertEqual(summary["status"], "failed", summary)
-        state = TeamworkEngine(self.root).status("scope-test")
+        inspect = TeamworkEngine(self.root)
+        self.addCleanup(inspect.close)
+        state = inspect.status("scope-test")
         backend = next(task for task in state["tasks"] if task["id"] == "backend")
         self.assertEqual(backend["state"], "failed")
         self.assertIn("outside its write scope", backend["reason"])
@@ -186,7 +190,9 @@ class RunnerExecutionTests(unittest.TestCase):
         self.addCleanup(runner.close)
         summary = runner.run()
         self.assertEqual(summary["status"], "passed", summary)
-        state = TeamworkEngine(self.root).status("repair-test")
+        inspect = TeamworkEngine(self.root)
+        self.addCleanup(inspect.close)
+        state = inspect.status("repair-test")
         milestone = state["milestones"][0]
         self.assertGreaterEqual(milestone["repair_iterations"], 1)
         backend_starts = [item for item in adapter.started if item["task_id"] == "backend"]
