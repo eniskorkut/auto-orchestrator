@@ -98,6 +98,8 @@ def main(argv=None) -> int:
         _answer(project, resumed_question, "refresh", platform="opencode")
         final_summary = _summary(project, started["interview"]["interview_id"],
                                  platform="opencode")
+        approved = _run(project, "grill", "approve", "--interview-id",
+                        started["interview"]["interview_id"], platform="opencode")
         context = _run(project, "context", platform="opencode")
         report["cross_ide_grill"] = {
             "codex_first_question": first["question_key"],
@@ -106,6 +108,7 @@ def main(argv=None) -> int:
             "opencode_resumed_question": resumed_question["question_key"]
             if resumed_question else None,
             "opencode_ready_after_resume": final_summary["ready"],
+            "opencode_approved": approved.get("approved", False),
             "opencode_confirmed_decisions": len(context["decisions"]),
             "project_id_same": context["identity"]["project_id"]
             == ensure_project_identity(project)["project_id"],

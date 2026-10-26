@@ -117,7 +117,8 @@ Deterministic CLI E2E (`tools/v76_memory_e2e.py`):
 
 - Codex starts an auth interview and answers the session question.
 - OpenCode resumes the same interview, gets the dependent JWT question, answers
-  it and reaches ready; the origin platform remains `codex`.
+  it, approves the interview and reaches ready; the origin platform remains
+  `codex`.
 - Ambiguous multi-user file sharing asks `file_access` before any Teamwork plan
   exists; no decision is confirmed before the user answer.
 - A repository containing JWT/PostgreSQL facts suppresses those questions and

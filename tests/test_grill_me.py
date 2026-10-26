@@ -88,6 +88,9 @@ class GrillMeTests(unittest.TestCase):
             self.assertEqual(resumed["interview"]["origin_platform"], "codex")
             self.assertEqual(resumed["question"]["question_key"], "jwt_refresh")
             self.assertEqual(resumed["interview"]["status"], "open")
+            answered = opencode.answer(resumed["question"]["question_id"], option="refresh")
+            self.assertIsNone(answered["next"])
+            self.assertTrue(opencode.approve()["approved"])
 
     def test_off_blocks_critical_and_required_forces_scope(self):
         with GrillMeEngine(self.root) as engine:

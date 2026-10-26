@@ -7,6 +7,7 @@
     "codex_ready": false,
     "opencode_resumed_question": "jwt_refresh",
     "opencode_ready_after_resume": true,
+    "opencode_approved": true,
     "opencode_confirmed_decisions": 2,
     "project_id_same": true
   },
