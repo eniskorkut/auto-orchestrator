@@ -269,7 +269,7 @@ class RunnerExecutionTests(unittest.TestCase):
                          "VALUE = 2\n")
 
     def test_two_independent_worktrees_run_concurrently(self):
-        adapter = DelayedFakeAdapter(duration=0.7)
+        adapter = DelayedFakeAdapter(duration=3.0)
         runner = TeamworkRunner(self.root, parallel_plan("parallel-test"),
                                 adapter=adapter, max_seconds=20)
         self.addCleanup(runner.close)
@@ -277,11 +277,12 @@ class RunnerExecutionTests(unittest.TestCase):
         summary = runner.run()
         elapsed = time.monotonic() - started
         self.assertEqual(summary["status"], "passed", summary)
-        self.assertLess(elapsed, 1.7, "two 0.7s tasks should overlap, not serialize")
+        self.assertLess(elapsed, 5.5, "two 3s tasks should not take a full serial budget")
         self.assertGreaterEqual(adapter.max_active, 2, "both managed tasks were active together")
         self.assertLess(abs(adapter.start_times["backend"] - adapter.start_times["frontend"]),
                         0.4)
-        self.assertLess(adapter.start_times["frontend"], adapter.end_times["backend"])
+        overlap = min(adapter.end_times.values()) - max(adapter.start_times.values())
+        self.assertGreater(overlap, 0.5, "task execution intervals must overlap")
         self.assertEqual(summary["timings"]["backend"]["cost"], 0.001)
 
     def test_cancel_flag_stops_locally_without_native_ack(self):
