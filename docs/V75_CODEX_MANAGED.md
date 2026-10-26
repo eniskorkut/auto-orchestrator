@@ -73,6 +73,9 @@ These are distinct and must not be conflated:
   `resume_live_verified` is false in the evidence.
 - Write mode, approval bridging and danger-full-access are not live-tested and
   are rejected by the Teamwork Codex adapter.
+- Local runtime/session evidence contains raw Codex thread IDs and event paths;
+  the committed asset deliberately hashes IDs and omits paths. Raw IDs are not
+  published.
 - Codex app-server approval requests are not interactively bridged in Teamwork;
   read-only tasks explicitly use `approvalPolicy: never`.
 - Codex write-mode Teamwork integration is not part of this smoke.
