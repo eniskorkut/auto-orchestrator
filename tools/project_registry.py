@@ -61,16 +61,17 @@ PROJECT_ID = re.compile(r"^p_[0-9a-f]{16}$")
 
 
 def _manifest_project_id(root: Path) -> str | None:
-    """Read a portable project id without creating or mutating state."""
+    """Read a validated portable project id without mutating state."""
     try:
-        path = Path(root) / ".auto-orchestrator" / "project.json"
-        if path.is_symlink() or not path.is_file() or path.stat().st_size > 16_384:
-            return None
-        value = json.loads(path.read_text(encoding="utf-8"))
-        candidate = value.get("project_id") if isinstance(value, dict) else None
-        return candidate if isinstance(candidate, str) and PROJECT_ID.fullmatch(candidate) else None
-    except (OSError, ValueError):
+        from tools.project_identity import ProjectIdentityError, read_project_identity
+    except ModuleNotFoundError:  # installed flat next to this module
+        from project_identity import ProjectIdentityError, read_project_identity  # type: ignore
+    try:
+        identity = read_project_identity(root)
+    except (ProjectIdentityError, OSError, ValueError):
         return None
+    candidate = identity.get("project_id") if identity else None
+    return candidate if isinstance(candidate, str) and PROJECT_ID.fullmatch(candidate) else None
 AGENT_ID = re.compile(r"^a_[0-9a-f]{12}$")
 NATIVE_HASH = re.compile(r"^[0-9a-f]{64}$")
 COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")

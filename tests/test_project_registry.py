@@ -100,6 +100,35 @@ class RegistryProjectTests(RegistryTestCase):
         with self.assertRaisesRegex(RegistryError, "Duplicate canonical"):
             self.registry.load()
 
+    def test_portable_manifest_keeps_project_id_after_relocation(self):
+        from tools.project_identity import ensure_project_identity
+        source = self.make_dir("portable")
+        original = ensure_project_identity(source)
+        project, created = self.registry.add(source, name="Portable")
+        self.assertTrue(created)
+        self.assertEqual(project["project_id"], original["project_id"])
+        moved = self.base / "portable-moved"
+        import shutil
+        shutil.copytree(source, moved)
+        relocated, created_again = self.registry.add(moved, name="Portable")
+        self.assertFalse(created_again)
+        self.assertEqual(relocated["project_id"], original["project_id"])
+        self.assertEqual(relocated["root"], str(canonical_root(moved)))
+        self.assertEqual(len(self.registry.projects()), 1)
+
+    def test_invalid_portable_manifest_is_not_trusted(self):
+        root = self.make_dir("broken")
+        path = root / ".auto-orchestrator" / "project.json"
+        path.parent.mkdir()
+        path.write_text(json.dumps({
+            "version": 1, "project_id": "p_" + "b" * 16,
+            "project_uuid": "00000000-0000-4000-8000-000000000000",
+        }))
+        project, created = self.registry.add(root, name="Broken")
+        self.assertTrue(created)
+        self.assertNotEqual(project["project_id"], "p_" + "b" * 16)
+        self.assertEqual(project["project_id"], project_id_for(canonical_root(root)))
+
     def test_project_id_collision_between_distinct_roots_fails(self):
         project, _ = self.add_project()
         second = self.make_dir("beta")
