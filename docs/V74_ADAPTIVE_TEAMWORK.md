@@ -187,12 +187,13 @@ model latency were not normalized.
   `local_signal_only: true`.
 - Unit tests cover an orphaned running task, duplicate prevention, cancellation,
   and restart state reload.
-- A real restart smoke killed the runner while `build-backend` was running.
-  `resume --recover` marked the attempt orphaned, started a new managed attempt
-  and did not duplicate the completed build task. The quick generic request then
-  failed product verification (the generated backend lacked the requested
-  endpoint), so the smoke proves reconciliation/duplicate handling but **not** a
-  fully successful product continuation. This is recorded as a gap, not a pass.
+- The V7.4 restart smoke killed the runner while `build-backend` was running.
+  It proved orphan reconciliation and duplicate protection, but the product
+  verification failed. V7.4.1 fixes the root causes (missing child identity,
+  stale repair sessions and missing browser environment) and records a full
+  crash-recovery pass with backend and browser E2E: see
+  [V741_RELIABILITY.md](V741_RELIABILITY.md). The V7.4 failure remains historical
+  evidence, not a success.
 
 ## 6. Virtual Office and dashboard
 

@@ -1,4 +1,4 @@
-# Auto-Orchestrator — Native Multi-Agent Coordination (V7.4)
+# Auto-Orchestrator — Native Multi-Agent Coordination (V7.4.1)
 
 Portable, opt-in native-subagent coordination for **OpenCode**, **Codex**, **Cursor**, and **Google Antigravity**. Platform-native runtime capabilities and proof strength differ.
 
@@ -296,6 +296,31 @@ adds a small, conservative long-tail domain ontology and
 skill selection rates. None of this proves live IDE reliability or speedup
 until matched native runs are repeated. See
 [execution reliability](docs/V64_RELIABILITY.md).
+
+## V7.4.1 — Recovery, ownership and secure chat input
+
+V7.4.1 hardens the V7.4 teamwork engine for interrupted, long-running work.
+
+- **Crash recovery full pass:** a real two-implementer OpenCode run was killed
+  while both children were alive; the bridge resumed, verified owned orphans,
+  preserved worktrees, repaired once and finished with 14 backend tests plus
+  browser E2E. Evidence: [recovery E2E](docs/assets/v741-recovery-e2e.json).
+- **Owned process identity:** PID + start token + UID/time, advisory project
+  locks, atomic active state, heartbeat and fail-closed stale-owner handling.
+- **Recovery states:** `active`, `runner_disconnected`, `reconciling`,
+  `orphaned`, `retry_ready`, `resuming`, `verifying`, `recovered`,
+  `recovery_failed`; no native cancel ACK is claimed.
+- **Secure single-chat input:** `/teamwork` writes the untrusted request to a
+  validated UTF-8 file and passes `--request-file`; it never interpolates user
+  text into a shell command. A real injection-shaped request preserved its
+  text, created no marker and was cancelled locally.
+- **Adaptive safety:** explicit FAST is upgraded for security, migration and
+  breaking-API work; repository test commands are detected from manifests;
+  handoffs include next tasks.
+- **Honest efficiency:** on a tiny health-endpoint task serial was faster and
+  cheaper than FAST; no speed-saving claim is made.
+
+See [V7.4.1 reliability and security evidence](docs/V741_RELIABILITY.md).
 
 ## V7.4 — Adaptive teamwork and true parallel execution
 

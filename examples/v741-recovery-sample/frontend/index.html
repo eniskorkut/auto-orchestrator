@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Task Manager</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="app__header">
+        <h1 class="app__title">Tasks</h1>
+        <p class="app__subtitle">A small in-memory task manager.</p>
+      </header>
+
+      <form id="task-form" class="task-form" novalidate>
+        <label class="visually-hidden" for="task-title">Task title</label>
+        <input
+          id="task-title"
+          class="task-form__input"
+          name="title"
+          type="text"
+          maxlength="80"
+          placeholder="What needs doing?"
+          autocomplete="off"
+          required
+        />
+        <button class="task-form__submit" type="submit">Add task</button>
+      </form>
+
+      <p id="task-error" class="task-error" role="alert" hidden></p>
+
+      <p id="task-empty" class="task-empty" hidden>
+        No tasks yet. Add your first one above.
+      </p>
+
+      <ul id="task-list" class="task-list" aria-label="Tasks"></ul>
+    </main>
+
+    <script src="/config.js"></script>
+    <script src="/app.js"></script>
+  </body>
+</html>

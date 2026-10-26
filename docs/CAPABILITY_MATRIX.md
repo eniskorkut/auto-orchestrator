@@ -69,14 +69,16 @@ as `managed_execution` by `python tools/capabilities.py show --json`.
 
 | Platform | Managed status | Live smoke | Cancel ACK | Resume | Terminal |
 |---|---|---|---|---|---|
-| OpenCode | `live-verified-local` (`opencode run --format json`) | yes, local 2.1.1 | **false** (local process signal only) | yes (`--session`) | no |
+| OpenCode | `live-verified-local` (`opencode run --format json`); V7.4.1 owner-verified crash recovery | yes, local 2.1.1 | **false** (local process signal only) | yes (`--session`) | no |
 | Codex | `contract-only` (`codex app-server` JSON-RPC) | no binary locally | false | contract only | no |
 | Antigravity | `not-implemented` | no | false | no | no |
 | Cursor | `not-implemented` | no | false | no | no |
 
 The OpenCode adapter records session id, sanitized tool activity, usage/cost,
-resume and completion from the real CLI stream. It does **not** claim native
-cancellation acknowledgement, background-stop proof or a terminal. The Codex
+resume and completion from the real CLI stream. V7.4.1 additionally records the
+child PID and process start token for recovery; only an identity-verified owned
+process may be signalled. It does **not** claim native cancellation
+acknowledgement, background-stop proof or a terminal. The Codex
 adapter is tested against a fake app-server only until a real binary is
 available. Antigravity and Cursor have no external managed-session integration
 in this version.

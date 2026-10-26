@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "kind": "v741-small-task-efficiency",
+  "task": "Add a backend GET /health endpoint with a unit test",
+  "environment": {
+    "platform": "macOS arm64",
+    "model": "opencode-go/deepseek-v4.1-flash",
+    "opencode": "local CLI",
+    "cache": "warm, not normalized"
+  },
+  "conditions": [
+    {
+      "label": "serial single agent",
+      "source": "docs/assets/v741-small-serial.json",
+      "wall_time_seconds": 28.391,
+      "cost_usd": 0.005785068,
+      "sessions": 1,
+      "repairs": 0,
+      "verified": true,
+      "tests": 1,
+      "note": "one real agent; one test suite"
+    },
+    {
+      "label": "FAST single-chat bridge",
+      "source": "docs/assets/v74-chat-bridge-e2e.json",
+      "wall_time_seconds": 62.264,
+      "cost_usd": 0.023094,
+      "sessions": 4,
+      "repairs": 2,
+      "verified": true,
+      "tests": null,
+      "note": "4 managed attempts; test count not recorded in V7.4 evidence"
+    }
+  ],
+  "comparison": {
+    "wall_time_difference_seconds": -33.873,
+    "cost_difference_usd": -0.017309,
+    "serial_faster": true,
+    "serial_cheaper": true,
+    "quality_equivalent": false,
+    "reason": "Different verification depth and test accounting; the FAST run spent two repairs on a tiny task. No time-saving claim is made."
+  },
+  "limitations": [
+    "Single sample per condition.",
+    "Not a 3-task x 3-mode matrix.",
+    "Provider cache and model latency were not normalized."
+  ]
+}

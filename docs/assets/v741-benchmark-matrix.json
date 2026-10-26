@@ -1,0 +1,95 @@
+{
+  "schema_version": 1,
+  "kind": "v741-benchmark-matrix",
+  "complete": false,
+  "note": "Only measured cells are populated. Missing cells are explicitly not run; they are not zeros and are not quality-equivalent.",
+  "environment": {
+    "platform": "macOS arm64",
+    "model": "opencode-go/deepseek-v4.1-flash",
+    "cache": "warm, not normalized"
+  },
+  "task_types": [
+    {
+      "id": "small-bugfix",
+      "description": "Backend GET /health + unit test",
+      "conditions": {
+        "serial": {
+          "status": "measured",
+          "wall_time_seconds": 28.391,
+          "cost_usd": 0.005785,
+          "source": "docs/assets/v741-small-serial.json",
+          "verified": true
+        },
+        "fast": {
+          "status": "measured",
+          "wall_time_seconds": 62.264,
+          "cost_usd": 0.023094,
+          "source": "docs/assets/v74-chat-bridge-e2e.json",
+          "verified": true
+        },
+        "balanced": {
+          "status": "not-run"
+        },
+        "rigorous": {
+          "status": "not-run"
+        }
+      }
+    },
+    {
+      "id": "medium-full-stack",
+      "description": "Task manager backend/frontend + browser E2E",
+      "conditions": {
+        "serial": {
+          "status": "measured",
+          "wall_time_seconds": 180.818,
+          "cost_usd": 0.022226,
+          "source": "docs/assets/v74-benchmark.json",
+          "verified": true
+        },
+        "fast": {
+          "status": "measured",
+          "wall_time_seconds": 247.846,
+          "cost_usd": 0.05279,
+          "source": "docs/assets/v74-benchmark.json",
+          "verified": true,
+          "note": "normal V7.4 FAST; V7.4.1 recovery FAST was 212.474 s and is not a clean comparison"
+        },
+        "balanced": {
+          "status": "measured",
+          "wall_time_seconds": 1566.142,
+          "cost_usd": 0.140372,
+          "source": "docs/assets/v74-benchmark.json",
+          "verified": true,
+          "note": "V7.3 balanced baseline, not V7.4.1 balanced"
+        },
+        "rigorous": {
+          "status": "not-run"
+        }
+      }
+    },
+    {
+      "id": "larger-modular",
+      "description": "Multiple independent modules",
+      "conditions": {
+        "serial": {
+          "status": "not-run"
+        },
+        "fast": {
+          "status": "not-run"
+        },
+        "balanced": {
+          "status": "not-run"
+        },
+        "rigorous": {
+          "status": "not-run"
+        }
+      }
+    }
+  ],
+  "limitations": [
+    "Single samples; no repetition or confidence interval.",
+    "FAST/RIGOROUS verification depth differs.",
+    "Provider cache and model latency were not normalized.",
+    "The medium balanced cell is a V7.3 baseline."
+  ]
+}

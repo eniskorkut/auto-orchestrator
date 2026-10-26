@@ -189,8 +189,11 @@ The API exposes a short session hash and task/provider/model/cost metadata, not
 raw managed session ids or event paths. Progress counts only passed milestones;
 `estimated_progress` is always `null`. V7.4 adds `work_mode`, `risk_assessment`,
 `usage` and `scheduler` fields for FAST/BALANCED/RIGOROUS, active session count,
-queue depth and measured cost. See [V73_TEAMWORK.md](V73_TEAMWORK.md) and
-[V74_ADAPTIVE_TEAMWORK.md](V74_ADAPTIVE_TEAMWORK.md).
+queue depth and measured cost. V7.4.1 adds `recovery_state`,
+`owner_connected`, `orphaned_managed_sessions` and a recovery transition object;
+orphaned sessions are shown as orphaned, not as working. See
+[V73_TEAMWORK.md](V73_TEAMWORK.md), [V74_ADAPTIVE_TEAMWORK.md](V74_ADAPTIVE_TEAMWORK.md)
+and [V741_RELIABILITY.md](V741_RELIABILITY.md).
 
 ## Privacy and security model
 

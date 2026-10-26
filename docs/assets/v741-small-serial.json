@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "kind": "v741-small-task-serial-baseline",
+  "label": "serial-small-task",
+  "status": "passed",
+  "wall_time_seconds": 28.391,
+  "cost_usd": 0.005785068,
+  "tokens": {
+    "input": 28518,
+    "output": 1263,
+    "reasoning": 944,
+    "cache_read": 61056,
+    "cache_write": 0,
+    "cache": {
+      "read": 61056,
+      "write": 0
+    }
+  },
+  "tool_count": 10,
+  "session_status": "completed",
+  "tests": [
+    {
+      "command": "python3.11 -m unittest discover -s tests -q",
+      "exit_code": 0,
+      "duration_seconds": 0.603,
+      "output_tail": "----------------------------------------------------------------------\nRan 1 test in 0.509s\n\nOK\n"
+    }
+  ],
+  "verified": true,
+  "note": "One real single-agent run; not a repeated statistical benchmark."
+}

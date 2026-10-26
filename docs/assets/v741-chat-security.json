@@ -1,0 +1,110 @@
+{
+  "schema_version": 1,
+  "kind": "v741-single-chat-shell-security",
+  "run_id": "v741-chat-security",
+  "mode": "balanced",
+  "status": "cancelled",
+  "wall_time_seconds": 2.182,
+  "request": {
+    "sha256": "81235016a963d8982887e5b8fdfa825835b59676830efac2bf3dc93f88778a3d",
+    "characters": 394,
+    "preview": "Add a backend GET /health endpoint with a unit test.\nSecurity probe (must remain text, never execute): single=' double=\" backtick=`id` substitution=$(touch $MARKER) ; echo pwned\nMarkdown/JSON: ```json\n{\"note\": \"ĞüşiÖÇ — safe\"}\n```\nPath-like text: ../../etc/passwd and ; rm -rf / are inert.",
+    "preserved_in_plan": true
+  },
+  "shell_marker_created": false,
+  "owner_verified": true,
+  "owner_connected": true,
+  "status_transitions": [
+    "ready",
+    "running"
+  ],
+  "active_tasks_observed": [
+    {
+      "task_id": "build-backend",
+      "role": "implementer",
+      "status": "running",
+      "session_hash": "b0cb67d8f4b7"
+    }
+  ],
+  "cancel": {
+    "run_id": "v741-chat-security",
+    "status": "cancel_requested",
+    "owner_connected": true,
+    "local_signal_only": true,
+    "native_cancel_ack": false,
+    "note": "The runner signals only its owned child processes; no native ACK is claimed."
+  },
+  "final_status": {
+    "run_id": "v741-chat-security",
+    "mode": "balanced",
+    "status": "cancelled",
+    "engine_status": "failed",
+    "verified_progress": 0.0,
+    "estimated_progress": null,
+    "current_milestone": null,
+    "milestones": [
+      {
+        "id": "M1",
+        "objective": "Implement the requested change.",
+        "status": "failed",
+        "repair_iterations": 0,
+        "max_repair": 2,
+        "satisfied_roles": [],
+        "missing_roles": []
+      },
+      {
+        "id": "M2",
+        "objective": "Run targeted and regression verification.",
+        "status": "blocked",
+        "repair_iterations": 0,
+        "max_repair": 2,
+        "satisfied_roles": [],
+        "missing_roles": [
+          "tester"
+        ]
+      },
+      {
+        "id": "M3",
+        "objective": "Review risks and audit evidence.",
+        "status": "blocked",
+        "repair_iterations": 0,
+        "max_repair": 2,
+        "satisfied_roles": [],
+        "missing_roles": [
+          "reviewer",
+          "auditor"
+        ]
+      }
+    ],
+    "active_managed_sessions": 0,
+    "orphaned_managed_sessions": 0,
+    "active_tasks": [],
+    "orphaned_tasks": [],
+    "owner_connected": false,
+    "owner_process_alive": false,
+    "owner_verified": false,
+    "heartbeat_age_seconds": 2.125,
+    "recovery": {
+      "state": "recovery_failed",
+      "owner_connected": false,
+      "owner_verified": false,
+      "heartbeat_age_seconds": 2.125,
+      "last_transition": {
+        "version": 1,
+        "run_id": "v741-chat-security",
+        "state": "reconciling",
+        "updated_at": 1792992760.6043992,
+        "requested": "cancel",
+        "owner_connected": true
+      },
+      "local_signal_only": true,
+      "native_cancel_ack": false
+    },
+    "recovery_state": "recovery_failed",
+    "pid_alive": false,
+    "log": "$TMPDIR/opencode/v741-chat-security/.auto-orchestrator/teamwork/v741-chat-security.log"
+  },
+  "native_cancel_ack": false,
+  "local_signal_only": true,
+  "note": "Real bridge run with a validated request file. The request text was never inserted into a shell command. Cancellation is a local signal."
+}
