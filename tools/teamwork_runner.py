@@ -33,6 +33,7 @@ try:
     from tools.executor import Executor, ExecutorError, validate_acceptance
     from tools.managed_exec import ManagedError, adapter_for
     from tools.project_planner import load_plan, write_plan
+    from tools.scheduler import PollScheduler, SchedulerError
     from tools.teamwork import TeamworkEngine, TeamworkError
     from tools.telemetry import record_event, span
     from tools.worktree import WorktreeError, create as create_worktree, read_manifest
@@ -40,6 +41,7 @@ except ModuleNotFoundError:  # python tools/teamwork_runner.py
     from executor import Executor, ExecutorError, validate_acceptance  # type: ignore
     from managed_exec import ManagedError, adapter_for  # type: ignore
     from project_planner import load_plan, write_plan  # type: ignore
+    from scheduler import PollScheduler, SchedulerError  # type: ignore
     from teamwork import TeamworkEngine, TeamworkError  # type: ignore
     from telemetry import record_event, span  # type: ignore
     from worktree import WorktreeError, create as create_worktree, read_manifest  # type: ignore
@@ -147,6 +149,7 @@ class TeamworkRunner:
         repair_targets: dict[str, str] | None = None,
         on_task_complete: Callable[[str, dict], None] | None = None,
         on_before_verify: Callable[[str], None] | None = None,
+        recover_orphans: bool = False,
     ):
         self.root = Path(root).resolve()
         self.plan = plan
@@ -161,6 +164,9 @@ class TeamworkRunner:
         self.repair_targets = dict(repair_targets or {})
         self.on_task_complete = on_task_complete
         self.on_before_verify = on_before_verify
+        self.recover_on_start = bool(recover_orphans)
+        self.cancel_path = (self.root / ".auto-orchestrator" / "teamwork"
+                            / f"cancel-{self.run_id}.json")
         self.evidence_dir = self.root / ".auto-orchestrator" / "evidence" / self.run_id
         self.evidence_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.task_map = {task["id"]: task for task in plan.get("tasks", [])}
@@ -172,9 +178,15 @@ class TeamworkRunner:
         }
         self.timings: dict[str, dict] = {}
         self._active: dict[str, TaskRun] = {}
+        self._recovered: list[dict] = []
+        self._scheduler = PollScheduler(
+            max_workers=int(plan.get("max_parallel", 3)), poll_slice=0.25,
+        )
         self._integrated: set[str] = set()
+        self._context_cache: dict[str, str] = {}
 
     def close(self) -> None:
+        self._scheduler.close()
         self.engine.close()
         self.executor.close()
 
@@ -199,11 +211,15 @@ class TeamworkRunner:
                         *, error: str | None = None,
                         cancel_state: str | None = None) -> None:
         if not run.session_id:
-            return
+            # The provider may not emit sessionID until after process start.
+            # Record a pending identity so live status/UI can show the session.
+            session_id = f"pending:{run.task_id}:{run.attempt}"
+        else:
+            session_id = run.session_id
         try:
             self.engine.record_managed_session(
                 self.run_id, run.task_id, attempt=run.attempt,
-                provider=run.provider, session_id=run.session_id, status=status,
+                provider=run.provider, session_id=session_id, status=status,
                 started_at=run.started_at or None,
                 finished_at=_now() if status in ("completed", "failed", "cancelled") else None,
                 events_path=run.events_path, model=run.model,
@@ -217,6 +233,37 @@ class TeamworkRunner:
             pass
 
     # -- prompts ---------------------------------------------------------
+    def _handoff_context(self, milestone: dict) -> str:
+        key = milestone.get("id", "")
+        if key in self._context_cache:
+            return self._context_cache[key]
+        parts = []
+        try:
+            state = self.engine.status(self.run_id)
+        except TeamworkError:
+            state = {"milestones": []}
+        for item in state.get("milestones", []):
+            if item.get("id") == key or item.get("status") != "passed":
+                continue
+            path = item.get("handoff_path")
+            if not isinstance(path, str):
+                continue
+            try:
+                handoff = json.loads(Path(path).read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            summary = str(handoff.get("context_summary") or "")[:700]
+            issues = handoff.get("open_issues") if isinstance(handoff.get("open_issues"), list) else []
+            if summary:
+                parts.append(f"{item['id']}: {summary}")
+            if issues:
+                parts.append("Open issues: " + "; ".join(str(x)[:200] for x in issues[:5]))
+            if len("\n".join(parts)) > 1800:
+                break
+        text = "\n".join(parts)[:1800]
+        self._context_cache[key] = text
+        return text
+
     def _prompt(self, task: dict, milestone: dict, run: TaskRun,
                 repair_reason: str | None = None) -> str:
         role = task["role"]
@@ -224,6 +271,7 @@ class TeamworkRunner:
             "You are an Auto-Orchestrator managed teammate in an isolated repository.",
             f"Task id: {task['id']}",
             f"Milestone: {milestone.get('id')} — {milestone.get('objective')}",
+            f"Work mode: {self.plan.get('work_mode', 'legacy')}",
             f"Role: {role}",
             f"Objective: {task.get('objective')}",
             f"Acceptance criteria: {json.dumps(task.get('acceptance', []), ensure_ascii=False)}",
@@ -235,14 +283,19 @@ class TeamworkRunner:
             "do not change files outside your write scope; run the relevant tests; "
             "do not claim a command ran if it did not.",
         ]
+        prior = self._handoff_context(milestone)
+        if prior:
+            lines.append("Prior milestone handoff (bounded context):\n" + prior)
         if repair_reason:
             lines.append(f"Repair context: {repair_reason}")
         if role == "explorer":
             lines.append("Read-only discovery: inspect the repository, identify the API and frontend "
                          "boundaries, risks and test strategy. Do not edit files. End with a concise report.")
         elif role == "implementer":
-            lines.append("Implement the objective and add focused tests inside your write scope. "
-                         "Do not commit; the orchestrator commits and integrates your work.")
+            lines.append("Implement the objective. Add focused tests only when the tests "
+                         "directory is inside your declared write scope; otherwise leave tests "
+                         "to the separate tester task. Do not commit; the orchestrator commits "
+                         "and integrates your work.")
         elif role == "tester":
             lines.append("Run the repository tests and the browser E2E, reproduce any failure with exact "
                          "command output, and add missing verification tests only if needed. End with a "
@@ -378,7 +431,8 @@ class TeamworkRunner:
         sessions = self.engine.managed_sessions(self.run_id)
         previous = [item for item in sessions
                     if item.get("task_id") == task_id and item.get("attempt", 0) < attempt
-                    and item.get("session_id")]
+                    and isinstance(item.get("session_id"), str)
+                    and item["session_id"].startswith("ses_")]
         return previous[-1]["session_id"] if previous else None
 
     def _start_task(self, claimed: dict, milestone: dict,
@@ -405,7 +459,16 @@ class TeamworkRunner:
         run.session_id = handle.get("session_id")
         run.started_at = _now()
         run.events_path = handle.get("events_path")
+        if not run.session_id:
+            try:
+                first = adapter.poll(handle, timeout=0)
+                if isinstance(first, dict):
+                    self._absorb_state(run, first)
+            except Exception:
+                pass
         self._record_session(task, run, "running")
+        timeout = float(task.get("timeout_seconds", 900))
+        self._scheduler.submit(task["id"], handle, adapter.poll, timeout=timeout)
         with span("teamwork.task.start", run_id=self.run_id, task_id=task["id"],
                   milestone_id=milestone["id"], role=task["role"],
                   provider=run.provider, model=run.model, attempt_id=str(attempt),
@@ -413,19 +476,7 @@ class TeamworkRunner:
             record_event("teamwork.task.started", status="running")
         return run
 
-    def _poll_task(self, task: dict, run: TaskRun) -> dict:
-        adapter = self._adapter(task, run)
-        timeout = float(task.get("timeout_seconds", 900))
-        deadline = time.monotonic() + timeout
-        state = adapter.poll(run.handle, timeout=0)
-        while state.get("status") == "running" and time.monotonic() < deadline:
-            time.sleep(POLL_SECONDS)
-            state = adapter.poll(run.handle, timeout=0)
-        if state.get("status") == "running":
-            cancel = adapter.cancel(run.handle)
-            state = adapter.poll(run.handle, timeout=0)
-            state["status"] = "timed_out"
-            state["cancel"] = cancel
+    def _absorb_state(self, run: TaskRun, state: dict) -> dict:
         run.session_id = state.get("session_id") or run.session_id
         run.events_path = state.get("events_path") or run.events_path
         run.tool_count = int(state.get("tool_count") or 0)
@@ -550,6 +601,7 @@ class TeamworkRunner:
                 "provider": run.provider,
                 "session_id_hash": _short_hash(run.session_id or task["id"]),
                 "model": run.model, "cost": run.cost,
+                "tool_count": run.tool_count,
                 "tokens": run.tokens, "events_name":
                     (Path(run.events_path).name if run.events_path else None),
                 "native_cancel_ack": False,
@@ -696,6 +748,77 @@ class TeamworkRunner:
             self._integrated.discard(milestone["id"])
         return bool(opened)
 
+    def _cancel_requested(self) -> bool:
+        return self.cancel_path.is_file()
+
+    def _cancel_active(self) -> None:
+        for task_id, run in list(self._active.items()):
+            task = self.task_map.get(task_id, {})
+            try:
+                adapter = self._adapter(task, run)
+                cancel = adapter.cancel(run.handle)
+            except Exception:
+                cancel = {"requested": False, "terminated": False,
+                          "native_cancel_ack": False, "local_signal_only": True}
+            self._record_session(task, run, "cancelled",
+                                 error="Cancellation requested by user",
+                                 cancel_state="local-signal-only")
+            if run.claimed:
+                try:
+                    self.executor.fail(self.run_id, task_id, run.claimed.get("lease"),
+                                       "Cancellation requested by user; "
+                                       "local process signal only")
+                except (ExecutorError, ValueError):
+                    pass
+            self._write_evidence(task_id, run.attempt, {
+                "status": "cancelled", "cancel": cancel,
+                "native_cancel_ack": False, "local_signal_only": True,
+                "note": "No native cancellation acknowledgement is claimed.",
+            })
+            self._active.pop(task_id, None)
+
+    def recover_orphans(self) -> list[dict]:
+        """Reconcile running tasks left by a previous runner process.
+
+        This does not signal or claim termination of an external process. It
+        marks the task failed with an explicit orphan reason and records the
+        managed session as failed/orphaned.
+        """
+        rows = list(self.engine.supervisor.conn.execute(
+            "SELECT id,state,lease,attempts,max_retries FROM tasks "
+            "WHERE run_id=? AND state='running'", (self.run_id,)))
+        recovered = []
+        for row in rows:
+            task_id = row["id"]
+            sessions = [item for item in self.engine.managed_sessions(self.run_id)
+                        if item.get("task_id") == task_id]
+            latest = sessions[-1] if sessions else None
+            reason = ("Runner restarted; orphaned managed process is not "
+                      "reattached. No native cancellation acknowledgement.")
+            try:
+                self.executor.fail(self.run_id, task_id, row["lease"], reason)
+            except (ExecutorError, ValueError):
+                continue
+            if latest:
+                try:
+                    self.engine.record_managed_session(
+                        self.run_id, task_id, attempt=latest.get("attempt", 1),
+                        provider=latest.get("provider", "opencode"),
+                        session_id=latest.get("session_id") or "orphaned",
+                        status="failed", started_at=latest.get("started_at"),
+                        events_path=latest.get("events_path"),
+                        model=latest.get("model"), cost=latest.get("cost"),
+                        tokens=latest.get("tokens"), error=reason,
+                        cancel_state="orphaned",
+                        tool_count=latest.get("tool_count") or 0,
+                    )
+                except TeamworkError:
+                    pass
+            recovered.append({"task_id": task_id, "status": "orphaned",
+                              "native_cancel_ack": False,
+                              "local_signal_only": True, "reason": reason})
+        return recovered
+
     # -- main loop -------------------------------------------------------
     def _ensure_plan_artifact(self) -> None:
         directory = self.root / ".auto-orchestrator" / "plans"
@@ -720,9 +843,20 @@ class TeamworkRunner:
         except TeamworkError as exc:
             if "already exists" not in str(exc):
                 raise
+        recovered = self.recover_orphans() if self.recover_on_start else []
+        self._recovered = recovered
         started = time.monotonic()
         repair_reason: str | None = None
         while time.monotonic() - started < self.max_seconds:
+            if self._cancel_requested():
+                self._cancel_active()
+                state = self.engine.status(self.run_id)
+                summary = self.finalize(
+                    state, error="Cancellation requested by user; local signal only",
+                    forced_status="cancelled")
+                summary["recovered_orphans"] = recovered
+                summary["native_cancel_ack"] = False
+                return summary
             state = self.engine.status(self.run_id)
             if state["status"] in ("passed", "cancelled"):
                 return self.finalize(state)
@@ -786,16 +920,26 @@ class TeamworkRunner:
         return self.finalize(state, error="Teamwork run exceeded its wall-time budget")
 
     def _poll_active(self) -> None:
-        for task_id, run in list(self._active.items()):
-            task = self.task_map[task_id]
-            state = self._poll_task(task, run)
-            if state.get("status") == "running":
+        completed = self._scheduler.wait(timeout=0.25)
+        for task_id, state in completed:
+            run = self._active.pop(task_id, None)
+            if run is None:
                 continue
+            task = self.task_map[task_id]
+            if state.get("status") == "timed_out":
+                adapter = self._adapter(task, run)
+                cancel = adapter.cancel(run.handle)
+                final = adapter.poll(run.handle, timeout=1)
+                if not isinstance(final, dict) or final.get("status") == "running":
+                    final = dict(state)
+                    final["status"] = "timed_out"
+                final["cancel"] = cancel
+                state = final
+            state = self._absorb_state(run, state)
             outcome = self._finish_task(task, run, state)
             claimed = run.claimed or {"id": task_id, "lease": self._lease_for(task_id),
                                       "attempt": run.attempt}
             self._complete_task(claimed, run, outcome)
-            self._active.pop(task_id, None)
             self.timings[task_id] = {
                 "wall_time_ms": round((_now() - run.dispatch_at) * 1000, 1),
                 "queue_wait_ms": round((run.started_at - run.dispatch_at) * 1000, 1),
@@ -813,7 +957,8 @@ class TeamworkRunner:
             (self.run_id, task_id)).fetchone()
         return row["lease"] if row else ""
 
-    def finalize(self, state: dict, error: str | None = None) -> dict:
+    def finalize(self, state: dict, error: str | None = None,
+                 forced_status: str | None = None) -> dict:
         # Record handoffs for newly passed milestones.
         handoffs = []
         for milestone in state["milestones"]:
@@ -824,19 +969,23 @@ class TeamworkRunner:
                 except TeamworkError:
                     pass
         state = self.engine.status(self.run_id)
-        status = state["status"]
+        status = forced_status or state["status"]
         if error and status not in ("passed", "failed", "cancelled"):
             status = "failed"
         summary = {
             "run_id": self.run_id, "status": status,
+            "work_mode": state.get("work_mode"),
             "verified_progress": state["verified_progress"],
             "estimated_progress": None,
             "milestones": state["milestones"],
+            "usage": state.get("usage"),
+            "scheduler": state.get("scheduler"),
             "managed_sessions": state.get("managed_sessions", []),
             "timings": self.timings,
             "handoffs": handoffs,
             "error": error,
         }
+        summary["recovered_orphans"] = list(self._recovered)
         self._write_evidence("teamwork-summary", 0, summary)
         return summary
 
@@ -858,6 +1007,8 @@ def main(argv=None) -> int:
     parser.add_argument("--provider", default="opencode")
     parser.add_argument("--model", default=None)
     parser.add_argument("--max-seconds", type=float, default=7200)
+    parser.add_argument("--recover", action="store_true",
+                        help="reconcile running tasks left by a previous runner")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
     runner = None
@@ -866,7 +1017,8 @@ def main(argv=None) -> int:
         # The plan file is a rich teamwork plan; the run root already contains
         # a clean repository for worktrees.
         runner = TeamworkRunner(args.root, plan, model=args.model,
-                                max_seconds=args.max_seconds)
+                                max_seconds=args.max_seconds,
+                                recover_orphans=args.recover)
         summary = runner.run()
         print(json.dumps(summary, indent=2, ensure_ascii=False))
         return 0 if summary["status"] == "passed" else 1
