@@ -109,6 +109,7 @@
     'status.awaiting-approval': 'Awaiting Approval',
     'status.blocked': 'Blocked',
     'status.failed': 'Failed',
+    'status.orphaned': 'Orphaned',
     'status.completed': 'Completed',
     'status.unknown': 'Unknown / Disconnected',
     'status.openSpanWarning': '{status} · start observed / stop missing',
@@ -189,6 +190,7 @@
     'milestone.recovery.resuming': 'RESUMING',
     'milestone.recovery.verifying': 'VERIFYING',
     'milestone.recovery.recovered': 'RECOVERED',
+    'milestone.recovery.cancelled': 'CANCELLED',
     'milestone.recovery.recovery_failed': 'RECOVERY FAILED',
     'milestone.orphaned': '{count} orphaned',
     'milestone.mode.balanced': 'BALANCED',
@@ -843,6 +845,7 @@
     'status.awaiting-approval': 'Onay Bekliyor',
     'status.blocked': 'Engellendi',
     'status.failed': 'Başarısız',
+    'status.orphaned': 'Yetim',
     'status.completed': 'Tamamlandı',
     'status.unknown': 'Bilinmiyor / Bağlantı Yok',
     'status.openSpanWarning': '{status} · başlangıç görüldü / duruş yok',
@@ -923,6 +926,7 @@
     'milestone.recovery.resuming': 'DEVAM EDİYOR',
     'milestone.recovery.verifying': 'DOĞRULANIYOR',
     'milestone.recovery.recovered': 'KURTARILDI',
+    'milestone.recovery.cancelled': 'İPTAL EDİLDİ',
     'milestone.recovery.recovery_failed': 'KURTARMA BAŞARISIZ',
     'milestone.orphaned': '{count} yetim',
     'milestone.mode.balanced': 'DENGELİ',
@@ -1489,6 +1493,7 @@
     blocked: { labelKey: 'status.blocked', tone: 'warn', symbol: '⊘' },
     failed: { labelKey: 'status.failed', tone: 'bad', symbol: '✕' },
     completed: { labelKey: 'status.completed', tone: 'ok', symbol: '✓' },
+    orphaned: { labelKey: 'status.orphaned', tone: 'bad', symbol: '⊘' },
     unknown: { labelKey: 'status.unknown', tone: 'neutral', symbol: '?' },
   };
 
@@ -1513,6 +1518,7 @@
     none: 'unknown',
     'not-observed': 'unknown',
     cancelled: 'failed',
+    orphaned: 'orphaned',
     canceled: 'failed',
     error: 'failed',
   };

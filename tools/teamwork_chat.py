@@ -30,6 +30,7 @@ try:
         OwnershipError,
         atomic_write_json,
         identity_matches,
+        lease_held,
         owner_alive,
         owner_record,
         project_lock,
@@ -47,6 +48,7 @@ except ModuleNotFoundError:  # python tools/teamwork_chat.py
         OwnershipError,
         atomic_write_json,
         identity_matches,
+        lease_held,
         owner_alive,
         owner_record,
         project_lock,
@@ -72,7 +74,7 @@ HEARTBEAT_STALE_SECONDS = 300.0
 RECOVERY_STATES = {
     "active", "runner_disconnected", "reconciling", "orphaned",
     "retry_ready", "resuming", "verifying", "recovered",
-    "recovery_failed",
+    "recovery_failed", "cancelled",
 }
 
 
@@ -247,21 +249,29 @@ def _heartbeat_age(active: dict) -> float | None:
     return None
 
 
-def _recovery_view(root: Path, active: dict, state: dict | None) -> dict:
-    stored = read_recovery_state(root, active.get("run_id", "")) or {}
-    reported = stored.get("state")
+def _recovery_view(root: Path, active: dict, state: dict | None,
+                   run_id: str, connected: bool | None = None) -> dict:
+    active = active if active.get("run_id") == run_id else {}
+    stored = read_recovery_state(root, run_id) or {}
+    stored_state = stored.get("state")
+    transitions = {"reconciling", "orphaned", "retry_ready", "resuming", "verifying"}
+    reported = None
     if state is not None:
-        if state.get("status") == "passed":
-            reported = "recovered"
-        elif state.get("status") == "failed" and reported in (
-                "reconciling", "orphaned", "retry_ready", "resuming", "verifying"):
-            reported = "recovery_failed"
-        elif state.get("status") == "cancelled":
+        run_status = state.get("status")
+        if run_status == "passed":
+            reported = (stored_state if stored_state in transitions | {"recovered"}
+                        else None)
+        elif run_status == "failed":
+            reported = "recovery_failed" if stored_state in transitions else None
+        elif run_status == "cancelled":
+            reported = "cancelled"
+    connected = _active_connected(active) if connected is None else connected
+    if state is None or state.get("status") not in ("passed", "failed", "cancelled"):
+        if not connected:
             reported = "runner_disconnected"
-    connected = _active_connected(active)
-    if not connected and reported not in ("recovered", "recovery_failed"):
-        reported = "runner_disconnected"
-    if reported not in RECOVERY_STATES:
+        elif reported is None:
+            reported = stored_state if stored_state in RECOVERY_STATES else "active"
+    if reported is not None and reported not in RECOVERY_STATES:
         reported = "active" if connected else "runner_disconnected"
     return {
         "state": reported,
@@ -322,6 +332,21 @@ def _new_active(root: Path, run_id: str, mode: str, plan_path: Path,
     }
 
 
+def request_path(args) -> dict:
+    """Return a fresh, shell-safe request path inside the project."""
+    root = _root(args.root)
+    name = f"request-{os.urandom(8).hex()}.md"
+    directory = teamwork_dir(root) / REQUEST_DIR
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    relative = (Path(".auto-orchestrator") / "teamwork" / REQUEST_DIR / name)
+    return {
+        "filename": name,
+        "relative_path": relative.as_posix(),
+        "absolute_path": str(directory / name),
+        "note": "Write the exact request text to this file; use relative_path in the bridge command.",
+    }
+
+
 def start(args) -> dict:
     root = _root(args.root)
     _require_repository(root)
@@ -333,10 +358,12 @@ def start(args) -> dict:
     token = os.urandom(16).hex()
     with project_lock(root, timeout=10):
         active = _active(root)
-        if _owner_process_alive(active):
+        old_run_id = active.get("run_id")
+        if _owner_process_alive(active) or (
+                isinstance(old_run_id, str) and lease_held(root, old_run_id)):
             raise ChatError(
-                f"active teamwork run {active.get('run_id')} still owns a live "
-                "process; use status/resume instead of starting a duplicate"
+                f"active teamwork run {old_run_id} still owns a live runner; "
+                "use status/resume instead of starting a duplicate"
             )
         if active.get("run_id"):
             try:
@@ -398,7 +425,9 @@ def status(args) -> dict:
         state = _engine_status(root, run_id)
     except TeamworkError as exc:
         raise ChatError(str(exc)) from exc
-    connected = _active_connected(active) and active.get("run_id") == run_id
+    selected_active = active if active.get("run_id") == run_id else {}
+    runner_lease_held = lease_held(root, run_id)
+    connected = _active_connected(selected_active) or runner_lease_held
     sessions = state.get("managed_sessions", [])
     running = [item for item in sessions
                if item.get("status") in ("starting", "running")]
@@ -411,11 +440,16 @@ def status(args) -> dict:
     current = next((item for item in state.get("milestones", [])
                     if item.get("status") in ("running", "verifying", "repairing")),
                    None)
-    recovery = _recovery_view(root, active, state)
+    recovery = _recovery_view(root, selected_active, state, run_id,
+                              connected=connected)
     reported_status = state.get("status")
     cancel_path = _state_path(root, f"cancel-{run_id}.json")
     if cancel_path.exists() and reported_status != "passed" and not connected:
         reported_status = "cancelled"
+        recovery["state"] = "cancelled"
+        recovery["last_transition"] = recovery.get("last_transition") or {}
+        recovery["cancelled"] = True
+    recovery_state = recovery["state"]
     return {
         "run_id": run_id,
         "mode": state.get("work_mode", active.get("mode")),
@@ -442,13 +476,14 @@ def status(args) -> dict:
                                 str(item.get("session_id", "")).encode()).hexdigest()[:12]}
                            for item in orphaned],
         "owner_connected": connected,
-        "owner_process_alive": _owner_process_alive(active),
-        "owner_verified": _owner_verified(active) if connected else False,
-        "heartbeat_age_seconds": _heartbeat_age(active),
+        "owner_process_alive": _owner_process_alive(selected_active) or runner_lease_held,
+        "runner_lease_held": runner_lease_held,
+        "owner_verified": _owner_verified(selected_active) if connected else False,
+        "heartbeat_age_seconds": _heartbeat_age(selected_active),
         "recovery": recovery,
-        "recovery_state": recovery["state"],
-        "pid_alive": _legacy_pid_alive(active),
-        "log": active.get("log"),
+        "recovery_state": recovery_state,
+        "pid_alive": _legacy_pid_alive(selected_active),
+        "log": selected_active.get("log"),
     }
 
 
@@ -460,7 +495,9 @@ def agents(args) -> dict:
         raise ChatError("no active teamwork run")
     _safe_run_id(run_id)
     state = _engine_status(root, run_id)
-    connected = _active_connected(active) and active.get("run_id") == run_id
+    selected_active = active if active.get("run_id") == run_id else {}
+    runner_lease_held = lease_held(root, run_id)
+    connected = _active_connected(selected_active) or runner_lease_held
     latest = {}
     for row in state.get("managed_sessions", []):
         key = (row.get("task_id"), row.get("attempt"))
@@ -480,9 +517,12 @@ def agents(args) -> dict:
             "session_hash": hashlib.sha256(
                 str(row.get("session_id", "")).encode()).hexdigest()[:12],
         })
+    selected_active = active if active.get("run_id") == run_id else {}
     return {"run_id": run_id, "agents": agents,
             "owner_connected": connected,
-            "recovery_state": _recovery_view(root, active, state)["state"]}
+            "recovery_state": _recovery_view(root, selected_active, state,
+                                             run_id,
+                                             connected=connected)["state"]}
 
 
 def milestones(args) -> dict:
@@ -501,7 +541,8 @@ def cancel(args) -> dict:
         if not run_id:
             raise ChatError("no active teamwork run")
         _safe_run_id(run_id)
-        connected = _active_connected(active)
+        selected = active if active.get("run_id") == run_id else {}
+        connected = _active_connected(selected) or lease_held(root, run_id)
         path = _state_path(root, f"cancel-{run_id}.json")
         _write_json(path, {"run_id": run_id, "requested_at": time.time(),
                            "requested_by": "single-chat"})
@@ -525,11 +566,13 @@ def resume(args) -> dict:
         if not run_id:
             raise ChatError("no active teamwork run")
         run_id = _safe_run_id(run_id)
-        if _owner_process_alive(active):
+        runner_lease_held = lease_held(root, run_id)
+        if _owner_process_alive(active) or runner_lease_held:
             return {"run_id": run_id, "status": "already_running",
-                    "owner_connected": _active_connected(active),
+                    "owner_connected": _active_connected(active) or runner_lease_held,
                     "heartbeat_age_seconds": _heartbeat_age(active),
                     "heartbeat_stale": not _active_connected(active),
+                    "runner_lease_held": runner_lease_held,
                     "pid": active.get("pid"),
                     "note": ("recovery did not start a duplicate runner; a live "
                              "owner with a stale heartbeat needs manual inspection"
@@ -586,6 +629,7 @@ def main(argv=None) -> int:
     start_p.add_argument("--run-id")
     start_p.add_argument("--model", default=DEFAULT_MODEL)
     start_p.add_argument("--max-seconds", type=float, default=7200)
+    sub.add_parser("request-path")
     for name in ("status", "agents", "milestones", "cancel", "resume"):
         command = sub.add_parser(name)
         command.add_argument("--run-id")
@@ -593,7 +637,7 @@ def main(argv=None) -> int:
     try:
         action = {"start": start, "status": status, "agents": agents,
                   "milestones": milestones, "cancel": cancel,
-                  "resume": resume}[args.command]
+                  "resume": resume, "request-path": request_path}[args.command]
         print(json.dumps(action(args), indent=2, ensure_ascii=False))
         return 0
     except (ChatError, OSError, ValueError, TeamworkError,

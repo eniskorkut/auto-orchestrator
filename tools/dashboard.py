@@ -32,12 +32,14 @@ from urllib.parse import unquote, urlparse
 try:
     from tools.perf import analyze, diagnose, observed_overlap, path_for
     from tools.quality_gate import assess, load_policy
-    from tools.run_owner import owner_alive, read_json, read_recovery_state
+    from tools.run_owner import (lease_held, owner_alive, read_json,
+                                 read_recovery_state)
 except ModuleNotFoundError:  # Running as ``python tools/dashboard.py``.
     from perf import analyze, diagnose, observed_overlap, path_for
     from quality_gate import assess, load_policy
     try:
-        from run_owner import owner_alive, read_json, read_recovery_state
+        from run_owner import (lease_held, owner_alive, read_json,
+                               read_recovery_state)
     except ModuleNotFoundError:  # pragma: no cover - older install
         owner_alive = read_json = read_recovery_state = None
 
@@ -1508,19 +1510,26 @@ class Catalog:
         if not isinstance(active, dict) or active.get("run_id") != run_id:
             active = {}
         connected = bool(owner_alive(active.get("owner"))) if owner_alive else False
+        if not connected and lease_held is not None:
+            connected = lease_held(root, run_id)
         stored = read_recovery_state(root, run_id) if read_recovery_state else None
         stored = stored if isinstance(stored, dict) else {}
-        state = stored.get("state")
+        stored_state = stored.get("state")
         run_status = run.get("status")
+        recovery_transitions = {
+            "reconciling", "orphaned", "retry_ready", "resuming", "verifying",
+        }
         if run_status == "passed":
-            state = state or ("recovered" if stored else None)
-        elif run_status == "failed" and state in (
-                "reconciling", "orphaned", "retry_ready", "resuming", "verifying"):
-            state = "recovery_failed"
-        elif not connected and run_status not in ("passed", "failed", "cancelled"):
+            state = (stored_state if stored_state in recovery_transitions | {"recovered"}
+                     else None)
+        elif run_status == "failed":
+            state = "recovery_failed" if stored_state in recovery_transitions else None
+        elif run_status == "cancelled":
+            state = "cancelled"
+        elif not connected:
             state = "runner_disconnected"
-        if not state:
-            state = "active" if connected else "runner_disconnected"
+        else:
+            state = stored_state or "active"
         sessions = run.get("managed_sessions", [])
         orphaned = 0
         if not connected and run_status not in ("passed", "cancelled"):

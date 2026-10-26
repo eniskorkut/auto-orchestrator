@@ -8,6 +8,7 @@ import unittest
 from pathlib import Path
 
 from tools.dashboard import Catalog, DashboardServer, Store
+from tools.run_owner import write_recovery_state
 from tools.teamwork import TeamworkEngine
 
 
@@ -67,6 +68,29 @@ class MilestoneDashboardTests(unittest.TestCase):
             engine.status("team-milestone")
         finally:
             engine.close()
+
+    def test_recovery_labels_do_not_mislabel_normal_terminal_runs(self):
+        self._seed()
+        run = {"run_id": "team-milestone", "status": "passed",
+               "managed_sessions": []}
+        normal = self.catalog._attach_recovery(self.root, dict(run))
+        self.assertIsNone(normal["recovery_state"])
+        self.assertFalse(normal["owner_connected"])
+
+        write_recovery_state(self.root, "team-milestone", "recovered")
+        recovered = self.catalog._attach_recovery(self.root, dict(run))
+        self.assertEqual(recovered["recovery_state"], "recovered")
+
+        verifying = {"run_id": "team-milestone", "status": "failed",
+                     "managed_sessions": []}
+        write_recovery_state(self.root, "team-milestone", "verifying")
+        failed = self.catalog._attach_recovery(self.root, verifying)
+        self.assertEqual(failed["recovery_state"], "recovery_failed")
+
+        cancelled = {"run_id": "team-milestone", "status": "cancelled",
+                     "managed_sessions": []}
+        stopped = self.catalog._attach_recovery(self.root, cancelled)
+        self.assertEqual(stopped["recovery_state"], "cancelled")
 
     def test_catalog_exposes_verified_milestones_and_sanitizes_sessions(self):
         self._seed()

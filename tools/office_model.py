@@ -502,16 +502,14 @@ def _run_connection(root: str, run_id: str) -> dict:
         return {"connected": None, "recovery_state": None}
     base = Path(root) / ".auto-orchestrator" / "teamwork"
     active = read_json(base / "active.json", {})
-    connected = False
-    if isinstance(active, dict) and active.get("run_id") == run_id:
-        connected = bool(owner_alive(active.get("owner")))
+    matched = isinstance(active, dict) and active.get("run_id") == run_id
+    connected = bool(matched and owner_alive(active.get("owner")))
     recovery = (read_recovery_state(root, run_id)
                 if read_recovery_state is not None else None)
     state = recovery.get("state") if isinstance(recovery, dict) else None
     return {"connected": connected, "recovery_state": state,
             "recovery": recovery if isinstance(recovery, dict) else None,
-            "heartbeat_at": active.get("heartbeat_at")
-            if isinstance(active, dict) else None}
+            "heartbeat_at": active.get("heartbeat_at") if matched else None}
 
 
 def _managed_sessions(project: dict) -> list[dict]:

@@ -29,18 +29,21 @@ If an active run exists and the user did not explicitly ask for a new one, use
 
 1. Read an optional leading `--mode fast|balanced|rigorous|auto` (default
    `auto`) from the arguments. The rest is the task request.
-2. Create the private request directory if needed and write the **exact**
-   remaining request text with the `write` tool to a new file under:
-   `.auto-orchestrator/teamwork/requests/`
-   Use a unique filename such as `request-<10 random hex>.md`. Do not pass the
-   request through `echo`, a heredoc, `printf`, command substitution or any
-   shell string.
-3. Run exactly one shell command with the shell tool. The filename comes from
-   step 2 and contains only letters, digits, dash and underscore:
+2. Run exactly one shell command with the shell tool to obtain a generated,
+   shell-safe request path. This command contains no user text:
 
-   `python3.11 tools/teamwork_chat.py --root . start --mode <mode> --request-file .auto-orchestrator/teamwork/requests/<file>.md`
+   `python3.11 tools/teamwork_chat.py --root . request-path`
 
-4. If the bridge rejects the request, report the validation error. Do not retry
+   Parse `relative_path` from the JSON response. It contains only letters,
+   digits, dash, underscore and `/`.
+3. Write the **exact** remaining request text with the `write` tool to that
+   validated path. Do not pass the request through `echo`, a heredoc, `printf`,
+   command substitution or any shell string.
+4. Run exactly one shell command with the shell tool:
+
+   `python3.11 tools/teamwork_chat.py --root . start --mode <mode> --request-file <relative_path>`
+
+5. If the bridge rejects the request, report the validation error. Do not retry
    by embedding the text into a shell argument.
 
 The bridge validates UTF-8, a 20,000-character limit, empty/NUL input, run-id

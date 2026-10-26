@@ -118,6 +118,38 @@ class ChatBridgeTests(unittest.TestCase):
         self.assertFalse(cancel.exists())
         self.assertTrue(calls[0]["recover"])
 
+    def test_status_with_explicit_run_does_not_leak_other_active_owner(self):
+        from tools.run_owner import read_process_identity
+        identity = read_process_identity(__import__("os").getpid())
+        for run_id in ("run-a", "run-b"):
+            plan_path = self.root / ".auto-orchestrator" / "plans" / f"{run_id}.json"
+            plan_path.parent.mkdir(parents=True, exist_ok=True)
+            plan_path.write_text(json.dumps(minimal_plan(run_id)), encoding="utf-8")
+            engine = TeamworkEngine(self.root)
+            try:
+                engine.init(minimal_plan(run_id))
+            finally:
+                engine.close()
+        active = {
+            "version": 2, "run_id": "run-b", "mode": "fast",
+            "plan": str(self.root / ".auto-orchestrator/plans/run-b.json"),
+            "log": "b.log", "model": None, "owner": dict(identity),
+            "pid": identity["pid"], "heartbeat_at": __import__("time").time(),
+        }
+        (self.root / ".auto-orchestrator" / "teamwork" / "active.json").write_text(
+            json.dumps(active), encoding="utf-8")
+        status = chat.status(argparse.Namespace(root=str(self.root),
+                                                run_id="run-a"))
+        self.assertEqual(status["run_id"], "run-a")
+        self.assertFalse(status["owner_connected"])
+        self.assertFalse(status["owner_process_alive"])
+        self.assertEqual(status["recovery_state"], "runner_disconnected")
+        self.assertEqual(status["recovery"]["last_transition"], {})
+        other = chat.status(argparse.Namespace(root=str(self.root),
+                                                run_id="run-b"))
+        self.assertTrue(other["owner_connected"])
+        self.assertTrue(other["owner_verified"])
+
     def test_command_file_uses_arguments_and_real_bridge(self):
         command = (Path(__file__).resolve().parents[1] / ".opencode" /
                    "commands" / "teamwork.md").read_text(encoding="utf-8")
@@ -126,6 +158,7 @@ class ChatBridgeTests(unittest.TestCase):
         self.assertIn("status", command)
         self.assertIn("cancel", command)
         self.assertIn("--request-file", command)
+        self.assertIn("request-path", command)
         self.assertNotIn('--request "', command)
         self.assertIn("untrusted", command.lower())
 
@@ -212,6 +245,13 @@ class ChatSecurityTests(unittest.TestCase):
         self.assertNotIn("profile", active)
         self.assertTrue(active["owner"]["start_token"])
 
+    def test_request_path_is_generated_and_shell_safe(self):
+        result = chat.request_path(argparse.Namespace(root=str(self.root)))
+        self.assertRegex(result["filename"], r"^request-[0-9a-f]{16}\.md$")
+        self.assertEqual(result["relative_path"],
+                         ".auto-orchestrator/teamwork/requests/" + result["filename"])
+        self.assertTrue((self.root / result["relative_path"]).parent.is_dir())
+
     def test_stdin_request_preserves_unicode_and_json(self):
         import io
         import sys
@@ -287,6 +327,31 @@ class ChatSecurityTests(unittest.TestCase):
         self.assertEqual(len(errors), 1)
         self.assertIsInstance(errors[0], chat.ChatError)
         self.assertIn("duplicate", str(errors[0]))
+
+    def test_resume_refuses_a_held_runner_lease_even_without_pid_identity(self):
+        from tools.run_owner import runner_lease
+        plan_path = self.root / ".auto-orchestrator" / "plans" / "secure-run.json"
+        plan_path.parent.mkdir(parents=True, exist_ok=True)
+        plan_path.write_text(json.dumps(minimal_plan("secure-run")), encoding="utf-8")
+        engine = TeamworkEngine(self.root)
+        try:
+            engine.init(minimal_plan("secure-run"))
+        finally:
+            engine.close()
+        active = {
+            "version": 2, "run_id": "secure-run", "mode": "fast",
+            "plan": str(plan_path), "log": "log", "model": None,
+            "owner": {"pid": 999999, "start_token": "dead", "uid": None,
+                      "host": "test"},
+            "pid": 999999, "heartbeat_at": 0,
+        }
+        path = self.root / ".auto-orchestrator" / "teamwork" / "active.json"
+        path.write_text(json.dumps(active), encoding="utf-8")
+        with runner_lease(self.root, "secure-run"):
+            result = chat.resume(argparse.Namespace(root=str(self.root),
+                                                    run_id=None))
+        self.assertEqual(result["status"], "already_running")
+        self.assertTrue(result["runner_lease_held"])
 
     def test_resume_refuses_live_owner_and_pid_reuse_is_disconnected(self):
         path = self.root / ".auto-orchestrator" / "teamwork" / "active.json"
