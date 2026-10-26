@@ -2071,3 +2071,40 @@ body.inspector-open .office-stage { height: min(760px, calc(100vh - 180px)); }
   .milestone-head { flex-direction: column; }
   .milestone-progress { justify-content: flex-start; }
 }
+
+/* V7.4 — adaptive mode and scheduler chips */
+.mode-chip, .scheduler-chip, .repair-chip, .cost-chip {
+  padding: 3px 6px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font: 600 8px/1 var(--mono);
+  letter-spacing: .04em;
+  color: var(--muted);
+  background: var(--panel-2);
+}
+.mode-chip[data-mode="fast"] { color: var(--ok); border-color: color-mix(in oklab, var(--ok) 35%, var(--line)); }
+.mode-chip[data-mode="balanced"] { color: var(--accent); border-color: color-mix(in oklab, var(--accent) 35%, var(--line)); }
+.mode-chip[data-mode="rigorous"] { color: var(--warn); border-color: color-mix(in oklab, var(--warn) 35%, var(--line)); }
+.scheduler-chip { color: var(--faint); }
+.repair-chip { color: var(--warn); border-color: color-mix(in oklab, var(--warn) 35%, var(--line)); }
+.cost-chip { color: var(--faint); }
+.office-milestone-label + .mode-chip { flex: 0 0 auto; }
+
+/* V7.4 — bounded execution timeline, separate from the office map */
+.milestone-timeline { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
+.milestone-timeline-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 6px; color: var(--muted); font: 600 9px/1.3 var(--mono); text-transform: uppercase; letter-spacing: .07em; }
+.milestone-timeline-row { display: flex; align-items: baseline; gap: 8px; min-width: 0; padding: 5px 4px; border-bottom: 1px solid color-mix(in oklab, var(--line) 50%, transparent); font: 9px/1.3 var(--mono); }
+.milestone-timeline-row:last-child { border-bottom: 0; }
+.milestone-timeline-row[data-state="running"] .timeline-state { color: var(--accent); }
+.milestone-timeline-row[data-state="completed"] .timeline-state { color: var(--ok); }
+.milestone-timeline-row[data-state="failed"] .timeline-state,
+.milestone-timeline-row[data-state="cancelled"] .timeline-state { color: var(--bad); }
+.timeline-task { min-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.timeline-role { color: var(--faint); }
+.timeline-state { color: var(--muted); }
+.timeline-waiting { color: var(--warn); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.timeline-metric { margin-left: auto; color: var(--faint); }
+@media (max-width: 700px) {
+  .milestone-timeline-row { flex-wrap: wrap; }
+  .timeline-metric { margin-left: 0; }
+}

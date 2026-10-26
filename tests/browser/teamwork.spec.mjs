@@ -19,6 +19,8 @@ test('milestone panel shows verified progress and filters the task board', async
   await expect(page.locator('#board-milestones')).toContainText('DEMO DATA');
   await expect(page.locator('#board-milestones')).toContainText('1/3 verified');
   await expect(page.locator('#board-milestones')).toContainText('No estimated progress is shown');
+  await expect(page.locator('#board-milestones .mode-chip', { hasText: 'BALANCED' })).toHaveCount(1);
+  await expect(page.locator('#board-milestones .scheduler-chip')).toContainText('running');
 
   await page.locator('.milestone-card').filter({ hasText: 'Build and verify' }).click();
   await expect(page.locator('.milestone-card.selected')).toHaveCount(1);

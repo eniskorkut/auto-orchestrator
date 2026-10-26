@@ -1703,6 +1703,27 @@
           ),
           h('div', { class: 'milestone-progress' },
             demo ? h('span', { class: 'demo-chip', text: 'DEMO DATA' }) : null,
+            activeRun.work_mode
+              ? h('span', { class: 'mode-chip', 'data-mode': activeRun.work_mode,
+                            text: t(`milestone.mode.${activeRun.work_mode}`) })
+              : null,
+            activeRun.scheduler
+              ? h('span', {
+                class: 'scheduler-chip',
+                text: t('milestone.activeSessions', {
+                  count: activeRun.scheduler.active_sessions || 0,
+                  queued: activeRun.scheduler.queued_tasks || 0,
+                }),
+              })
+              : null,
+            activeRun.scheduler?.repairing
+              ? h('span', { class: 'repair-chip', text: t('milestone.repairing') })
+              : null,
+            activeRun.usage?.cost_measured
+              ? h('span', { class: 'cost-chip', text: t('milestone.cost', {
+                cost: Number(activeRun.usage.cost_total_usd).toFixed(4),
+              }) })
+              : null,
             h('span', {
               text: t('milestone.verifiedProgress', {
                 passed: activeRun.passed_milestones,
@@ -1725,6 +1746,41 @@
           list.append(h('div', { role: 'listitem' }, milestoneCard(activeRun, milestone)));
         }
         boardHost.append(list);
+        const timelineTasks = (activeRun.milestones || [])
+          .flatMap((milestone) => milestone.tasks || [])
+          .sort((left, right) => {
+            const rank = { running: 0, cancel_requested: 0, pending: 1, completed: 2,
+                           failed: 2, cancelled: 2, timed_out: 2 };
+            return (rank[left.state] ?? 3) - (rank[right.state] ?? 3)
+              || (left.id > right.id ? 1 : -1);
+          })
+          .slice(0, 12);
+        if (timelineTasks.length) {
+          const timeline = h('div', { class: 'milestone-timeline' },
+            h('div', { class: 'milestone-timeline-head' },
+              h('span', { text: t('milestone.timeline') }),
+              h('span', {
+                class: 'milestone-note',
+                text: t('milestone.queue', {
+                  queued: activeRun.scheduler?.queued_tasks || 0,
+                }),
+              }),
+            ),
+          );
+          for (const task of timelineTasks) {
+            const waiting = (task.waiting_on || []).join(', ');
+            timeline.append(h('div', { class: 'milestone-timeline-row', 'data-state': task.state },
+              h('span', { class: 'timeline-task', text: task.id }),
+              h('span', { class: 'timeline-role', text: task.role }),
+              h('span', { class: 'timeline-state', text: task.state }),
+              waiting ? h('span', { class: 'timeline-waiting', text: t('milestone.waitingOn', { deps: waiting }) }) : null,
+              task.duration_seconds != null ? h('span', { class: 'timeline-metric', text: fmtDuration(task.duration_seconds) }) : null,
+              task.managed?.tool_count != null ? h('span', { class: 'timeline-metric', text: t('milestone.tools', { count: task.managed.tool_count }) }) : null,
+              task.managed?.cost != null ? h('span', { class: 'timeline-metric', text: `$${Number(task.managed.cost).toFixed(4)}` }) : null,
+            ));
+          }
+          boardHost.append(timeline);
+        }
       }
     }
     if (officeHost) {
@@ -1738,6 +1794,10 @@
       officeHost.append(
         h('div', { class: 'office-milestone-strip' },
           h('span', { class: 'office-milestone-label', text: t('milestone.current') }),
+          activeRun.work_mode
+            ? h('span', { class: 'mode-chip', 'data-mode': activeRun.work_mode,
+                          text: t(`milestone.mode.${activeRun.work_mode}`) })
+            : null,
           h('button', {
             class: 'office-milestone-open', type: 'button',
             onclick: () => selectMilestone(activeRun, current),
@@ -1749,6 +1809,15 @@
                 total: activeRun.milestone_count,
               }),
             }),
+            activeRun.scheduler
+              ? h('span', {
+                class: 'scheduler-chip',
+                text: t('milestone.activeSessions', {
+                  count: activeRun.scheduler.active_sessions || 0,
+                  queued: activeRun.scheduler.queued_tasks || 0,
+                }),
+              })
+              : null,
           ),
           h('span', { class: 'office-milestone-status', 'data-status': current.status, text: milestoneStatusLabel(current.status) }),
         ),
