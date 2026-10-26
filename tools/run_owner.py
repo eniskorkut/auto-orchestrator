@@ -27,6 +27,10 @@ class OwnershipError(RuntimeError):
     pass
 
 
+_SELF_IDENTITY = None
+_SELF_LOCK = __import__("threading").Lock()
+
+
 def _posix_identity(pid: int) -> dict | None:
     try:
         process = subprocess.run(
@@ -222,66 +226,78 @@ def terminate_owned(record, *, grace: float = 5.0) -> dict:
 
 @contextmanager
 def project_lock(root: Path, *, timeout: float = 5.0):
-    """Cross-process advisory lock for bridge state mutations.
+    """Cross-process atomic lock for bridge/runner state mutations.
 
-    The lock file may remain on disk. Advisory locks are released by the OS when
-    the holder exits, so a crash never leaves a permanently stale lock.
+    An exclusive create is used instead of an OS-specific advisory lock so the
+    behavior is identical on POSIX and Windows. The lock file records the same
+    PID + start-token ownership as the run itself. A crash leaves a stale file
+    that is reclaimed only after its owner identity no longer matches.
     """
     path = Path(root) / ".auto-orchestrator" / "teamwork" / "state.lock"
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    handle = open(path, "a+b")
-    try:
-        handle.seek(0)
-        if handle.read(1) == b"":
-            handle.write(b"\0")
-            handle.flush()
-        deadline = time.monotonic() + max(0.0, float(timeout))
-        acquired = False
-        while True:
-            try:
-                _try_lock(handle)
-                acquired = True
-                break
-            except (OSError, ValueError):
-                if time.monotonic() >= deadline:
-                    raise OwnershipError(
-                        "another Teamwork state operation is in progress"
-                    )
-                time.sleep(0.05)
+    global _SELF_IDENTITY
+    with _SELF_LOCK:
+        if _SELF_IDENTITY is None:
+            _SELF_IDENTITY = read_process_identity(os.getpid())
+        identity = _SELF_IDENTITY
+    if identity is None:
+        raise OwnershipError("cannot verify the lock owner process identity")
+    token = os.urandom(8).hex()
+    payload = {**identity, "lock_token": token,
+               "acquired_at": time.time()}
+    deadline = time.monotonic() + max(0.0, float(timeout))
+    acquired = False
+    while True:
         try:
-            yield path
-        finally:
-            if acquired:
-                _unlock(handle)
-    finally:
-        handle.close()
-
-
-def _try_lock(handle) -> None:
-    if os.name == "nt":
-        import msvcrt
-
-        handle.seek(0)
-        msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
-    else:
-        import fcntl
-
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-
-
-def _unlock(handle) -> None:
+            fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            try:
+                os.write(fd, (json.dumps(payload, separators=(",", ":")) + "\n").encode())
+                try:
+                    os.fsync(fd)
+                except OSError:
+                    pass
+            finally:
+                os.close(fd)
+            acquired = True
+            break
+        except FileExistsError:
+            holder = read_json(path, None)
+            stale = False
+            if isinstance(holder, dict):
+                stale = not identity_matches(holder)
+            else:
+                try:
+                    age = time.time() - path.stat().st_mtime
+                except OSError:
+                    age = 0.0
+                stale = age > 2.0
+            if stale:
+                try:
+                    path.unlink()
+                except FileNotFoundError:
+                    pass
+                except OSError:
+                    pass
+                continue
+            if time.monotonic() >= deadline:
+                raise OwnershipError(
+                    "another Teamwork state operation is in progress"
+                )
+            time.sleep(0.05)
+        except OSError as exc:
+            raise OwnershipError(f"could not acquire project lock: {exc}") from exc
     try:
-        if os.name == "nt":
-            import msvcrt
-
-            handle.seek(0)
-            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
-        else:
-            import fcntl
-
-            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-    except (OSError, ValueError):
-        pass
+        yield path
+    finally:
+        if acquired:
+            holder = read_json(path, None)
+            if isinstance(holder, dict) and holder.get("lock_token") == token:
+                try:
+                    path.unlink()
+                except FileNotFoundError:
+                    pass
+                except OSError:
+                    pass
 
 
 def owner_record(pid) -> dict | None:

@@ -92,16 +92,18 @@ class ChatBridgeTests(unittest.TestCase):
         cancel = self.root / ".auto-orchestrator" / "teamwork" / "cancel-chat-test.json"
         cancel.write_text("{}", encoding="utf-8")
         calls = []
-        original = chat.subprocess.Popen
+        original_spawn = chat._spawn
 
         class FakeProcess:
             pid = 12345
 
-        def fake_popen(command, **kwargs):
-            calls.append(command)
+        def fake_spawn(root, log, plan_path, *, recover, owner_token, model,
+                       max_seconds):
+            calls.append({"recover": recover, "plan": str(plan_path),
+                          "token": owner_token})
             return FakeProcess()
 
-        chat.subprocess.Popen = fake_popen
+        chat._spawn = fake_spawn
         original_owner = chat.owner_record
         chat.owner_record = lambda pid: {
             "pid": pid, "start_token": "fake-start", "uid": None,
@@ -110,11 +112,11 @@ class ChatBridgeTests(unittest.TestCase):
         try:
             result = chat.resume(self._args("resume"))
         finally:
-            chat.subprocess.Popen = original
+            chat._spawn = original_spawn
             chat.owner_record = original_owner
         self.assertEqual(result["status"], "resumed")
         self.assertFalse(cancel.exists())
-        self.assertIn("--recover", calls[0])
+        self.assertTrue(calls[0]["recover"])
 
     def test_command_file_uses_arguments_and_real_bridge(self):
         command = (Path(__file__).resolve().parents[1] / ".opencode" /
@@ -191,7 +193,8 @@ class ChatSecurityTests(unittest.TestCase):
             f"{marker}); Unicode: ĞüşiÖÇ — line one\nline two"
         )
         path = self.requests / "request-safe.md"
-        path.write_text(request, encoding="utf-8")
+        # Preserve LF bytes on Windows; text-mode write would translate to CRLF.
+        path.write_bytes(request.encode("utf-8"))
         result = chat.start(self._start_args(request_file=str(path)))
         self.assertEqual(result["status"], "started")
         plan = json.loads(Path(result["plan"]).read_text(encoding="utf-8"))
