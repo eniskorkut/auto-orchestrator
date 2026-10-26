@@ -205,7 +205,7 @@ Screenshots (demo data, clearly labelled):
 
 ## 10. Tests and limitations
 
-Local V7.4.1 verification: 455 Python tests (1 skipped), 90 Node tests and 19
+Local V7.4.1 verification: 456 Python tests (1 skipped), 90 Node tests and 19
 Playwright tests passed. The CI matrix is checked after the branch push. The
 recovery/security/efficiency harnesses are real-provider tests and are not part
 of the default credential-free CI.
