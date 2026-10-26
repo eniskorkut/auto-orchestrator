@@ -508,14 +508,22 @@ class TeamworkRunner:
         if self.adapter is not None:
             return self.adapter
         provider = task.get("provider") or "opencode"
-        cached = self.adapters.get(provider)
+        options = {"model": task.get("model") or self.model,
+                   "env": self.browser_env}
+        if provider == "codex":
+            if task.get("sandbox") is not None:
+                options["sandbox"] = task["sandbox"]
+            if task.get("approval_policy") is not None:
+                options["approval_policy"] = task["approval_policy"]
+        cache_key = (provider, options.get("sandbox"),
+                     options.get("approval_policy"))
+        cached = self.adapters.get(cache_key)
         if cached is not None:
             return cached
-        adapter = adapter_for(provider, self.root, model=task.get("model") or self.model,
-                              env=self.browser_env)
+        adapter = adapter_for(provider, self.root, **options)
         if not adapter.available():
             raise RunnerError(f"Managed provider is unavailable: {provider}")
-        self.adapters[provider] = adapter
+        self.adapters[cache_key] = adapter
         return adapter
 
     def _resume_session(self, task_id: str, attempt: int) -> str | None:

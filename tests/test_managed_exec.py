@@ -166,6 +166,16 @@ for raw in sys.stdin:
     elif method == "turn/start":
         respond(message_id, {{"turn": {{"id": turn_id}}}})
         if mode == "success":
+            notify("item/started", {{
+                "threadId": thread_id, "turnId": turn_id,
+                "item": {{"id": "cmd_fake_1", "type": "commandExecution"}}}})
+            notify("thread/tokenUsage/updated", {{
+                "threadId": thread_id, "turnId": turn_id,
+                "tokenUsage": {{"total": {{
+                    "inputTokens": 100, "outputTokens": 20,
+                    "reasoningOutputTokens": 5, "cachedInputTokens": 7,
+                    "cacheWriteInputTokens": 3, "totalTokens": 135
+                }}}}}})
             notify("turn/completed", {{
                 "threadId": thread_id, "turnId": turn_id,
                 "turn": {{"id": turn_id, "status": "completed",
@@ -487,10 +497,17 @@ class ManagedExecTestCase(unittest.TestCase):
         with self.assertRaises(ManagedError):
             adapter.start(task_id="codex", prompt=self.prompt, cwd=self.work)
 
-    def test_codex_capabilities_are_contract_only(self):
+    def test_codex_rejects_invalid_sandbox_and_approval_values(self):
+        with self.assertRaises(ManagedError):
+            CodexAdapter(self.root, sandbox="write-everything")
+        with self.assertRaises(ManagedError):
+            CodexAdapter(self.root, approval_policy="always")
+
+    def test_codex_capabilities_include_live_tool_activity(self):
         caps = self._codex_adapter().capabilities()
         self.assertEqual(caps["provider"], "codex")
         self.assertIs(caps["managed_session"], True)
+        self.assertIs(caps["tool_activity"], True)
         self.assertIs(caps["completion"], True)
         self.assertIs(caps["resume"], True)
         self.assertIs(caps["native_cancel_ack"], False)
@@ -509,6 +526,11 @@ class ManagedExecTestCase(unittest.TestCase):
         self.assertEqual(state["turn_id"], "tu_fake_1")
         self.assertEqual(state["session_id"], "th_fake_1")
         self.assertEqual(state["text"], "DONE_CODEX")
+        self.assertEqual(state["tool_count"], 1)
+        self.assertEqual(state["tokens"]["input"], 100)
+        self.assertEqual(state["tokens"]["output"], 20)
+        self.assertEqual(state["tokens"]["cache_read"], 7)
+        self.assertEqual(state["tokens"]["cache"]["write"], 3)
         methods = self.method_log.read_text(encoding="utf-8").splitlines()
         self.assertEqual(methods[:3], ["initialize", "thread/start", "turn/start"])
         self.assertNotIn(self.prompt, json.dumps(state))

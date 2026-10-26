@@ -136,8 +136,10 @@ class CapabilityMatrixTests(unittest.TestCase):
         self.assertEqual(managed["platforms"]["opencode"]["status"], "live-verified-local")
         self.assertTrue(managed["platforms"]["opencode"]["live_smoke_tested"])
         self.assertFalse(managed["platforms"]["opencode"]["native_cancel_ack"])
-        self.assertEqual(managed["platforms"]["codex"]["status"], "contract-only")
-        self.assertFalse(managed["platforms"]["codex"]["live_smoke_tested"])
+        self.assertEqual(managed["platforms"]["codex"]["status"], "live-verified-local")
+        self.assertTrue(managed["platforms"]["codex"]["live_smoke_tested"])
+        self.assertFalse(managed["platforms"]["codex"]["native_cancel_ack"])
+        self.assertIn("resume_scope", managed["platforms"]["codex"])
         for key in ("antigravity", "cursor"):
             self.assertEqual(managed["platforms"][key]["status"], "not-implemented")
             self.assertFalse(managed["platforms"][key]["managed_session"])
