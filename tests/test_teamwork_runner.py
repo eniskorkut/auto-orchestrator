@@ -269,20 +269,21 @@ class RunnerExecutionTests(unittest.TestCase):
                          "VALUE = 2\n")
 
     def test_two_independent_worktrees_run_concurrently(self):
-        adapter = DelayedFakeAdapter(duration=3.0)
+        adapter = DelayedFakeAdapter(duration=4.0)
         runner = TeamworkRunner(self.root, parallel_plan("parallel-test"),
                                 adapter=adapter, max_seconds=20)
         self.addCleanup(runner.close)
-        started = time.monotonic()
         summary = runner.run()
-        elapsed = time.monotonic() - started
         self.assertEqual(summary["status"], "passed", summary)
-        self.assertLess(elapsed, 5.5, "two 3s tasks should not take a full serial budget")
+        # CI wall-clock and worktree startup times vary; prove concurrency from
+        # the adapter's execution intervals instead of a fixed elapsed budget.
         self.assertGreaterEqual(adapter.max_active, 2, "both managed tasks were active together")
-        self.assertLess(abs(adapter.start_times["backend"] - adapter.start_times["frontend"]),
-                        0.4)
         overlap = min(adapter.end_times.values()) - max(adapter.start_times.values())
-        self.assertGreater(overlap, 0.5, "task execution intervals must overlap")
+        self.assertGreater(overlap, 1.0, "task execution intervals must overlap")
+        self.assertGreater(
+            overlap, 0.25 * adapter.duration,
+            "serialized tasks would have no positive interval overlap",
+        )
         self.assertEqual(summary["timings"]["backend"]["cost"], 0.001)
 
     def test_cancel_flag_stops_locally_without_native_ack(self):
