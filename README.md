@@ -1,4 +1,4 @@
-# Auto-Orchestrator — Native Multi-Agent Coordination (V7.3)
+# Auto-Orchestrator — Native Multi-Agent Coordination (V7.4)
 
 Portable, opt-in native-subagent coordination for **OpenCode**, **Codex**, **Cursor**, and **Google Antigravity**. Platform-native runtime capabilities and proof strength differ.
 
@@ -296,6 +296,32 @@ adds a small, conservative long-tail domain ontology and
 skill selection rates. None of this proves live IDE reliability or speedup
 until matched native runs are repeated. See
 [execution reliability](docs/V64_RELIABILITY.md).
+
+## V7.4 — Adaptive teamwork and true parallel execution
+
+V7.4 keeps the V7.3 managed-session/milestone runtime and fixes the coordination
+layer: an event-driven bounded scheduler, FAST/BALANCED/RIGOROUS adaptive
+planning, a single-chat `/teamwork` bridge, correct concurrency metrics and
+restart orphan reconciliation.
+
+- **True concurrency:** live two-session OpenCode probe: 8.65 s wall, 8.41 s
+  true overlap, peak 2; the scheduler never blocks one task while waiting for
+  another.
+- **Adaptive modes:** FAST (one milestone, targeted verification), BALANCED
+  (build/verify/risk review), RIGOROUS (full independent audit), and `auto`
+  using a bounded repository profile. Missing repo facts fall back to BALANCED.
+- **Single chat:** `.opencode/commands/teamwork.md` plus
+  `tools/teamwork_chat.py` start/status/agents/milestones/cancel/resume without
+  a separate terminal workflow. Child sessions stay separate managed sessions.
+- **Correct metrics:** interval union is no longer called overlap; schema 2
+  exposes true concurrent overlap, max/average concurrency and critical path.
+- **Recovery:** orphaned running tasks are explicitly reconciled; local cancel
+  is never shown as native ACK.
+- **Real FAST E2E:** 33 backend tests and browser E2E passed; 247.8 s and
+  $0.0528 versus V7.3’s 1566.1 s/$0.1404 on the same sample, with intentionally
+  lower verification depth.
+
+See [Adaptive teamwork and measured evidence](docs/V74_ADAPTIVE_TEAMWORK.md).
 
 ## V7.3 — Teamwork engine, managed execution and milestones
 

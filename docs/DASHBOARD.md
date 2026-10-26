@@ -187,7 +187,10 @@ V7.3 adds:
 
 The API exposes a short session hash and task/provider/model/cost metadata, not
 raw managed session ids or event paths. Progress counts only passed milestones;
-`estimated_progress` is always `null`. See [V73_TEAMWORK.md](V73_TEAMWORK.md).
+`estimated_progress` is always `null`. V7.4 adds `work_mode`, `risk_assessment`,
+`usage` and `scheduler` fields for FAST/BALANCED/RIGOROUS, active session count,
+queue depth and measured cost. See [V73_TEAMWORK.md](V73_TEAMWORK.md) and
+[V74_ADAPTIVE_TEAMWORK.md](V74_ADAPTIVE_TEAMWORK.md).
 
 ## Privacy and security model
 
