@@ -305,7 +305,7 @@ V7.4.1 hardens the V7.4 teamwork engine for interrupted, long-running work.
   while both children were alive; the bridge resumed, verified owned orphans,
   preserved worktrees, repaired once and finished with 14 backend tests plus
   browser E2E. Evidence: [recovery E2E](docs/assets/v741-recovery-e2e.json).
-- **Owned process identity:** PID + start token + UID/time, advisory project
+- **Owned process identity:** PID + start token + UID/time, atomic project
   locks, atomic active state, heartbeat and fail-closed stale-owner handling.
 - **Recovery states:** `active`, `runner_disconnected`, `reconciling`,
   `orphaned`, `retry_ready`, `resuming`, `verifying`, `recovered`,

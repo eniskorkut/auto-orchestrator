@@ -29,8 +29,8 @@ fixes.
 - `identity_matches()` and `owner_alive()` that never signal a process;
 - `terminate_owned()` which refuses to signal when the live identity does not
   match the recorded owner;
-- an advisory cross-process project lock (`state.lock`) released by the OS on
-  crash;
+- an atomic cross-process project lock (`state.lock`) that is reclaimed only
+  after the recorded owner identity is gone;
 - atomic active-state updates and private recovery-state files.
 
 `teamwork_chat.py` now treats `active.json` as metadata only. It stores the

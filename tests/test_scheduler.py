@@ -53,7 +53,7 @@ class SchedulerTests(unittest.TestCase):
 
     def test_failure_timeout_and_duplicate_keys_are_bounded(self):
         scheduler = PollScheduler(max_workers=2, poll_slice=0.05)
-        scheduler.submit("bad", "bad", FakePoll(0.05, fail=True), timeout=5)
+        scheduler.submit("bad", "bad", FakePoll(1.0, fail=True), timeout=5)
         with self.assertRaises(SchedulerError):
             scheduler.submit("bad", "bad", FakePoll(0.01), timeout=5)
         key, state = scheduler.wait(timeout=2)[0]
