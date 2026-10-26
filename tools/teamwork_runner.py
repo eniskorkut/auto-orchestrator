@@ -200,6 +200,30 @@ def default_browser_env(root: Path) -> dict:
     return env
 
 
+def adapter_options(task: dict, default_model, browser_env: dict):
+    """Validate provider options before they become a cache key."""
+    provider_value = task.get("provider") or "opencode"
+    if not isinstance(provider_value, str) or not provider_value.strip():
+        raise RunnerError("Task provider must be a non-empty string")
+    provider = provider_value.strip().lower()
+    sandbox = task.get("sandbox")
+    approval_policy = task.get("approval_policy")
+    if sandbox is not None and not isinstance(sandbox, str):
+        raise RunnerError("Task sandbox must be a string")
+    if approval_policy is not None and not isinstance(approval_policy, str):
+        raise RunnerError("Task approval_policy must be a string")
+    options = {"model": task.get("model") or default_model,
+               "env": browser_env}
+    if provider == "codex":
+        if sandbox is not None:
+            options["sandbox"] = sandbox
+        if approval_policy is not None:
+            options["approval_policy"] = approval_policy
+    cache_key = (provider, options.get("sandbox"),
+                 options.get("approval_policy"))
+    return provider, options, cache_key
+
+
 class TeamworkRunner:
     def __init__(
         self,
@@ -513,25 +537,8 @@ class TeamworkRunner:
     def _adapter(self, task: dict, run: TaskRun):
         if self.adapter is not None:
             return self.adapter
-        provider_value = task.get("provider") or "opencode"
-        if not isinstance(provider_value, str) or not provider_value.strip():
-            raise RunnerError("Task provider must be a non-empty string")
-        provider = provider_value.strip().lower()
-        sandbox = task.get("sandbox")
-        approval_policy = task.get("approval_policy")
-        if sandbox is not None and not isinstance(sandbox, str):
-            raise RunnerError("Task sandbox must be a string")
-        if approval_policy is not None and not isinstance(approval_policy, str):
-            raise RunnerError("Task approval_policy must be a string")
-        options = {"model": task.get("model") or self.model,
-                   "env": self.browser_env}
-        if provider == "codex":
-            if sandbox is not None:
-                options["sandbox"] = sandbox
-            if approval_policy is not None:
-                options["approval_policy"] = approval_policy
-        cache_key = (provider, options.get("sandbox"),
-                     options.get("approval_policy"))
+        provider, options, cache_key = adapter_options(
+            task, self.model, self.browser_env)
         cached = self.adapters.get(cache_key)
         if cached is not None:
             return cached
