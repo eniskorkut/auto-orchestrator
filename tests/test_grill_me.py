@@ -61,6 +61,27 @@ class GrillMeTests(unittest.TestCase):
                 decisions = memory.list_decisions(topic="jwt_refresh")
                 self.assertTrue(all(item["status"] == "superseded" for item in decisions))
 
+    def test_skipped_critical_question_can_be_resumed_and_answered(self):
+        with GrillMeEngine(self.root) as engine:
+            start = engine.start("Kullanıcı giriş sistemini geliştir",
+                                 origin_platform="codex", mode="auto")
+            skipped = engine.skip(start["question"]["question_id"])
+            self.assertFalse(engine.summary()["ready"])
+            with ProjectMemory(self.root) as memory:
+                self.assertEqual(len(memory.list_requirements(
+                    status="unresolved_blocking")), 1)
+            resumed = engine.resume()
+            self.assertEqual(resumed["question"]["question_key"], "auth_session")
+            answered = engine.answer(resumed["question"]["question_id"],
+                                     option="jwt")
+            self.assertEqual(answered["next"]["question_key"], "jwt_refresh")
+            engine.answer(answered["next"]["question_id"], option="refresh")
+            self.assertTrue(engine.summary()["ready"])
+            with ProjectMemory(self.root) as memory:
+                self.assertEqual(memory.list_requirements(
+                    status="unresolved_blocking"), [])
+            self.assertTrue(engine.approve()["approved"])
+
     def test_code_derived_facts_suppress_questions(self):
         (self.root / "backend").mkdir()
         (self.root / "backend" / "auth.py").write_text(

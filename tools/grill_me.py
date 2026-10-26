@@ -132,6 +132,18 @@ class GrillMeEngine:
                 (time.time(), interview["interview_id"]))
             self.conn.commit()
             interview = self.get_interview(interview["interview_id"])
+        # A skipped question stays unresolved_blocking, but it must remain
+        # answerable: resume reopens it instead of losing it forever.
+        reopened = self.conn.execute(
+            "UPDATE interview_questions SET status='open',answered_at=NULL "
+            "WHERE interview_id=? AND status='skipped'",
+            (interview["interview_id"],)).rowcount
+        if reopened:
+            self.conn.execute(
+                "UPDATE interviews SET status='open',updated_at=? WHERE interview_id=?",
+                (time.time(), interview["interview_id"]))
+            self.conn.commit()
+            interview = self.get_interview(interview["interview_id"])
         return {"interview": interview,
                 "question": self.next_question(interview["interview_id"])}
 
@@ -289,7 +301,7 @@ class GrillMeEngine:
 
     def answer(self, question_id, *, option=None, text=None) -> dict:
         question = self._question(question_id)
-        if question["status"] != "open":
+        if question["status"] not in ("open", "skipped"):
             raise GrillError("question is not open")
         options = {item["id"]: item for item in question["options"]}
         if option is not None:
@@ -318,10 +330,12 @@ class GrillMeEngine:
                           if item["id"] != option],
             source="user", source_ref=f"question:{question_id}",
             status="confirmed", confirmed_by="user")
+        self.memory.resolve_requirements_by_ref(f"question:{question_id}")
         self._expand(question["interview_id"], question["question_key"], option, now)
         self.conn.execute("UPDATE interviews SET updated_at=? WHERE interview_id=?",
                           (now, question["interview_id"]))
         self.conn.commit()
+        self._settle(question["interview_id"])
         return {"question": self._question(question_id),
                 "next": self.next_question(question["interview_id"])}
 
@@ -416,7 +430,12 @@ class GrillMeEngine:
         skipped = self.conn.execute(
             "SELECT COUNT(*) FROM interview_questions WHERE interview_id=? "
             "AND status='skipped'", (interview_id,)).fetchone()[0]
-        status = "ready" if open_rows == 0 and skipped == 0 else "blocked"
+        if skipped:
+            status = "blocked"
+        elif open_rows:
+            status = "open"
+        else:
+            status = "ready"
         self.conn.execute("UPDATE interviews SET status=?,updated_at=? "
                           "WHERE interview_id=?", (status, time.time(), interview_id))
         self.conn.commit()

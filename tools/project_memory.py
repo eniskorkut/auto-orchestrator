@@ -404,6 +404,18 @@ class ProjectMemory:
         self.conn.commit()
         return self.get_requirement(row["requirement_id"])
 
+    def resolve_requirements_by_ref(self, source_ref, *, status="confirmed"):
+        if not isinstance(source_ref, str) or not source_ref:
+            raise MemoryError("source_ref is required")
+        if status not in REQUIREMENT_STATUSES:
+            raise MemoryError("unsupported requirement status")
+        cursor = self.conn.execute(
+            "UPDATE requirements SET status=?,updated_at=? "
+            "WHERE project_id=? AND source_ref=? AND status LIKE 'unresolved%'",
+            (status, time.time(), self.project_id, source_ref))
+        self.conn.commit()
+        return cursor.rowcount
+
     # -- meta / handoff / observations ----------------------------------
     def update_meta(self, **fields) -> dict:
         allowed = {"last_platform", "last_run_id", "last_milestone", "head_sha",
