@@ -1,0 +1,92 @@
+{
+  "schema_version": 1,
+  "kind": "v75-codex-app-server-smoke",
+  "codex_version": "0.164.0",
+  "auth_mode": "chatgpt",
+  "model_requested": "gpt-6.1-sol",
+  "protocol": {
+    "handshake": "initialize + initialized",
+    "model_list_count": 7,
+    "selected_model": "gpt-6.1-sol",
+    "model_default": true,
+    "thread_hash": "45eee41ee64c",
+    "turn_status": "completed",
+    "duration_ms": 68713,
+    "event_count": 110,
+    "completion_observed": true,
+    "tokens": {
+      "input": 84420,
+      "output": 241,
+      "reasoning": 0,
+      "cache_read": 79232,
+      "cache_write": 0,
+      "total": 84661
+    },
+    "approval_events": 0,
+    "wall_time_seconds": 69.908
+  },
+  "managed_adapter": {
+    "status": "completed",
+    "thread_hash": "23d018685da8",
+    "turn_status": "completed",
+    "tool_count": 1,
+    "tokens": {
+      "input": 73375,
+      "output": 343,
+      "reasoning": 0,
+      "cache_read": 47232,
+      "cache_write": 0,
+      "total": 73718,
+      "cache": {
+        "read": 47232,
+        "write": 0
+      }
+    },
+    "cost": null,
+    "error_count": 0,
+    "completion_observed": true,
+    "wall_time_seconds": 21.471
+  },
+  "managed_teamwork": {
+    "status": "passed",
+    "milestone_status": "passed",
+    "task_state": "completed",
+    "verdict": "pass",
+    "managed": {
+      "provider": "codex",
+      "session_id_hash": "4b0a46a1e690",
+      "model": "gpt-6.1-sol",
+      "cost": null,
+      "tool_count": 2,
+      "tokens": {
+        "input": 96450,
+        "output": 564,
+        "reasoning": 0,
+        "cache_read": 71168,
+        "cache_write": 0,
+        "total": 97014,
+        "cache": {
+          "read": 71168,
+          "write": 0
+        }
+      },
+      "events_name": "10802254a67e4f0f8fc5e4503417d1ed.jsonl",
+      "native_cancel_ack": false
+    },
+    "completion_observed": true
+  },
+  "native_cancel_ack": false,
+  "limitations": [
+    "Single local sample; no repeated latency benchmark.",
+    "Cost is not reported by the Codex app-server notification stream; null means unmeasured.",
+    "Native Codex cancellation acknowledgement is not claimed.",
+    "This is Codex CLI/app-server managed execution, not an IDE-native subagent.",
+    "The harness phases must be run in separate fresh processes; a second app-server turn in the same process can be affected by provider/hook state."
+  ],
+  "auth_verification": {
+    "command": "codex login status",
+    "result": "Logged in using ChatGPT",
+    "claimed_token_or_api_key": false
+  },
+  "sampling_note": "Single local sample. The protocol phase took 68.7 s; provider rate limits can affect subsequent runs. The auth field was verified separately with codex login status because the original harness did not retain the account/updated notification."
+}

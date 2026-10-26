@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "kind": "v75-opencode-go-gpt-model",
+  "classification": "OpenCode Go hosted GPT model, not OpenAI provider and not Codex App-server",
+  "model": "opencode-go/gpt-6-luna",
+  "provider": "OpenCode Go",
+  "status": "succeeded",
+  "session_hash": "6ab6bee53261",
+  "request": "Read calc.py; identify the bug and suggest one test; do not modify files.",
+  "response_preview": "`add(a, b)` incorrectly subtracts instead of adding; test that `add(2, 3) == 5`.",
+  "measured_window_ms": 360.0,
+  "openai_provider_direct": "not-connected",
+  "note": "OpenCode auth list contains an OpenCode Go API key, not an OpenAI/ChatGPT provider login. Output was real; no raw session id stored."
+}

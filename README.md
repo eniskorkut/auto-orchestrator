@@ -1,4 +1,4 @@
-# Auto-Orchestrator — Native Multi-Agent Coordination (V7.4.1)
+# Auto-Orchestrator — Native Multi-Agent Coordination (V7.5)
 
 Portable, opt-in native-subagent coordination for **OpenCode**, **Codex**, **Cursor**, and **Google Antigravity**. Platform-native runtime capabilities and proof strength differ.
 
@@ -296,6 +296,21 @@ adds a small, conservative long-tail domain ontology and
 skill selection rates. None of this proves live IDE reliability or speedup
 until matched native runs are repeated. See
 [execution reliability](docs/V64_RELIABILITY.md).
+
+## V7.5 — Codex managed execution (branch)
+
+V7.5 is a feature branch on top of the merged V7.4.1 main line. It validates the
+real Codex CLI/app-server path rather than treating it as contract-only.
+
+- Codex CLI 0.164.0, ChatGPT login, `gpt-6.1-sol`.
+- Real app-server `initialize` → `initialized` → `model/list` →
+  `thread/start` → `turn/start` → `turn/completed`.
+- Real adapter and Supervisor/Teamwork reviewer runs passed; token usage and
+  tool-item counts are recorded.
+- Capability matrix marks Codex managed execution `live-verified-local`; native
+  cancel ACK, IDE-native subagent status and live resume remain unclaimed.
+
+See [Codex managed execution evidence](docs/V75_CODEX_MANAGED.md).
 
 ## V7.4.1 — Recovery, ownership and secure chat input
 
