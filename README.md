@@ -376,8 +376,9 @@ bounded repair loop reopens the relevant implementer when verification fails.
   the Supervisor SQLite database. Progress counts only verified passed
   milestones and never shows an estimate as success.
 - **Managed execution:** OpenCode is live-verified via `opencode run --format
-  json`; Codex App-server is contract-tested only; Antigravity and Cursor
-  managed execution is not implemented. Native hook observation is unchanged
+  json`; on the V7.4.1 main line Codex App-server remains contract-only, while
+  the V7.5 branch records a live local Codex 0.164.0 smoke; Antigravity and
+  Cursor managed execution is not implemented. Native hook observation is unchanged
   and managed completion is never claimed as a native stop.
 - **Real E2E:** a disposable task-manager project with backend, frontend, unit
   tests and browser E2E was built by managed sessions, independently reviewed

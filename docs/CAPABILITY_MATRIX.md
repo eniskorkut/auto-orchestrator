@@ -84,10 +84,9 @@ The Codex adapter now records live `thread/start`, `turn/start`, token usage,
 tool-item counts and `turn/completed` from a local Codex 0.164.0 app-server using
 the ChatGPT login. Native cancellation acknowledgement, IDE-native subagent
 status and a live resume claim remain unsupported. Evidence:
-`docs/assets/v75-codex-smoke.json` (V7.5 branch). The Codex
-adapter is tested against a fake app-server only until a real binary is
-available. Antigravity and Cursor have no external managed-session integration
-in this version.
+`docs/assets/v75-codex-smoke.json` (V7.5 branch). Fake app-server tests remain as
+fast contract regressions; they are not the live evidence. Antigravity and
+Cursor have no external managed-session integration in this version.
 
 ## Platform evidence and limits
 

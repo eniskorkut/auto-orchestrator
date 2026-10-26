@@ -12,11 +12,14 @@ managed path that V7.3 marked as contract-only.
   `initialize` → `initialized` → `model/list` → `thread/start` →
   `turn/start` → live events → `turn/completed`.
 - Default model selected from `model/list`: **gpt-6.1-sol**.
-- Real read-only review task completed; no file modifications.
+- Real read-only review task completed. The prompt forbade changes and the model
+  reported none; this sample did **not** independently hash-check the file.
 - Real `CodexAdapter` managed run completed with **73,718 tokens**, **1 tool
   item**, and no errors.
 - Real Teamwork reviewer task completed through the Supervisor: **passed**, JSON
   verdict `pass`, **97,014 tokens**, **2 tool items**, milestone M1 passed.
+  Sandbox `read-only`, approval policy `never`; file hash assertion was not
+  recorded in this sample.
 - The protocol smoke recorded **110 events**, `turn/completed`, and **84,661
   tokens**; adapter and Teamwork are separate managed executions.
 
@@ -66,7 +69,10 @@ These are distinct and must not be conflated:
 - Cost is not emitted by the app-server notification stream; no cost is invented.
 - One local sample; no repeated latency benchmark.
 - Native Codex cancellation acknowledgement is not claimed.
-- `thread/resume` is implemented and contract-tested, but not live-smoked here.
+- `thread/resume` is implemented and contract-tested, but not live-smoked here;
+  `resume_live_verified` is false in the evidence.
+- Write mode, approval bridging and danger-full-access are not live-tested and
+  are rejected by the Teamwork Codex adapter.
 - Codex app-server approval requests are not interactively bridged in Teamwork;
   read-only tasks explicitly use `approvalPolicy: never`.
 - Codex write-mode Teamwork integration is not part of this smoke.

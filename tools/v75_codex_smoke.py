@@ -56,6 +56,13 @@ def _hash(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
 
 
+def _file_hash(path: Path) -> str | None:
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
 def _clean(value):
     text = json.dumps(value, ensure_ascii=False)
     for old, new in (
@@ -73,6 +80,7 @@ def _protocol_smoke(root: Path, model: str) -> dict:
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1,
     )
     started = time.monotonic()
+    before = _file_hash(root / "calc.py")
     events = []
     completed = None
     models = []
@@ -175,6 +183,7 @@ def _protocol_smoke(root: Path, model: str) -> dict:
         "duration_ms": turn.get("durationMs"),
         "event_count": len(events),
         "completion_observed": True,
+        "file_unchanged": _file_hash(root / "calc.py") == before,
         "auth_mode": auth_mode,
         "tokens": tokens,
         "approval_events": sum(
@@ -187,6 +196,7 @@ def _protocol_smoke(root: Path, model: str) -> dict:
 
 def _adapter_smoke(root: Path, model: str) -> dict:
     adapter = CodexAdapter(root, model=model)
+    before = _file_hash(root / "calc.py")
     started = time.monotonic()
     handle = None
     try:
@@ -207,6 +217,7 @@ def _adapter_smoke(root: Path, model: str) -> dict:
             "cost": state.get("cost") or None,
             "error_count": len(state.get("errors") or []),
             "completion_observed": state.get("status") == "completed",
+            "file_unchanged": _file_hash(root / "calc.py") == before,
             "wall_time_seconds": round(time.monotonic() - started, 3),
         }
     finally:
@@ -217,6 +228,7 @@ def _adapter_smoke(root: Path, model: str) -> dict:
 def _teamwork_smoke(root: Path, model: str) -> dict:
     (root / "calc.py").write_text("def add(a, b):\n    return a + b\n",
                                  encoding="utf-8")
+    before = _file_hash(root / "calc.py")
     (root / ".gitignore").write_text(".auto-orchestrator/\n", encoding="utf-8")
     for args in (["init"], ["config", "user.email", "smoke@example.invalid"],
                  ["config", "user.name", "Smoke"], ["add", "."],
@@ -260,6 +272,7 @@ def _teamwork_smoke(root: Path, model: str) -> dict:
         "task_state": task.get("state"),
         "verdict": (task.get("result") or {}).get("verdict"),
         "managed": (task.get("result") or {}).get("managed"),
+        "file_unchanged": _file_hash(root / "calc.py") == before,
         "completion_observed": summary.get("status") == "passed",
     }
 
@@ -269,8 +282,7 @@ def main(argv=None) -> int:
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--phase", choices=["all", "protocol", "adapter", "teamwork"],
                         default="all")
-    parser.add_argument("--json-out", type=Path,
-                        default=Path("docs/assets/v75-codex-smoke.json"))
+    parser.add_argument("--json-out", type=Path, default=None)
     args = parser.parse_args(argv)
     codex = shutil.which("codex")
     if not codex:

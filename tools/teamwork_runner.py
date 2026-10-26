@@ -260,6 +260,12 @@ class TeamworkRunner:
         self._context_cache: dict[str, str] = {}
 
     def close(self) -> None:
+        for adapter in list(self.adapters.values()):
+            try:
+                adapter.close()
+            except (ManagedError, OSError, ValueError):
+                pass
+        self.adapters.clear()
         self._heartbeat_stop.set()
         if self._heartbeat_thread is not None:
             self._heartbeat_thread.join(timeout=2)
@@ -507,14 +513,23 @@ class TeamworkRunner:
     def _adapter(self, task: dict, run: TaskRun):
         if self.adapter is not None:
             return self.adapter
-        provider = task.get("provider") or "opencode"
+        provider_value = task.get("provider") or "opencode"
+        if not isinstance(provider_value, str) or not provider_value.strip():
+            raise RunnerError("Task provider must be a non-empty string")
+        provider = provider_value.strip().lower()
+        sandbox = task.get("sandbox")
+        approval_policy = task.get("approval_policy")
+        if sandbox is not None and not isinstance(sandbox, str):
+            raise RunnerError("Task sandbox must be a string")
+        if approval_policy is not None and not isinstance(approval_policy, str):
+            raise RunnerError("Task approval_policy must be a string")
         options = {"model": task.get("model") or self.model,
                    "env": self.browser_env}
         if provider == "codex":
-            if task.get("sandbox") is not None:
-                options["sandbox"] = task["sandbox"]
-            if task.get("approval_policy") is not None:
-                options["approval_policy"] = task["approval_policy"]
+            if sandbox is not None:
+                options["sandbox"] = sandbox
+            if approval_policy is not None:
+                options["approval_policy"] = approval_policy
         cache_key = (provider, options.get("sandbox"),
                      options.get("approval_policy"))
         cached = self.adapters.get(cache_key)

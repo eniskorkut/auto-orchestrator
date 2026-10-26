@@ -23,7 +23,10 @@
       "total": 84661
     },
     "approval_events": 0,
-    "wall_time_seconds": 69.908
+    "wall_time_seconds": 69.908,
+    "sandbox": "read-only",
+    "approval_policy": "never",
+    "approval_events_note": "zero approval events because approvalPolicy was never"
   },
   "managed_adapter": {
     "status": "completed",
@@ -45,7 +48,9 @@
     "cost": null,
     "error_count": 0,
     "completion_observed": true,
-    "wall_time_seconds": 21.471
+    "wall_time_seconds": 21.471,
+    "sandbox": "read-only",
+    "approval_policy": "never"
   },
   "managed_teamwork": {
     "status": "passed",
@@ -73,7 +78,9 @@
       "events_name": "10802254a67e4f0f8fc5e4503417d1ed.jsonl",
       "native_cancel_ack": false
     },
-    "completion_observed": true
+    "completion_observed": true,
+    "sandbox": "read-only",
+    "approval_policy": "never"
   },
   "native_cancel_ack": false,
   "limitations": [
@@ -81,12 +88,22 @@
     "Cost is not reported by the Codex app-server notification stream; null means unmeasured.",
     "Native Codex cancellation acknowledgement is not claimed.",
     "This is Codex CLI/app-server managed execution, not an IDE-native subagent.",
-    "The harness phases must be run in separate fresh processes; a second app-server turn in the same process can be affected by provider/hook state."
+    "The harness phases must be run in separate fresh processes; a second app-server turn in the same process can be affected by provider/hook state.",
+    "File modifications were not independently hash-checked in this sample; the prompt was read-only and the adapter reported no changes.",
+    "Live resume, write-mode and approval-bridging are not verified."
   ],
   "auth_verification": {
     "command": "codex login status",
     "result": "Logged in using ChatGPT",
     "claimed_token_or_api_key": false
   },
-  "sampling_note": "Single local sample. The protocol phase took 68.7 s; provider rate limits can affect subsequent runs. The auth field was verified separately with codex login status because the original harness did not retain the account/updated notification."
+  "sampling_note": "Single local sample. The protocol phase took 68.7 s; provider rate limits can affect subsequent runs. The auth field was verified separately with codex login status because the original harness did not retain the account/updated notification.",
+  "scope": {
+    "sandbox": "read-only",
+    "approval_policy": "never",
+    "resume_live_verified": false,
+    "write_mode_tested": false,
+    "file_modification_checked": false,
+    "note": "Only a new read-only Codex thread was live-smoked. Resume and write mode are not live claims."
+  }
 }

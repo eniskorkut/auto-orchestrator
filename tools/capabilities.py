@@ -135,6 +135,11 @@ MANAGED_EXECUTION = {
             "native_cancel_ack": False,
             "terminal_stream": False,
             "live_smoke_tested": True,
+            "sandbox_tested": "read-only",
+            "approval_policy_tested": "never",
+            "write_mode_tested": False,
+            "resume_live_verified": False,
+            "file_modification_checked": False,
             "evidence": ("real local Codex CLI 0.164.0 app-server; gpt-6.1-sol; "
                          "V7.5 protocol/adapter/Teamwork smoke; no native cancel ACK"),
             "resume_scope": "codex thread/resume is implemented and contract-tested; no live resume smoke in V7.5",

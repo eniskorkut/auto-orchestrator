@@ -213,8 +213,9 @@ model latency were not normalized.
 - The OpenCode command is a real custom command file, but this environment did
   not automate a click-through of the desktop TUI. The bridge and command
   contract were exercised directly.
-- Codex managed execution remains contract-tested only; Antigravity and Cursor
-  managed execution remain not implemented.
+- Codex managed execution is contract-tested in the V7.4/V7.4.1 scope;
+  Antigravity and Cursor managed execution remain not implemented. The V7.5
+  branch later records a live Codex 0.164.0 smoke.
 - The live comparison is one sample per condition, not three repetitions.
 - FAST/BALANCED/RIGOROUS have different verification depth; wall-time ratios
   across modes are not quality-adjusted claims.

@@ -35,6 +35,9 @@ class FakeAdapter:
     def available(self):
         return True
 
+    def close(self):
+        return None
+
     def capabilities(self):
         return {"provider": "fake", "managed_session": True}
 
@@ -256,6 +259,29 @@ class RunnerGitRecoveryTests(unittest.TestCase):
 
 
 class RunnerHelpersTests(unittest.TestCase):
+    def test_codex_provider_options_are_normalized_and_validated(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as temp:
+            runner = TeamworkRunner(Path(temp), plan("codex-options"),
+                                    adapter=None, max_seconds=10)
+            self.addCleanup(runner.close)
+            with mock.patch("tools.teamwork_runner.adapter_for") as factory:
+                fake = FakeAdapter()
+                factory.return_value = fake
+                adapter = runner._adapter({
+                    "id": "codex", "provider": " Codex ",
+                    "model": "gpt-6.1-sol", "sandbox": "read-only",
+                    "approval_policy": "never",
+                }, None)
+                self.assertIs(adapter, fake)
+                kwargs = factory.call_args.kwargs
+                self.assertEqual(kwargs["sandbox"], "read-only")
+                self.assertEqual(kwargs["approval_policy"], "never")
+            with self.assertRaises(RunnerError):
+                runner._adapter({
+                    "id": "codex", "provider": "codex", "sandbox": [],
+                }, None)
+
     def test_path_scope_and_verdict_parser(self):
         self.assertTrue(path_allowed("backend/app.py", ["backend/"]))
         self.assertFalse(path_allowed("frontend/app.js", ["backend/"]))

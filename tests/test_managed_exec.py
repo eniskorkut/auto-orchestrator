@@ -501,7 +501,11 @@ class ManagedExecTestCase(unittest.TestCase):
         with self.assertRaises(ManagedError):
             CodexAdapter(self.root, sandbox="write-everything")
         with self.assertRaises(ManagedError):
+            CodexAdapter(self.root, sandbox="danger-full-access")
+        with self.assertRaises(ManagedError):
             CodexAdapter(self.root, approval_policy="always")
+        with self.assertRaises(ManagedError):
+            CodexAdapter(self.root, approval_policy="on-request")
 
     def test_codex_capabilities_include_live_tool_activity(self):
         caps = self._codex_adapter().capabilities()

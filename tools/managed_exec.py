@@ -142,7 +142,7 @@ def _finite_number(value, *, integer: bool = False):
         return 0 if integer else 0.0
     try:
         number = float(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return 0 if integer else 0.0
     if not math.isfinite(number) or number < 0:
         return 0 if integer else 0.0
@@ -1331,13 +1331,17 @@ class CodexAdapter(_ManagedAdapter):
     provider = "codex"
 
     def __init__(self, root: Path, *, sandbox: str | None = None,
-                 approval_policy: str | None = None, **kwargs):
+                 approval_policy: str = "never", **kwargs):
         super().__init__(root, **kwargs)
-        if sandbox not in (None, "read-only", "workspace-write",
-                           "danger-full-access"):
-            raise ManagedError("invalid Codex sandbox")
-        if approval_policy not in (None, "untrusted", "on-request", "never"):
-            raise ManagedError("invalid Codex approval policy")
+        if sandbox not in (None, "read-only", "workspace-write"):
+            raise ManagedError(
+                "Codex sandbox must be read-only or workspace-write; "
+                "danger-full-access is not accepted by Teamwork"
+            )
+        if approval_policy != "never":
+            raise ManagedError(
+                "Codex approval bridging is not implemented; only 'never' is accepted"
+            )
         self.sandbox = sandbox
         self.approval_policy = approval_policy
 
@@ -1401,10 +1405,13 @@ class CodexAdapter(_ManagedAdapter):
             )
             run.rpc.notify("initialized", {})
             if resume:
+                resume_params = {"threadId": resume, "cwd": str(cwd)}
+                if self.sandbox is not None:
+                    resume_params["sandbox"] = self.sandbox
+                if self.approval_policy is not None:
+                    resume_params["approvalPolicy"] = self.approval_policy
                 result = run.rpc.request(
-                    "thread/resume",
-                    {"threadId": resume, "cwd": str(cwd)},
-                    timeout=START_TIMEOUT,
+                    "thread/resume", resume_params, timeout=START_TIMEOUT
                 )
             else:
                 params = {"cwd": str(cwd)}
@@ -1631,9 +1638,13 @@ class CodexAdapter(_ManagedAdapter):
                         and item_type in ("commandExecution", "fileChange",
                                           "mcpToolCall", "webSearch")):
                     call_id = item.get("id")
-                    call_id = (str(call_id)[:80] if call_id is not None else None)
-                    if call_id is None or all(
-                            tool.get("call_id") != call_id for tool in run.tools):
+                    call_id = (_text(str(call_id), limit=80,
+                                     prompt=run.redaction_prompt, secrets=True)
+                               if call_id is not None else None)
+                    if (len(run.tools) < MAX_TOOLS
+                            and (call_id is None or all(
+                                tool.get("call_id") != call_id
+                                for tool in run.tools))):
                         run.tools.append({
                             "name": str(item_type)[:64],
                             "tool": str(item_type)[:64],
