@@ -472,6 +472,33 @@ class TeamworkEngineTests(TeamworkTestCase):
                                     count_repair=False)
         self.assertEqual(second["repair_iterations"], 1)
 
+    def test_final_group_repair_reopens_every_failed_target(self):
+        self.init_sample(max_repair=2)
+        for milestone_id in ("M1", "M2", "M3"):
+            self.complete_milestone("team-run", milestone_id)
+        claimed = self.supervisor.claim("team-run")["claimed"]
+        self.assertEqual({item["id"] for item in claimed},
+                         {"review", "challenge", "audit"})
+        for item in claimed:
+            self.supervisor.change("team-run", item["id"], item["lease"],
+                                   "failed", reason="simulated failure")
+        first = self.engine.reopen("team-run", "review", "repair one")
+        self.assertEqual(first["repair_iterations"], 1)
+        claimed = self.supervisor.claim("team-run")["claimed"]
+        self.assertEqual([item["id"] for item in claimed], ["review"])
+        self.supervisor.change("team-run", "review", claimed[0]["lease"],
+                               "failed", reason="simulated again")
+        second = self.engine.reopen("team-run", "review", "final cycle")
+        self.assertEqual(second["repair_iterations"], 2)
+        third = self.engine.reopen("team-run", "challenge", "same cycle",
+                                   count_repair=False)
+        self.assertEqual(third["state"], "pending")
+        states = {task["id"]: task["state"]
+                  for task in self.milestone("team-run", "M4")["tasks"]}
+        self.assertEqual(states["review"], "pending")
+        self.assertEqual(states["challenge"], "pending")
+        self.assertEqual(self.milestone("team-run", "M4")["repair_iterations"], 2)
+
     def test_reopen_clears_lease_result_and_keeps_attempt_history(self):
         self.init_sample()
         self.complete_milestone("team-run", "M1")

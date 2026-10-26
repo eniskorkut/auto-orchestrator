@@ -15,6 +15,7 @@ import ctypes
 import json
 import os
 import signal
+import re
 import socket
 import subprocess
 import sys
@@ -25,10 +26,6 @@ from pathlib import Path
 
 class OwnershipError(RuntimeError):
     pass
-
-
-_SELF_IDENTITY = None
-_SELF_LOCK = __import__("threading").Lock()
 
 
 def _posix_identity(pid: int) -> dict | None:
@@ -181,123 +178,241 @@ def wait_for_exit(record, timeout: float = 5.0) -> bool:
     return not identity_matches(record)
 
 
+def _process_group(pid: int) -> int | None:
+    if os.name == "nt":
+        return None
+    try:
+        group = os.getpgid(pid)
+    except (OSError, ProcessLookupError):
+        return None
+    return group if group == pid else None
+
+
+def _group_alive(group: int | None) -> bool:
+    if group is None:
+        return False
+    # A zombie group leader would make killpg(0) look alive forever; inspect
+    # the group states and ignore zombies.
+    try:
+        process = subprocess.run(
+            ["ps", "-o", "stat=", "-g", str(group)],
+            capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=5,
+            env={**os.environ, "LC_ALL": "C", "LANG": "C"},
+        )
+        if process.returncode == 0:
+            return any(not state.upper().startswith("Z")
+                       for state in process.stdout.split())
+    except (OSError, subprocess.SubprocessError):
+        pass
+    try:
+        os.killpg(group, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+
+
+def owned_group_alive(pid: int) -> bool:
+    """Check the session group led by an owned managed PID (POSIX)."""
+    if os.name == "nt" or type(pid) is not int or pid <= 0:
+        return False
+    return _group_alive(pid)
+
+
+def _signal_owned(pid: int, group: int | None, sig) -> bool:
+    try:
+        if group is not None:
+            os.killpg(group, sig)
+        else:
+            os.kill(pid, sig)
+        return True
+    except (OSError, ProcessLookupError):
+        return False
+
+
 def terminate_owned(record, *, grace: float = 5.0) -> dict:
     """Terminate only a process whose live identity matches ``record``.
 
-    Returns a local-signal result. This is deliberately not a native provider
-    cancellation acknowledgement.
+    The managed provider starts a new session, so its direct PID is normally
+    the process-group leader. On POSIX the whole owned group is signalled; a
+    surviving grandchild would otherwise keep writing to the worktree.
     """
     if not identity_matches(record):
         return {
             "requested": False,
             "signaled": False,
             "terminated": not identity_matches(record),
+            "group_terminated": True,
             "native_cancel_ack": False,
             "local_signal_only": True,
             "reason": "process ownership could not be verified; no signal sent",
         }
     pid = record["pid"]
-    signaled = False
-    try:
-        if os.name == "nt":
-            # os.kill supports SIGTERM on modern Python/Windows; it is only
-            # issued after the creation-time identity check above.
-            os.kill(pid, signal.SIGTERM)
-        else:
-            os.kill(pid, signal.SIGTERM)
-        signaled = True
-    except (OSError, ProcessLookupError):
-        signaled = False
-    if signaled and not wait_for_exit(record, grace):
-        try:
-            if os.name != "nt":
-                os.kill(pid, signal.SIGKILL)
-        except (OSError, ProcessLookupError):
-            pass
+    group = _process_group(pid)
+    signaled = _signal_owned(pid, group, signal.SIGTERM)
+    parent_exited = wait_for_exit(record, grace) if signaled else False
+    group_alive = _group_alive(group)
+    if signaled and group_alive and group is not None:
+        _signal_owned(pid, group, signal.SIGKILL)
+        deadline = time.monotonic() + grace
+        while time.monotonic() < deadline and _group_alive(group):
+            time.sleep(0.1)
+    group_alive = _group_alive(group)
     return {
         "requested": True,
         "signaled": signaled,
-        "terminated": wait_for_exit(record, grace),
+        "terminated": bool(parent_exited and not group_alive),
+        "group_terminated": not group_alive,
+        "process_group": group,
         "native_cancel_ack": False,
         "local_signal_only": True,
         "pid": pid,
     }
 
 
+_PROJECT_LOCKS: dict[str, "threading.Lock"] = {}
+_PROJECT_LOCKS_GUARD = __import__("threading").Lock()
+
+
+def _thread_lock(path: Path):
+    key = str(path)
+    with _PROJECT_LOCKS_GUARD:
+        lock = _PROJECT_LOCKS.get(key)
+        if lock is None:
+            lock = __import__("threading").Lock()
+            _PROJECT_LOCKS[key] = lock
+        return lock
+
+
+def _try_lock(handle) -> None:
+    if os.name == "nt":
+        import msvcrt
+
+        handle.seek(0)
+        msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+    else:
+        import fcntl
+
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+def _unlock(handle) -> None:
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    except (OSError, ValueError):
+        pass
+
+
 @contextmanager
 def project_lock(root: Path, *, timeout: float = 5.0):
-    """Cross-process atomic lock for bridge/runner state mutations.
+    """Cross-process advisory lock for bridge/runner state mutations.
 
-    An exclusive create is used instead of an OS-specific advisory lock so the
-    behavior is identical on POSIX and Windows. The lock file records the same
-    PID + start-token ownership as the run itself. A crash leaves a stale file
-    that is reclaimed only after its owner identity no longer matches.
+    The OS releases the lock when the holder exits, so a crash never leaves a
+    permanently held lock. A per-process thread lock also serializes two
+    threads that open the same file, which is needed on Windows because file
+    locks are process-scoped there.
     """
     path = Path(root) / ".auto-orchestrator" / "teamwork" / "state.lock"
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    global _SELF_IDENTITY
-    with _SELF_LOCK:
-        if _SELF_IDENTITY is None:
-            _SELF_IDENTITY = read_process_identity(os.getpid())
-        identity = _SELF_IDENTITY
-    if identity is None:
-        raise OwnershipError("cannot verify the lock owner process identity")
-    token = os.urandom(8).hex()
-    payload = {**identity, "lock_token": token,
-               "acquired_at": time.time()}
-    deadline = time.monotonic() + max(0.0, float(timeout))
+    thread_lock = _thread_lock(path)
+    if not thread_lock.acquire(timeout=max(0.0, float(timeout))):
+        raise OwnershipError("another Teamwork state operation is in progress")
+    handle = None
     acquired = False
-    while True:
-        try:
-            fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            try:
-                os.write(fd, (json.dumps(payload, separators=(",", ":")) + "\n").encode())
-                try:
-                    os.fsync(fd)
-                except OSError:
-                    pass
-            finally:
-                os.close(fd)
-            acquired = True
-            break
-        except FileExistsError:
-            holder = read_json(path, None)
-            stale = False
-            if isinstance(holder, dict):
-                stale = not identity_matches(holder)
-            else:
-                try:
-                    age = time.time() - path.stat().st_mtime
-                except OSError:
-                    age = 0.0
-                stale = age > 2.0
-            if stale:
-                try:
-                    path.unlink()
-                except FileNotFoundError:
-                    pass
-                except OSError:
-                    pass
-                continue
-            if time.monotonic() >= deadline:
-                raise OwnershipError(
-                    "another Teamwork state operation is in progress"
-                )
-            time.sleep(0.05)
-        except OSError as exc:
-            raise OwnershipError(f"could not acquire project lock: {exc}") from exc
     try:
+        handle = open(path, "a+b")
+        handle.seek(0)
+        if handle.read(1) == b"":
+            handle.write(b"\0")
+            handle.flush()
+        deadline = time.monotonic() + max(0.0, float(timeout))
+        while True:
+            try:
+                _try_lock(handle)
+                acquired = True
+                break
+            except (OSError, ValueError):
+                if time.monotonic() >= deadline:
+                    raise OwnershipError(
+                        "another Teamwork state operation is in progress"
+                    )
+                time.sleep(0.05)
         yield path
     finally:
-        if acquired:
-            holder = read_json(path, None)
-            if isinstance(holder, dict) and holder.get("lock_token") == token:
-                try:
-                    path.unlink()
-                except FileNotFoundError:
-                    pass
-                except OSError:
-                    pass
+        if handle is not None:
+            if acquired:
+                _unlock(handle)
+            handle.close()
+        thread_lock.release()
+
+
+def _runner_lock_path(root, run_id: str) -> Path:
+    if not isinstance(run_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}", run_id):
+        raise OwnershipError("invalid runner id for lease")
+    return teamwork_dir(root) / f"runner-{run_id}.lock"
+
+
+@contextmanager
+def runner_lease(root, run_id: str, *, timeout: float = 0.0):
+    """Hold an OS lease for the lifetime of one runner process.
+
+    The lease is independent of PID identity, so a bridge can distinguish a
+    live (even hung) runner from a dead one after a crash. The OS releases it
+    when the process exits; the lock file may remain on disk.
+    """
+    path = _runner_lock_path(root, run_id)
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    thread_lock = _thread_lock(path)
+    if not thread_lock.acquire(timeout=max(0.0, float(timeout))):
+        raise OwnershipError("runner lease is already held")
+    handle = None
+    acquired = False
+    try:
+        handle = open(path, "a+b")
+        handle.seek(0)
+        if handle.read(1) == b"":
+            handle.write(b"\0")
+            handle.flush()
+        deadline = time.monotonic() + max(0.0, float(timeout))
+        while True:
+            try:
+                _try_lock(handle)
+                acquired = True
+                break
+            except (OSError, ValueError):
+                if time.monotonic() >= deadline:
+                    raise OwnershipError("runner lease is already held")
+                time.sleep(0.05)
+        yield path
+    finally:
+        if handle is not None:
+            if acquired:
+                _unlock(handle)
+            handle.close()
+        thread_lock.release()
+
+
+def lease_held(root, run_id: str) -> bool:
+    path = _runner_lock_path(root, run_id)
+    if not path.exists():
+        return False
+    try:
+        with runner_lease(root, run_id, timeout=0):
+            return False
+    except OwnershipError:
+        return True
 
 
 def owner_record(pid) -> dict | None:
@@ -334,13 +449,16 @@ def atomic_write_json(path: Path, value: dict) -> None:
     os.replace(temporary, path)
 
 
-def update_active(root, run_id: str, **fields) -> dict:
+def update_active(root, run_id: str, *, expected_token: str | None = None,
+                  **fields) -> dict:
     """Atomically update the active record if it still belongs to ``run_id``."""
     path = teamwork_dir(root) / "active.json"
     with project_lock(root, timeout=5.0):
         current = read_json(path, {})
         if not isinstance(current, dict) or current.get("run_id") != run_id:
             raise OwnershipError("active run record changed or does not belong to this run")
+        if expected_token is not None and current.get("runner_token") != expected_token:
+            raise OwnershipError("active run record is owned by a different runner token")
         current.update(fields)
         atomic_write_json(path, current)
         return current
@@ -354,7 +472,7 @@ def write_recovery_state(root, run_id: str, state: str, **fields) -> dict:
     allowed = {
         "active", "runner_disconnected", "reconciling", "orphaned",
         "retry_ready", "resuming", "verifying", "recovered",
-        "recovery_failed",
+        "recovery_failed", "cancelled",
     }
     if state not in allowed:
         raise OwnershipError(f"unknown recovery state: {state}")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -13,10 +14,12 @@ from tools.run_owner import (
     OwnershipError,
     atomic_write_json,
     identity_matches,
+    lease_held,
     owner_alive,
     project_lock,
     read_process_identity,
     read_recovery_state,
+    runner_lease,
     terminate_owned,
     update_active,
     write_recovery_state,
@@ -71,6 +74,35 @@ class ProcessIdentityTests(unittest.TestCase):
         self.assertIsNotNone(process.returncode)
 
 
+class ProcessGroupTests(unittest.TestCase):
+    @unittest.skipIf(os.name == "nt", "POSIX process-group semantics only")
+    def test_owned_process_tree_is_terminated_as_a_group(self):
+        code = (
+            "import subprocess,sys,time;"
+            "p=subprocess.Popen([sys.executable,'-c','import time;time.sleep(30)']);"
+            "print(p.pid,flush=True);time.sleep(60)"
+        )
+        child = subprocess.Popen(
+            [sys.executable, "-c", code], stdout=subprocess.PIPE, text=True,
+            start_new_session=True,
+        )
+        self.addCleanup(lambda: child.poll() is None and child.kill())
+        grandchild = int(child.stdout.readline().strip())
+        identity = read_process_identity(child.pid)
+        self.assertIsNotNone(identity)
+        result = terminate_owned(identity, grace=3)
+        self.assertTrue(result["signaled"])
+        self.assertTrue(result["terminated"])
+        self.assertTrue(result["group_terminated"])
+        child.wait(timeout=10)
+        try:
+            os.kill(grandchild, 0)
+        except ProcessLookupError:
+            pass
+        else:
+            self.fail("grandchild survived owned process-group termination")
+
+
 class ProjectLockTests(unittest.TestCase):
     def test_lock_is_exclusive_and_released(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -95,6 +127,19 @@ class ProjectLockTests(unittest.TestCase):
                 pass
 
 
+class RunnerLeaseTests(unittest.TestCase):
+    def test_lease_distinguishes_live_and_released_runner(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            self.assertFalse(lease_held(root, "run-1"))
+            with runner_lease(root, "run-1"):
+                self.assertTrue(lease_held(root, "run-1"))
+            self.assertFalse(lease_held(root, "run-1"))
+            with self.assertRaises(OwnershipError):
+                with runner_lease(root, "../escape"):
+                    pass
+
+
 class ActiveStateTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -113,6 +158,9 @@ class ActiveStateTests(unittest.TestCase):
         self.assertEqual(json.loads(path.read_text())["heartbeat_at"], 1.0)
         with self.assertRaises(OwnershipError):
             update_active(self.root, "other", heartbeat_at=2.0)
+        with self.assertRaises(OwnershipError):
+            update_active(self.root, "run-1", expected_token="stale",
+                          heartbeat_at=3.0)
 
     def test_recovery_states_are_validated_and_persisted(self):
         result = write_recovery_state(self.root, "run-1", "reconciling",

@@ -446,16 +446,24 @@ class TeamworkEngine:
         session_columns = {row["name"] for row in self.conn.execute(
             "PRAGMA table_info(managed_sessions)")}
         if "tool_count" not in session_columns:
-            self.conn.execute(
-                "ALTER TABLE managed_sessions ADD COLUMN tool_count INTEGER NOT NULL DEFAULT 0")
+            try:
+                self.conn.execute(
+                    "ALTER TABLE managed_sessions ADD COLUMN tool_count INTEGER NOT NULL DEFAULT 0")
+            except sqlite3.OperationalError as exc:
+                if "duplicate column" not in str(exc).lower():
+                    raise
         for column, kind in (
             ("pid", "INTEGER"),
             ("pid_start_token", "TEXT"),
             ("pid_uid", "INTEGER"),
         ):
             if column not in session_columns:
-                self.conn.execute(
-                    f"ALTER TABLE managed_sessions ADD COLUMN {column} {kind}")
+                try:
+                    self.conn.execute(
+                        f"ALTER TABLE managed_sessions ADD COLUMN {column} {kind}")
+                except sqlite3.OperationalError as exc:
+                    if "duplicate column" not in str(exc).lower():
+                        raise
 
     def _transaction(self, fn):
         self.conn.execute("BEGIN IMMEDIATE")
@@ -1104,7 +1112,7 @@ class TeamworkEngine:
         task = next(task for task in milestone["tasks"] if task["id"] == task_id)
         if task["state"] not in ("completed", "failed"):
             raise TeamworkError("Reopen requires a completed or failed task")
-        if milestone["repair_iterations"] >= milestone["max_repair"]:
+        if count_repair and milestone["repair_iterations"] >= milestone["max_repair"]:
             raise TeamworkError("Milestone repair limit reached")
         try:
             reopened = self.supervisor.reopen(run_id, task_id, reason)

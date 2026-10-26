@@ -24,6 +24,7 @@ import os
 import shlex
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -38,7 +39,10 @@ try:
         identity_matches,
         read_json,
         read_process_identity,
+        owned_group_alive,
+        owned_group_alive,
         read_recovery_state,
+        runner_lease,
         terminate_owned,
         update_active,
         wait_for_exit,
@@ -57,7 +61,10 @@ except ModuleNotFoundError:  # python tools/teamwork_runner.py
         identity_matches,
         read_json,
         read_process_identity,
+        owned_group_alive,
+        owned_group_alive,
         read_recovery_state,
+        runner_lease,
         terminate_owned,
         update_active,
         wait_for_exit,
@@ -228,6 +235,9 @@ class TeamworkRunner:
         self.heartbeat_interval = max(0.5, float(heartbeat_interval))
         self._last_heartbeat = 0.0
         self._recovery_state = "active"
+        self._lease_context = None
+        self._heartbeat_stop = threading.Event()
+        self._heartbeat_thread = None
         self.cancel_path = (self.root / ".auto-orchestrator" / "teamwork"
                             / f"cancel-{self.run_id}.json")
         self.evidence_dir = self.root / ".auto-orchestrator" / "evidence" / self.run_id
@@ -250,6 +260,13 @@ class TeamworkRunner:
         self._context_cache: dict[str, str] = {}
 
     def close(self) -> None:
+        self._heartbeat_stop.set()
+        if self._heartbeat_thread is not None:
+            self._heartbeat_thread.join(timeout=2)
+            self._heartbeat_thread = None
+        if self._lease_context is not None:
+            self._lease_context.__exit__(None, None, None)
+            self._lease_context = None
         self._scheduler.close()
         self.engine.close()
         self.executor.close()
@@ -725,7 +742,7 @@ class TeamworkRunner:
             base = manifest["base_sha"]
         except (WorktreeError, OSError, KeyError, ValueError):
             return None
-        count = self._git(self.root, "rev-list", "--count", f"{base}..{branch}",
+        count = self._git(self.root, "rev-list", "--count", f"HEAD..{branch}",
                           check=False)
         if count.returncode != 0:
             return None
@@ -946,12 +963,22 @@ class TeamworkRunner:
                     # cleanly before a local termination signal.
                     if wait_for_exit(identity, 2.0):
                         process_result["exited_before_signal"] = True
-                        process_result["terminated"] = True
+                        group_alive = owned_group_alive(pid)
+                        process_result["group_terminated"] = not group_alive
+                        process_result["terminated"] = not group_alive
+                        if group_alive:
+                            blocked_reason = (
+                                "owned provider exited but its process group is "
+                                "still alive; refusing to start a second writer"
+                            )
                     else:
                         termination = terminate_owned(identity, grace=5.0)
                         process_result.update({
                             "signaled": bool(termination.get("signaled")),
                             "terminated": bool(termination.get("terminated")),
+                            "group_terminated": bool(
+                                termination.get("group_terminated")),
+                            "process_group": termination.get("process_group"),
                             "local_signal_only": True,
                             "native_cancel_ack": False,
                         })
@@ -962,12 +989,19 @@ class TeamworkRunner:
                             )
                 else:
                     live = read_process_identity(pid)
+                    group_alive = owned_group_alive(pid)
                     process_result = {
                         "recorded": True, "pid": pid, "owned": False,
                         "signaled": False,
+                        "group_terminated": not group_alive,
                         "status": ("pid_reused_or_unowned_process"
                                    if live is not None else "process_exited"),
                     }
+                    if live is None and group_alive:
+                        blocked_reason = (
+                            "owned provider is gone but its process group is "
+                            "still alive; no duplicate writer allowed"
+                        )
                     if live is not None:
                         blocked_reason = (
                             "recorded PID is alive but its identity does not "
@@ -1064,6 +1098,7 @@ class TeamworkRunner:
             write_recovery_state(self.root, self.run_id, state, **fields)
             if self.owner_token:
                 update_active(self.root, self.run_id,
+                              expected_token=self.owner_token,
                               heartbeat_at=time.time(),
                               recovery_state=state)
         except (OwnershipError, OSError):
@@ -1071,6 +1106,24 @@ class TeamworkRunner:
             # runner continues; status will report runner_disconnected.
             pass
         self._recovery_state = state
+
+    def _start_heartbeat(self) -> None:
+        if not self.owner_token or self._heartbeat_thread is not None:
+            return
+
+        def beat():
+            while not self._heartbeat_stop.wait(self.heartbeat_interval):
+                try:
+                    update_active(self.root, self.run_id,
+                                  expected_token=self.owner_token,
+                                  heartbeat_at=time.time(),
+                                  recovery_state=self._recovery_state)
+                except (OwnershipError, OSError):
+                    return
+
+        self._heartbeat_thread = threading.Thread(
+            target=beat, name=f"ao-heartbeat-{self.run_id}", daemon=True)
+        self._heartbeat_thread.start()
 
     def _heartbeat(self, state: dict | None = None) -> None:
         if not self.owner_token:
@@ -1091,13 +1144,20 @@ class TeamworkRunner:
                 recovery = "verifying"
         try:
             update_active(self.root, self.run_id,
+                          expected_token=self.owner_token,
                           heartbeat_at=time.time(), recovery_state=recovery)
         except (OwnershipError, OSError):
             pass
         self._recovery_state = recovery
 
     def _reconcile_interrupted_merge(self) -> str | None:
-        merge_head = self.root / ".git" / "MERGE_HEAD"
+        git_path = self._git(self.root, "rev-parse", "--git-path",
+                             "MERGE_HEAD", check=False)
+        if git_path.returncode != 0:
+            return None
+        merge_head = Path(git_path.stdout.strip())
+        if not merge_head.is_absolute():
+            merge_head = self.root / merge_head
         if not merge_head.exists():
             return None
         unmerged = self._git(self.root, "diff", "--name-only",
@@ -1133,7 +1193,11 @@ class TeamworkRunner:
         os.replace(temporary, path)
 
     def run(self) -> dict:
+        if self._lease_context is None:
+            self._lease_context = runner_lease(self.root, self.run_id)
+            self._lease_context.__enter__()
         self._wait_for_owner_record()
+        self._start_heartbeat()
         self._ensure_plan_artifact()
         try:
             self.engine.init(self.plan)
