@@ -101,6 +101,29 @@ class AdaptivePlannerTests(unittest.TestCase):
         self.assertTrue(plan["risk_assessment"]["safety_upgrade"])
         self.assertEqual(plan["verification_budget"]["review_depth"], "full")
 
+    def test_polyglot_test_commands_are_all_added(self):
+        plan = plan_request(
+            "Build the backend and frontend", run_id="polyglot",
+            model="test-model", mode="balanced",
+            repo_profile={
+                "files": 20, "modules": 3, "tests": 5,
+                "backend": True, "frontend": True,
+                "languages": ["python", "javascript"],
+                "test_commands": ["npm test", "python3.11 -m pytest -q"],
+                "test_command_sources": [
+                    {"command": "npm test", "source": "package.json"},
+                    {"command": "python3.11 -m pytest -q",
+                     "source": "pyproject.toml"},
+                ],
+            },
+        )
+        self.assertEqual(plan["test_commands"],
+                         ["npm test", "python3.11 -m pytest -q"])
+        tester = next(task for task in plan["tasks"]
+                      if task["role"] == "tester")
+        self.assertIn("npm test", tester["verify_commands"])
+        self.assertIn("python3.11 -m pytest -q", tester["verify_commands"])
+
     def test_detected_test_command_replaces_planner_default(self):
         plan = plan_request(
             "Build the backend", run_id="command", model="test-model",

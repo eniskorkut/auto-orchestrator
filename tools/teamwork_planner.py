@@ -620,21 +620,31 @@ def plan_request(request, *, run_id, project_id=None, max_parallel=3,
             milestones, tasks = _full_plan(selected, text, model)
     else:  # explicit auto must have resolved to a concrete mode
         milestones, tasks = _balanced_plan(selected, text, model)
-    detected_command = None
+    detected_commands = []
     command_source = None
     if isinstance(repo_profile, dict):
         sources = repo_profile.get("test_command_sources")
-        if isinstance(sources, list) and sources and isinstance(sources[0], dict):
-            candidate = sources[0].get("command")
-            if isinstance(candidate, str) and candidate.strip() and len(candidate) <= 500:
-                detected_command = candidate.strip()
-                command_source = sources[0].get("source")
-    if detected_command:
+        if isinstance(sources, list):
+            for source in sources[:4]:
+                if not isinstance(source, dict):
+                    continue
+                candidate = source.get("command")
+                if (isinstance(candidate, str) and candidate.strip()
+                        and len(candidate) <= 500
+                        and candidate.strip() not in detected_commands):
+                    detected_commands.append(candidate.strip())
+                    if command_source is None:
+                        command_source = source.get("source")
+    detected_command = detected_commands[0] if detected_commands else None
+    if detected_commands:
         for task in tasks:
-            task["verify_commands"] = [
-                detected_command if command == TEST_COMMAND else command
-                for command in task.get("verify_commands", [])
-            ]
+            replaced = []
+            for command in task.get("verify_commands", []):
+                if command == TEST_COMMAND:
+                    replaced.extend(detected_commands)
+                elif command not in replaced:
+                    replaced.append(command)
+            task["verify_commands"] = replaced
     used_layers = sorted({
         task["department"] for task in tasks
         if task["department"] in ("backend", "frontend")
@@ -659,6 +669,7 @@ def plan_request(request, *, run_id, project_id=None, max_parallel=3,
         "work_mode": chosen_mode or "legacy",
         "risk_assessment": assessment,
         "test_command": detected_command or TEST_COMMAND,
+        "test_commands": detected_commands or [TEST_COMMAND],
         "test_command_source": command_source or "planner default",
         "verification_budget": {
             "mode": chosen_mode or "legacy",
