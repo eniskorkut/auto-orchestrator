@@ -63,7 +63,7 @@ def fast_plan(run_id: str, model: str) -> dict:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path,
-                        default=Path("/private/var/folders/sm/btb8_q_x5v71_ngxg6tkd43h0000gn/T/opencode/v74-fast-sample"))
+                        default=Path(tempfile.gettempdir()) / "opencode" / "v74-fast-sample")
     parser.add_argument("--run-id", default="v74-fast-e2e")
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--max-seconds", type=float, default=3600)

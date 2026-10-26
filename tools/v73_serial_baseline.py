@@ -12,6 +12,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -81,7 +82,7 @@ def run_command(root: Path, argv: list[str], env: dict) -> dict:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path,
-                        default=Path("/private/var/folders/sm/btb8_q_x5v71_ngxg6tkd43h0000gn/T/opencode/teamwork-serial-sample"))
+                        default=Path(tempfile.gettempdir()) / "opencode" / "teamwork-serial-sample")
     parser.add_argument("--model", default=MODEL)
     parser.add_argument("--max-seconds", type=float, default=3600)
     parser.add_argument("--json-out", type=Path, default=None)

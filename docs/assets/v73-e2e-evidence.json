@@ -539,7 +539,7 @@
       "teamwork-e2e-M3.v1.json"
     ],
     "failure_recovery": null,
-    "source_evidence_dir": "/private/var/folders/sm/btb8_q_x5v71_ngxg6tkd43h0000gn/T/opencode/teamwork-e2e-sample/.auto-orchestrator/evidence/teamwork-e2e",
+    "source_evidence_dir": "$TMPDIR/opencode/teamwork-e2e-sample/.auto-orchestrator/evidence/teamwork-e2e",
     "note": "Real local OpenCode managed sessions. Raw session IDs are replaced by SHA-256 prefixes."
   },
   "failure_recovery": {
@@ -1084,9 +1084,9 @@
       "injected": true,
       "injection": "frontend/config.js AO_API_BASE -> unreachable loopback port",
       "repair_iterations": 2,
-      "root": "/private/var/folders/sm/btb8_q_x5v71_ngxg6tkd43h0000gn/T/opencode/teamwork-e2e-failure"
+      "root": "$TMPDIR/opencode/teamwork-e2e-failure"
     },
-    "source_evidence_dir": "/private/var/folders/sm/btb8_q_x5v71_ngxg6tkd43h0000gn/T/opencode/teamwork-e2e-failure/.auto-orchestrator/evidence/teamwork-repair",
+    "source_evidence_dir": "$TMPDIR/opencode/teamwork-e2e-failure/.auto-orchestrator/evidence/teamwork-repair",
     "note": "Real local OpenCode managed sessions. Raw session IDs are replaced by SHA-256 prefixes."
   },
   "environment": {
