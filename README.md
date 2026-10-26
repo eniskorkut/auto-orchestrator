@@ -1,4 +1,4 @@
-# Auto-Orchestrator — Native Multi-Agent Coordination (V7.2)
+# Auto-Orchestrator — Native Multi-Agent Coordination (V7.4.1)
 
 Portable, opt-in native-subagent coordination for **OpenCode**, **Codex**, **Cursor**, and **Google Antigravity**. Platform-native runtime capabilities and proof strength differ.
 
@@ -296,6 +296,89 @@ adds a small, conservative long-tail domain ontology and
 skill selection rates. None of this proves live IDE reliability or speedup
 until matched native runs are repeated. See
 [execution reliability](docs/V64_RELIABILITY.md).
+
+## V7.4.1 — Recovery, ownership and secure chat input
+
+V7.4.1 hardens the V7.4 teamwork engine for interrupted, long-running work.
+
+- **Crash recovery full pass:** a real two-implementer OpenCode run was killed
+  while both children were alive; the bridge resumed, verified owned orphans,
+  preserved worktrees, repaired once and finished with 13 backend tests plus
+  browser E2E. Evidence: [recovery E2E](docs/assets/v741-recovery-e2e.json).
+- **Owned process identity:** PID + start token + UID/time, atomic project
+  locks, atomic active state, heartbeat and fail-closed stale-owner handling.
+- **Recovery states:** `active`, `runner_disconnected`, `reconciling`,
+  `orphaned`, `retry_ready`, `resuming`, `verifying`, `recovered`,
+  `recovery_failed`; no native cancel ACK is claimed.
+- **Secure single-chat input:** `/teamwork` writes the untrusted request to a
+  validated UTF-8 file and passes `--request-file`; it never interpolates user
+  text into a shell command. A real injection-shaped request preserved its
+  text, created no marker and was cancelled locally.
+- **Adaptive safety:** explicit FAST is upgraded for security, migration and
+  breaking-API work; repository test commands are detected from manifests;
+  handoffs include next tasks.
+- **Honest efficiency:** on a tiny health-endpoint task serial was faster and
+  cheaper than FAST; no speed-saving claim is made.
+
+See [V7.4.1 reliability and security evidence](docs/V741_RELIABILITY.md).
+
+## V7.4 — Adaptive teamwork and true parallel execution
+
+V7.4 keeps the V7.3 managed-session/milestone runtime and fixes the coordination
+layer: an event-driven bounded scheduler, FAST/BALANCED/RIGOROUS adaptive
+planning, a single-chat `/teamwork` bridge, correct concurrency metrics and
+restart orphan reconciliation.
+
+- **True concurrency:** live two-session OpenCode probe: 8.65 s wall, 8.41 s
+  true overlap, peak 2; the scheduler never blocks one task while waiting for
+  another.
+- **Adaptive modes:** FAST (one milestone, targeted verification), BALANCED
+  (build/verify/risk review), RIGOROUS (full independent audit), and `auto`
+  using a bounded repository profile. Missing repo facts fall back to BALANCED.
+- **Single chat:** `.opencode/commands/teamwork.md` plus
+  `tools/teamwork_chat.py` start/status/agents/milestones/cancel/resume without
+  a separate terminal workflow. Child sessions stay separate managed sessions.
+- **Correct metrics:** interval union is no longer called overlap; schema 2
+  exposes true concurrent overlap, max/average concurrency and critical path.
+- **Recovery:** orphaned running tasks are explicitly reconciled; local cancel
+  is never shown as native ACK.
+- **Real FAST E2E:** 33 backend tests and browser E2E passed; 247.8 s and
+  $0.0528 versus V7.3’s 1566.1 s/$0.1404 on the same sample, with intentionally
+  lower verification depth.
+
+See [Adaptive teamwork and measured evidence](docs/V74_ADAPTIVE_TEAMWORK.md).
+
+## V7.3 — Teamwork engine, managed execution and milestones
+
+V7.3 adds a real managed-session runtime on top of the V7.1 Supervisor and V7.2
+office. A single request is planned into milestones and a task DAG; implementers
+work in isolated worktrees through **real OpenCode sessions**; testers, critics,
+challengers, auditors and a success auditor verify the integrated result. A
+bounded repair loop reopens the relevant implementer when verification fails.
+
+- **Milestone state machine:** `planned → ready → running → verifying → passed`
+  plus `repairing`, `failed`, `blocked`, `cancelled`; restart is recovered from
+  the Supervisor SQLite database. Progress counts only verified passed
+  milestones and never shows an estimate as success.
+- **Managed execution:** OpenCode is live-verified via `opencode run --format
+  json`; Codex App-server is contract-tested only; Antigravity and Cursor
+  managed execution is not implemented. Native hook observation is unchanged
+  and managed completion is never claimed as a native stop.
+- **Real E2E:** a disposable task-manager project with backend, frontend, unit
+  tests and browser E2E was built by managed sessions, independently reviewed
+  and passed. A controlled frontend fault was detected, repaired and rerun.
+- **Virtual Office:** real managed sessions spawn as named task characters in
+  Backend/Frontend/QA/Review/Research rooms. Their inspector shows task,
+  provider, model, status, tool count, cost and a session hash; it explicitly
+  does not claim native stop proof or a terminal.
+- **Dashboard:** Task Board has a Milestones panel with role requirements,
+  handoffs, blockers and verified-only progress; clicking a milestone filters
+  the board. Office header shows the current milestone.
+- **CI:** Windows/macOS/Linux Python matrix, Node matrix, Playwright functional
+  E2E and dependency/compile checks. Windows path normalization and home
+  fallback regressions are fixed.
+
+See [Teamwork engine and real E2E evidence](docs/V73_TEAMWORK.md).
 
 ## V7.2 — Virtual Office 2.0
 

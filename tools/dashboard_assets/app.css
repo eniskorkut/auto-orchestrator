@@ -2012,3 +2012,120 @@ body.inspector-open .office-stage { height: min(760px, calc(100vh - 180px)); }
   body.inspector-open .inspector-field { padding: 8px 10px; }
   body.inspector-open .inspector-body { padding: 16px 16px 24px; }
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   V7.3 — Teamwork milestone panel and office progress strip
+   ══════════════════════════════════════════════════════════════════════════ */
+.office-milestones { margin: 0 0 12px; }
+.office-milestone-strip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--accent);
+  border-radius: 9px;
+  background: var(--panel);
+}
+.office-milestone-label { color: var(--faint); font: 600 8px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; white-space: nowrap; }
+.office-milestone-open { appearance: none; display: flex; align-items: baseline; gap: 10px; min-width: 0; border: 0; background: transparent; color: var(--text); text-align: left; cursor: pointer; }
+.office-milestone-open strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 11px/1.3 var(--sans); }
+.office-milestone-open span { color: var(--faint); font: 9px/1.2 var(--mono); white-space: nowrap; }
+.office-milestone-status { margin-left: auto; padding: 4px 7px; border-radius: 4px; background: var(--panel-2); color: var(--muted); font: 600 8px/1 var(--mono); text-transform: uppercase; letter-spacing: .06em; }
+.office-milestone-status[data-status="passed"] { color: var(--ok); background: color-mix(in oklab, var(--ok) 10%, var(--panel)); }
+.office-milestone-status[data-status="running"], .office-milestone-status[data-status="verifying"], .office-milestone-status[data-status="repairing"] { color: var(--accent); background: color-mix(in oklab, var(--accent) 10%, var(--panel)); }
+.office-milestone-status[data-status="failed"], .office-milestone-status[data-status="blocked"] { color: var(--bad); background: color-mix(in oklab, var(--bad) 10%, var(--panel)); }
+
+.board-milestones { margin: 0 0 14px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+.milestone-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 12px; }
+.milestone-head h2 { margin: 4px 0 0; font: 600 15px/1.2 var(--sans); }
+.milestone-progress { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; color: var(--muted); font: 9px/1.4 var(--mono); }
+.milestone-estimate { color: var(--faint); }
+.milestone-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 8px; }
+.milestone-card { appearance: none; min-width: 0; display: grid; gap: 7px; padding: 11px; border: 1px solid var(--line); border-left: 2px solid var(--line-strong); border-radius: 8px; background: var(--panel-2); color: var(--text); text-align: left; cursor: pointer; }
+.milestone-card:hover { border-color: var(--line-strong); background: var(--panel-3); }
+.milestone-card.selected { border-color: color-mix(in oklab, var(--accent) 55%, var(--line)); border-left-color: var(--accent); background: color-mix(in oklab, var(--accent) 6%, var(--panel-2)); }
+.milestone-card[data-status="passed"] { border-left-color: var(--ok); }
+.milestone-card[data-status="running"], .milestone-card[data-status="verifying"], .milestone-card[data-status="repairing"] { border-left-color: var(--accent); }
+.milestone-card[data-status="failed"], .milestone-card[data-status="blocked"] { border-left-color: var(--bad); }
+.milestone-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.milestone-id { color: var(--faint); font: 600 8px/1 var(--mono); letter-spacing: .1em; }
+.milestone-status { padding: 3px 5px; border-radius: 3px; background: var(--panel); color: var(--muted); font: 600 7px/1 var(--mono); text-transform: uppercase; }
+.milestone-status[data-status="passed"] { color: var(--ok); }
+.milestone-status[data-status="running"], .milestone-status[data-status="verifying"], .milestone-status[data-status="repairing"] { color: var(--accent); }
+.milestone-status[data-status="failed"], .milestone-status[data-status="blocked"] { color: var(--bad); }
+.milestone-objective { font: 600 10px/1.4 var(--sans); }
+.milestone-metrics { display: flex; gap: 8px; flex-wrap: wrap; color: var(--faint); font: 8px/1.3 var(--mono); }
+.milestone-running { color: var(--accent); }
+.milestone-failed { color: var(--bad); }
+.milestone-handoff { color: var(--ok); }
+.milestone-roles, .milestone-acceptance { color: var(--faint); font: 8px/1.4 var(--mono); overflow-wrap: anywhere; }
+.milestone-acceptance { color: var(--muted); }
+.milestone-empty { padding: 12px; border: 1px dashed var(--line-strong); border-radius: 8px; color: var(--muted); }
+.milestone-empty p { margin: 0 0 5px; font-size: 11px; }
+.milestone-note { color: var(--faint); font-size: 9px; }
+@media (max-width: 700px) {
+  .office-milestone-strip { flex-wrap: wrap; }
+  .office-milestone-status { margin-left: 0; }
+  .milestone-head { flex-direction: column; }
+  .milestone-progress { justify-content: flex-start; }
+}
+
+/* V7.4 — adaptive mode and scheduler chips */
+.mode-chip, .scheduler-chip, .repair-chip, .cost-chip {
+  padding: 3px 6px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font: 600 8px/1 var(--mono);
+  letter-spacing: .04em;
+  color: var(--muted);
+  background: var(--panel-2);
+}
+.mode-chip[data-mode="fast"] { color: var(--ok); border-color: color-mix(in oklab, var(--ok) 35%, var(--line)); }
+.mode-chip[data-mode="balanced"] { color: var(--accent); border-color: color-mix(in oklab, var(--accent) 35%, var(--line)); }
+.mode-chip[data-mode="rigorous"] { color: var(--warn); border-color: color-mix(in oklab, var(--warn) 35%, var(--line)); }
+.scheduler-chip { color: var(--faint); }
+.repair-chip { color: var(--warn); border-color: color-mix(in oklab, var(--warn) 35%, var(--line)); }
+.cost-chip { color: var(--faint); }
+.office-milestone-label + .mode-chip { flex: 0 0 auto; }
+
+/* V7.4 — bounded execution timeline, separate from the office map */
+.milestone-timeline { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
+.milestone-timeline-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 6px; color: var(--muted); font: 600 9px/1.3 var(--mono); text-transform: uppercase; letter-spacing: .07em; }
+.milestone-timeline-row { display: flex; align-items: baseline; gap: 8px; min-width: 0; padding: 5px 4px; border-bottom: 1px solid color-mix(in oklab, var(--line) 50%, transparent); font: 9px/1.3 var(--mono); }
+.milestone-timeline-row:last-child { border-bottom: 0; }
+.milestone-timeline-row[data-state="running"] .timeline-state { color: var(--accent); }
+.milestone-timeline-row[data-state="completed"] .timeline-state { color: var(--ok); }
+.milestone-timeline-row[data-state="failed"] .timeline-state,
+.milestone-timeline-row[data-state="cancelled"] .timeline-state { color: var(--bad); }
+.timeline-task { min-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.timeline-role { color: var(--faint); }
+.timeline-state { color: var(--muted); }
+.timeline-waiting { color: var(--warn); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.timeline-metric { margin-left: auto; color: var(--faint); }
+@media (max-width: 700px) {
+  .milestone-timeline-row { flex-wrap: wrap; }
+  .timeline-metric { margin-left: 0; }
+}
+
+/* V7.4.1 — recovery ownership and orphan state */
+.recovery-chip, .orphan-chip {
+  padding: 3px 6px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font: 600 8px/1 var(--mono);
+  letter-spacing: .04em;
+  color: var(--muted);
+  background: var(--panel-2);
+}
+.recovery-chip[data-state="active"], .recovery-chip[data-state="verifying"],
+.recovery-chip[data-state="retry_ready"] { color: var(--ok); border-color: color-mix(in oklab, var(--ok) 35%, var(--line)); }
+.recovery-chip[data-state="runner_disconnected"], .recovery-chip[data-state="recovery_failed"],
+.recovery-chip[data-state="cancelled"] { color: var(--bad); border-color: color-mix(in oklab, var(--bad) 35%, var(--line)); }
+.recovery-chip[data-state="reconciling"], .recovery-chip[data-state="orphaned"],
+.recovery-chip[data-state="resuming"] { color: var(--warn); border-color: color-mix(in oklab, var(--warn) 35%, var(--line)); }
+.orphan-chip { color: var(--bad); border-color: color-mix(in oklab, var(--bad) 35%, var(--line)); }
+.inspector-recovery { margin-top: 8px; padding: 8px; border-left: 2px solid var(--warn); background: color-mix(in oklab, var(--warn) 6%, transparent); }
+.inspector-recovery strong { display: block; margin-bottom: 4px; font: 600 9px/1.2 var(--mono); text-transform: uppercase; letter-spacing: .06em; }
+.inspector-recovery p { margin: 0; color: var(--muted); font-size: 9px; }

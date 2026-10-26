@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Tasks</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="/config.js"></script>
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <main class="app">
+      <header class="app__header">
+        <p class="eyebrow">In-memory task manager</p>
+        <h1 class="app__title">Tasks</h1>
+        <p class="app__subtitle">
+          Add a task, check it off, keep moving. Everything resets when the
+          server restarts.
+        </p>
+      </header>
+
+      <form class="composer" data-testid="task-form" novalidate>
+        <label class="visually-hidden" for="task-title">Task title</label>
+        <input
+          id="task-title"
+          class="composer__input"
+          data-testid="task-input"
+          name="title"
+          type="text"
+          maxlength="80"
+          placeholder="What needs doing?"
+          autocomplete="off"
+          aria-describedby="form-error"
+        />
+        <button class="composer__submit" data-testid="task-submit" type="submit">
+          Add task
+        </button>
+      </form>
+
+      <p
+        id="form-error"
+        class="error"
+        data-testid="error"
+        role="alert"
+        hidden
+      ></p>
+
+      <section class="tasks" aria-labelledby="tasks-heading">
+        <div class="tasks__meta">
+          <h2 id="tasks-heading" class="visually-hidden">Task list</h2>
+          <p class="status" data-testid="status" aria-live="polite">
+            Loading tasks&hellip;
+          </p>
+        </div>
+
+        <ul class="task-list" data-testid="task-list" aria-busy="true"></ul>
+
+        <p class="empty" data-testid="empty" hidden>
+          Nothing here yet. Add your first task above.
+        </p>
+      </section>
+    </main>
+
+    <noscript>
+      <p class="noscript">This app needs JavaScript enabled to manage tasks.</p>
+    </noscript>
+  </body>
+</html>

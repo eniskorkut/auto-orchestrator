@@ -18,7 +18,8 @@ except ModuleNotFoundError:
 
 ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$")
 DEPARTMENT = re.compile(r"^[a-z][a-z0-9-]{0,39}$")
-ROLES = {"explorer", "implementer", "tester", "reviewer"}
+ROLES = {"explorer", "implementer", "tester", "reviewer",
+         "critic", "challenger", "auditor", "success-auditor"}
 ACTIVE = {"running", "cancel_requested", "timed_out"}
 TERMINAL = {"completed", "failed", "cancelled"}
 
@@ -489,6 +490,31 @@ class Supervisor:
             self.conn.execute("""UPDATE tasks SET state='pending', lease=NULL, started=NULL, finished=NULL,
               result=NULL, reason=?, termination_confirmed=0, reviewed=0, review_digest=NULL WHERE run_id=? AND id=?""",(reason,run,task_id))
             return {"id":task_id,"state":"pending","attempts_used":task["attempts"]}
+        return self.transaction(op)
+    def reopen(self,run,task_id,reason):
+        """Explicit repair primitive for a completed or failed task.
+
+        This is a local state reset only. It does not signal, cancel or claim
+        any native process. The next claim is a new attempt and remains subject
+        to the same lease and native start/stop evidence requirements.
+        """
+        if not isinstance(reason,str) or not reason.strip() or len(reason)>1000:
+            raise SupervisorError("Reopen requires a short actionable reason")
+        identifier(task_id)
+        def op():
+            rows=self._tasks(run)
+            if task_id not in rows:
+                raise SupervisorError("Unknown task")
+            task=rows[task_id]
+            if task["state"] not in ("completed","failed"):
+                raise SupervisorError("Reopen requires a completed or failed task")
+            if not task["termination_confirmed"]:
+                raise SupervisorError("Reopen requires a confirmed terminal attempt")
+            self.conn.execute("""UPDATE tasks SET state='pending', lease=NULL, started=NULL, finished=NULL,
+              result=NULL, reason=?, termination_confirmed=0, reviewed=0, review_digest=NULL
+              WHERE run_id=? AND id=?""",(reason,run,task_id))
+            return {"id":task_id,"state":"pending","attempts_used":task["attempts"],
+                    "reopened":True,"reason":reason,"native_cancellation_required":False}
         return self.transaction(op)
     def status(self,run):
         rows=self._tasks(run)

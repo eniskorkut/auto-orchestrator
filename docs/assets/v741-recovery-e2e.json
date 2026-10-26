@@ -1,0 +1,445 @@
+{
+  "schema_version": 1,
+  "kind": "v741-crash-recovery-real-e2e",
+  "run_id": "v741-recovery-e2e",
+  "mode": "fast",
+  "status": "passed",
+  "runner_exit_code": -15,
+  "wall_time_seconds": 307.863,
+  "crash_at_seconds": 1.023,
+  "timeline": [
+    "active",
+    "runner_disconnected",
+    "resuming",
+    "resuming",
+    "retry_ready",
+    "recovered"
+  ],
+  "pre_kill": {
+    "tasks": {
+      "backend": "running",
+      "frontend": "running",
+      "integrate": "pending"
+    },
+    "sessions": {
+      "backend": {
+        "status": "running",
+        "pid_recorded": true,
+        "tool_count": 0
+      },
+      "frontend": {
+        "status": "running",
+        "pid_recorded": true,
+        "tool_count": 0
+      }
+    },
+    "milestones": [
+      {
+        "id": "M1",
+        "milestone_id": "M1",
+        "objective": "Implement and verify in a fast budget",
+        "dependencies": [],
+        "acceptance": [
+          "Backend tests pass.",
+          "Browser E2E passes."
+        ],
+        "status": "running",
+        "started_at": 1792996837.381973,
+        "completed_at": null,
+        "repair_iterations": 0,
+        "max_repair": 2,
+        "verification_policy": {
+          "require_roles": [],
+          "max_repair": 2
+        },
+        "require_roles": [],
+        "satisfied_roles": [],
+        "missing_roles": [],
+        "verdicts": {},
+        "handoff_path": null,
+        "last_error": null,
+        "tasks": [
+          {
+            "id": "backend",
+            "task_id": "backend",
+            "role": "implementer",
+            "state": "running",
+            "milestone": "M1",
+            "phase": "build",
+            "attempts": 1,
+            "max_retries": 2,
+            "department": "backend",
+            "reason": null,
+            "result": null,
+            "native_stop_observed": false,
+            "review_attested": false,
+            "provider": "opencode",
+            "model": "opencode-go/deepseek-v4.1-flash",
+            "verify_commands": [
+              "python3.11 -m unittest discover -s tests -q"
+            ],
+            "depends_on": [],
+            "waiting_on": [],
+            "duration_seconds": null,
+            "managed": {
+              "provider": "opencode",
+              "status": "running",
+              "model": "opencode-go/deepseek-v4.1-flash",
+              "cost": null,
+              "tool_count": 0,
+              "session_hash": "884c0578d1a6"
+            }
+          },
+          {
+            "id": "frontend",
+            "task_id": "frontend",
+            "role": "implementer",
+            "state": "running",
+            "milestone": "M1",
+            "phase": "build",
+            "attempts": 1,
+            "max_retries": 2,
+            "department": "frontend",
+            "reason": null,
+            "result": null,
+            "native_stop_observed": false,
+            "review_attested": false,
+            "provider": "opencode",
+            "model": "opencode-go/deepseek-v4.1-flash",
+            "verify_commands": [
+              "node --check frontend/app.js"
+            ],
+            "depends_on": [],
+            "waiting_on": [],
+            "duration_seconds": null,
+            "managed": {
+              "provider": "opencode",
+              "status": "running",
+              "model": "opencode-go/deepseek-v4.1-flash",
+              "cost": null,
+              "tool_count": 0,
+              "session_hash": "31714049ec26"
+            }
+          },
+          {
+            "id": "integrate",
+            "task_id": "integrate",
+            "role": "tester",
+            "state": "pending",
+            "milestone": "M1",
+            "phase": "verify",
+            "attempts": 0,
+            "max_retries": 2,
+            "department": "qa",
+            "reason": null,
+            "result": null,
+            "native_stop_observed": false,
+            "review_attested": false,
+            "provider": "opencode",
+            "model": "opencode-go/deepseek-v4.1-flash",
+            "verify_commands": [
+              "python3.11 -m unittest discover -s tests -v",
+              "node e2e/check.cjs"
+            ],
+            "depends_on": [
+              "backend",
+              "frontend"
+            ],
+            "waiting_on": [
+              "backend",
+              "frontend"
+            ],
+            "duration_seconds": null,
+            "managed": null
+          }
+        ]
+      }
+    ]
+  },
+  "persisted_after_crash": {
+    "tasks": {
+      "backend": "running",
+      "frontend": "running",
+      "integrate": "pending"
+    },
+    "sessions": {
+      "backend": "running",
+      "frontend": "running"
+    },
+    "milestones": [
+      {
+        "id": "M1",
+        "milestone_id": "M1",
+        "objective": "Implement and verify in a fast budget",
+        "dependencies": [],
+        "acceptance": [
+          "Backend tests pass.",
+          "Browser E2E passes."
+        ],
+        "status": "running",
+        "started_at": 1792996837.381973,
+        "completed_at": null,
+        "repair_iterations": 0,
+        "max_repair": 2,
+        "verification_policy": {
+          "require_roles": [],
+          "max_repair": 2
+        },
+        "require_roles": [],
+        "satisfied_roles": [],
+        "missing_roles": [],
+        "verdicts": {},
+        "handoff_path": null,
+        "last_error": null,
+        "tasks": [
+          {
+            "id": "backend",
+            "task_id": "backend",
+            "role": "implementer",
+            "state": "running",
+            "milestone": "M1",
+            "phase": "build",
+            "attempts": 1,
+            "max_retries": 2,
+            "department": "backend",
+            "reason": null,
+            "result": null,
+            "native_stop_observed": false,
+            "review_attested": false,
+            "provider": "opencode",
+            "model": "opencode-go/deepseek-v4.1-flash",
+            "verify_commands": [
+              "python3.11 -m unittest discover -s tests -q"
+            ],
+            "depends_on": [],
+            "waiting_on": [],
+            "duration_seconds": null,
+            "managed": {
+              "provider": "opencode",
+              "status": "running",
+              "model": "opencode-go/deepseek-v4.1-flash",
+              "cost": null,
+              "tool_count": 0,
+              "session_hash": "884c0578d1a6"
+            }
+          },
+          {
+            "id": "frontend",
+            "task_id": "frontend",
+            "role": "implementer",
+            "state": "running",
+            "milestone": "M1",
+            "phase": "build",
+            "attempts": 1,
+            "max_retries": 2,
+            "department": "frontend",
+            "reason": null,
+            "result": null,
+            "native_stop_observed": false,
+            "review_attested": false,
+            "provider": "opencode",
+            "model": "opencode-go/deepseek-v4.1-flash",
+            "verify_commands": [
+              "node --check frontend/app.js"
+            ],
+            "depends_on": [],
+            "waiting_on": [],
+            "duration_seconds": null,
+            "managed": {
+              "provider": "opencode",
+              "status": "running",
+              "model": "opencode-go/deepseek-v4.1-flash",
+              "cost": null,
+              "tool_count": 0,
+              "session_hash": "31714049ec26"
+            }
+          },
+          {
+            "id": "integrate",
+            "task_id": "integrate",
+            "role": "tester",
+            "state": "pending",
+            "milestone": "M1",
+            "phase": "verify",
+            "attempts": 0,
+            "max_retries": 2,
+            "department": "qa",
+            "reason": null,
+            "result": null,
+            "native_stop_observed": false,
+            "review_attested": false,
+            "provider": "opencode",
+            "model": "opencode-go/deepseek-v4.1-flash",
+            "verify_commands": [
+              "python3.11 -m unittest discover -s tests -v",
+              "node e2e/check.cjs"
+            ],
+            "depends_on": [
+              "backend",
+              "frontend"
+            ],
+            "waiting_on": [
+              "backend",
+              "frontend"
+            ],
+            "duration_seconds": null,
+            "managed": null
+          }
+        ]
+      }
+    ]
+  },
+  "children_alive_after_runner_crash": {
+    "backend": true,
+    "frontend": true
+  },
+  "resume_response": {
+    "run_id": "v741-recovery-e2e",
+    "status": "resumed",
+    "pid_recorded": true,
+    "owner_verified": true,
+    "log": "$TMPDIR/opencode/v741-recovery/.auto-orchestrator/teamwork/v741-recovery-e2e.resume.log",
+    "recover": true,
+    "recovery_state": "resuming",
+    "native_cancel_ack": false,
+    "local_signal_only": true
+  },
+  "final": {
+    "status": "passed",
+    "verified_progress": 1.0,
+    "milestones": [
+      {
+        "id": "M1",
+        "status": "passed",
+        "repair_iterations": 1,
+        "max_repair": 2
+      }
+    ],
+    "sessions": [
+      {
+        "task_id": "backend",
+        "attempt": 1,
+        "status": "failed",
+        "tool_count": 0,
+        "cost": null,
+        "pid_verified": true,
+        "cancel_state": "orphaned"
+      },
+      {
+        "task_id": "backend",
+        "attempt": 2,
+        "status": "completed",
+        "tool_count": 11,
+        "cost": 0.008275302,
+        "pid_verified": true,
+        "cancel_state": "none"
+      },
+      {
+        "task_id": "frontend",
+        "attempt": 1,
+        "status": "failed",
+        "tool_count": 0,
+        "cost": null,
+        "pid_verified": true,
+        "cancel_state": "orphaned"
+      },
+      {
+        "task_id": "frontend",
+        "attempt": 2,
+        "status": "completed",
+        "tool_count": 28,
+        "cost": 0.022768524,
+        "pid_verified": true,
+        "cancel_state": "none"
+      },
+      {
+        "task_id": "integrate",
+        "attempt": 1,
+        "status": "completed",
+        "tool_count": 14,
+        "cost": 0.004632654,
+        "pid_verified": true,
+        "cancel_state": "none"
+      }
+    ],
+    "completed_attempts": {
+      "backend": [
+        2
+      ],
+      "frontend": [
+        2
+      ],
+      "integrate": [
+        1
+      ]
+    },
+    "duplicate_completed_attempts": [],
+    "note": "Repaired tasks may have more than one completed attempt; that is expected."
+  },
+  "independent_verification": {
+    "backend": {
+      "command": "$HOME/.local/bin/python3.11 -m unittest discover -s tests -q",
+      "exit_code": 0,
+      "duration_seconds": 1.167,
+      "output_tail": "----------------------------------------------------------------------\nRan 13 tests in 1.083s\n\nOK\n"
+    },
+    "browser_e2e": {
+      "command": "node e2e/check.cjs",
+      "exit_code": 0,
+      "duration_seconds": 2.81,
+      "output_tail": "Starting backend: $TMPDIR/opencode/v741-recovery/backend/app.py\nBackend ready on http://127.0.0.1:56852\n1. Loading the app\n2. Creating a task\n3. Rejecting an empty title\n4. Rejecting a whitespace-only title\n5. Toggling the task done\n6. Reloading to confirm the toggle persisted\n\nE2E passed: load, create, empty-title rejection, toggle, reload.\n"
+    }
+  },
+  "recovery_state_file": {
+    "version": 1,
+    "run_id": "v741-recovery-e2e",
+    "state": "recovered",
+    "updated_at": 1792997140.098658,
+    "final_status": "passed",
+    "recovered_orphans": [
+      {
+        "task_id": "backend",
+        "status": "orphaned",
+        "blocked": false,
+        "process": {
+          "recorded": true,
+          "pid_recorded": true,
+          "owned": true,
+          "exited_before_signal": false,
+          "signaled": true,
+          "terminated": true,
+          "group_terminated": true,
+          "local_signal_only": true,
+          "native_cancel_ack": false
+        },
+        "preserved_worktree_changes": [],
+        "native_cancel_ack": false,
+        "local_signal_only": true,
+        "reason": "Runner restarted. Previous managed attempt is not reattached. Owned orphan was already stopped or was terminated locally; the worktree and its changes were preserved for a new attempt."
+      },
+      {
+        "task_id": "frontend",
+        "status": "orphaned",
+        "blocked": false,
+        "process": {
+          "recorded": true,
+          "pid_recorded": true,
+          "owned": true,
+          "exited_before_signal": false,
+          "signaled": true,
+          "terminated": true,
+          "group_terminated": true,
+          "local_signal_only": true,
+          "native_cancel_ack": false
+        },
+        "preserved_worktree_changes": [],
+        "native_cancel_ack": false,
+        "local_signal_only": true,
+        "reason": "Runner restarted. Previous managed attempt is not reattached. Owned orphan was already stopped or was terminated locally; the worktree and its changes were preserved for a new attempt."
+      }
+    ]
+  },
+  "native_cancel_ack": false,
+  "local_signal_only": true,
+  "note": "Real managed OpenCode crash-recovery run. The runner was killed while both implementers were alive; recovery terminated only identity-verified owned child processes. No native cancellation ACK is claimed."
+}

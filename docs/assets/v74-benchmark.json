@@ -1,0 +1,283 @@
+{
+  "schema_version": 2,
+  "generated_at": "2026-10-26",
+  "environment": {
+    "platform": "macOS arm64",
+    "model": "opencode-go/deepseek-v4.1-flash",
+    "opencode": "2.1.1",
+    "provider_cache": "warm, not normalized",
+    "note": "local wall-clock and managed adapter timestamps; no cross-host comparison"
+  },
+  "runs": [
+    {
+      "label": "serial-single-agent",
+      "mode": "serial",
+      "wall_time_seconds": 180.818,
+      "cost_usd": 0.022225722,
+      "verified": true,
+      "tests": 21,
+      "milestones": 0,
+      "sessions": 1,
+      "agent_intervals": [
+        {
+          "agent": "serial",
+          "start": 0,
+          "end": 180.818
+        }
+      ],
+      "task_graph": [
+        {
+          "id": "serial",
+          "depends_on": [],
+          "duration_seconds": 180.818
+        }
+      ],
+      "concurrency": {
+        "agent_span_union_seconds": 180.818,
+        "concurrent_overlap_seconds": 0.0,
+        "max_concurrent_agents": 1,
+        "average_concurrency": 1.0,
+        "agent_seconds": 180.818
+      },
+      "critical_path_seconds": 180.818,
+      "note": "one managed session; same two verification suites were run independently"
+    },
+    {
+      "label": "v7.3 balanced",
+      "mode": "balanced",
+      "wall_time_seconds": 1566.142,
+      "cost_usd": 0.140372,
+      "verified": true,
+      "tests": 60,
+      "milestones": 3,
+      "sessions": 10,
+      "agent_intervals": [
+        {
+          "agent": "explore#1",
+          "start": 0.0,
+          "end": 19.117
+        },
+        {
+          "agent": "backend#1",
+          "start": 19.258,
+          "end": 96.707
+        },
+        {
+          "agent": "frontend#1",
+          "start": 19.375,
+          "end": 364.138
+        },
+        {
+          "agent": "integrate#1",
+          "start": 364.458,
+          "end": 661.835
+        },
+        {
+          "agent": "backend#2",
+          "start": 670.459,
+          "end": 873.469
+        },
+        {
+          "agent": "integrate#2",
+          "start": 874.117,
+          "end": 1085.36
+        },
+        {
+          "agent": "critic#1",
+          "start": 1086.81,
+          "end": 1204.296
+        },
+        {
+          "agent": "challenger#1",
+          "start": 1204.72,
+          "end": 1419.005
+        },
+        {
+          "agent": "auditor#1",
+          "start": 1420.362,
+          "end": 1523.31
+        },
+        {
+          "agent": "success#1",
+          "start": 1525.404,
+          "end": 1564.054
+        }
+      ],
+      "task_graph": [
+        {
+          "id": "explore",
+          "depends_on": [],
+          "duration_seconds": 19.152
+        },
+        {
+          "id": "backend",
+          "depends_on": [
+            "explore"
+          ],
+          "duration_seconds": 203.548
+        },
+        {
+          "id": "frontend",
+          "depends_on": [
+            "explore"
+          ],
+          "duration_seconds": 345.133
+        },
+        {
+          "id": "integrate",
+          "depends_on": [
+            "backend",
+            "frontend"
+          ],
+          "duration_seconds": 212.527
+        },
+        {
+          "id": "critic",
+          "depends_on": [
+            "integrate"
+          ],
+          "duration_seconds": 117.909
+        },
+        {
+          "id": "challenger",
+          "depends_on": [
+            "integrate"
+          ],
+          "duration_seconds": 215.641
+        },
+        {
+          "id": "auditor",
+          "depends_on": [
+            "integrate",
+            "critic",
+            "challenger"
+          ],
+          "duration_seconds": 105.039
+        },
+        {
+          "id": "success",
+          "depends_on": [
+            "auditor"
+          ],
+          "duration_seconds": 40.738
+        }
+      ],
+      "concurrency": {
+        "agent_span_union_seconds": 1548.996,
+        "concurrent_overlap_seconds": 77.332,
+        "max_concurrent_agents": 2,
+        "average_concurrency": 1.05,
+        "agent_seconds": 1626.328
+      },
+      "critical_path_seconds": 938.23,
+      "note": "5-role verification and environment repair in M2; includes integration repairs",
+      "verification_overhead_seconds": 981.988,
+      "repair_overhead_seconds": 414.253,
+      "dispatch_latency_ms": 2.4,
+      "queue_wait_seconds": null,
+      "scheduler_idle_seconds": null
+    },
+    {
+      "label": "v7.4 FAST",
+      "mode": "fast",
+      "wall_time_seconds": 247.846,
+      "cost_usd": 0.05279,
+      "verified": true,
+      "tests": 33,
+      "milestones": 1,
+      "sessions": 4,
+      "agent_intervals": [
+        {
+          "agent": "backend#1",
+          "start": 0.0,
+          "end": 105.752
+        },
+        {
+          "agent": "frontend#1",
+          "start": 0.116,
+          "end": 180.236
+        },
+        {
+          "agent": "backend#2",
+          "start": 105.822,
+          "end": 128.804
+        },
+        {
+          "agent": "integrate#1",
+          "start": 180.547,
+          "end": 246.316
+        }
+      ],
+      "task_graph": [
+        {
+          "id": "backend",
+          "depends_on": [],
+          "duration_seconds": 23.612
+        },
+        {
+          "id": "frontend",
+          "depends_on": [],
+          "duration_seconds": 180.47
+        },
+        {
+          "id": "integrate",
+          "depends_on": [
+            "backend",
+            "frontend"
+          ],
+          "duration_seconds": 67.188
+        }
+      ],
+      "concurrency": {
+        "agent_span_union_seconds": 246.005,
+        "concurrent_overlap_seconds": 128.618,
+        "max_concurrent_agents": 2,
+        "average_concurrency": 1.523,
+        "agent_seconds": 374.623
+      },
+      "critical_path_seconds": 247.658,
+      "note": "real backend/frontend worktrees + integration tester; no critic/challenger/auditor",
+      "verification_overhead_seconds": 65.769,
+      "repair_overhead_seconds": 22.982,
+      "dispatch_latency_ms": 2.4,
+      "queue_wait_seconds": null,
+      "scheduler_idle_seconds": null
+    }
+  ],
+  "comparison": {
+    "v73_to_v74_fast": {
+      "wall_time_saved_seconds": 1318.296,
+      "wall_time_reduction_percent": 84.2,
+      "cost_saved_usd": 0.087581,
+      "quality_equivalent": false,
+      "reason": "V7.4 FAST intentionally omits critic, challenger, auditor and success auditor; compare verification depth separately"
+    },
+    "serial_to_v74_fast": {
+      "wall_time_difference_seconds": 67.028,
+      "verified_improvement": false,
+      "reason": "the serial run was faster; no time-saving claim"
+    },
+    "true_concurrency": {
+      "v73": {
+        "agent_span_union_seconds": 1548.996,
+        "concurrent_overlap_seconds": 77.332,
+        "max_concurrent_agents": 2,
+        "average_concurrency": 1.05,
+        "agent_seconds": 1626.328
+      },
+      "v74": {
+        "agent_span_union_seconds": 246.005,
+        "concurrent_overlap_seconds": 128.618,
+        "max_concurrent_agents": 2,
+        "average_concurrency": 1.523,
+        "agent_seconds": 374.623
+      },
+      "note": "concurrent_overlap_seconds is the time with at least two agents; union is not overlap"
+    }
+  },
+  "limitations": [
+    "Single live sample per condition; no three-repetition statistical claim.",
+    "FAST and BALANCED do not have equal verification depth.",
+    "Local provider cache and model latency were not normalized."
+  ]
+}

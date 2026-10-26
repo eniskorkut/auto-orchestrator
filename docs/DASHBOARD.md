@@ -177,6 +177,24 @@ Router advice is either `single` or `consider-parallel`; parallel advice caps at
 
 The current evidence schema contains no token or price field. The dashboard therefore shows **no cost figures** and does not estimate them. Adding cost would require an explicit, reviewable input per platform and model; subscription and usage-based plans must not be mixed silently.
 
+## Teamwork milestones and managed sessions
+
+V7.3 adds:
+
+- `GET /api/projects/<project_id>/milestones` — project-scoped milestone runs,
+  verified progress, role verdicts, handoffs and managed-session summaries.
+- `GET /api/projects/<project_id>/milestones/<run_id>` — one milestone run.
+
+The API exposes a short session hash and task/provider/model/cost metadata, not
+raw managed session ids or event paths. Progress counts only passed milestones;
+`estimated_progress` is always `null`. V7.4 adds `work_mode`, `risk_assessment`,
+`usage` and `scheduler` fields for FAST/BALANCED/RIGOROUS, active session count,
+queue depth and measured cost. V7.4.1 adds `recovery_state`,
+`owner_connected`, `orphaned_managed_sessions` and a recovery transition object;
+orphaned sessions are shown as orphaned, not as working. See
+[V73_TEAMWORK.md](V73_TEAMWORK.md), [V74_ADAPTIVE_TEAMWORK.md](V74_ADAPTIVE_TEAMWORK.md)
+and [V741_RELIABILITY.md](V741_RELIABILITY.md).
+
 ## Privacy and security model
 
 The dashboard is local by construction:

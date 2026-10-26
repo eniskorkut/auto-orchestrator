@@ -479,6 +479,34 @@ test('identical display names in different sessions are never merged', () => {
   assert.notEqual(one.room, two.room);
 });
 
+test('managed execution sessions spawn only with a managed identity and explicit status', () => {
+  const managed = {
+    kind: 'managed',
+    key: 'm:run-1:backend:1',
+    room: 'backend',
+    status: 'working',
+    spawnable: true,
+    managed: {
+      run_id: 'run-1', task_id: 'backend', attempt: 1,
+      provider: 'opencode', status: 'running', session_hash: 'abcdef123456',
+      tool_count: 3,
+    },
+  };
+  assert.equal(StateMachine.canSpawn(managed), true);
+  assert.equal(StateMachine.visualState(managed), 'working');
+  assert.equal(StateMachine.derive(managed, null, layout()).room, 'backend');
+  assert.equal(StateMachine.canSpawn({ ...managed, spawnable: false }), false);
+  assert.equal(StateMachine.canSpawn({
+    kind: 'managed', key: '', room: 'backend', status: 'working',
+    managed: { status: 'running' },
+  }), false);
+  const completed = {
+    ...managed, key: 'm:run-1:backend:2', status: 'completed',
+    managed: { ...managed.managed, status: 'completed' },
+  };
+  assert.equal(StateMachine.visualState(completed), 'completed');
+});
+
 test('session keys dedupe duplicate spawns without merging different sessions', () => {
   const one = agentEntry();
   const duplicate = agentEntry({ status: 'completed' });

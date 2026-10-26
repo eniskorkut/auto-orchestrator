@@ -1,0 +1,1099 @@
+{
+  "version": 1,
+  "success": {
+    "run_id": "teamwork-e2e",
+    "status": "passed",
+    "verified_progress": 1.0,
+    "estimated_progress": null,
+    "milestones": [
+      {
+        "id": "M1",
+        "objective": "Discover the scaffold and confirm boundaries",
+        "status": "passed",
+        "repair_iterations": 0,
+        "max_repair": 0,
+        "require_roles": [],
+        "satisfied_roles": [],
+        "tasks": [
+          {
+            "id": "explore",
+            "role": "explorer",
+            "state": "completed",
+            "attempts": 1,
+            "department": "research"
+          }
+        ],
+        "handoff": "teamwork-e2e-M1.v1.json"
+      },
+      {
+        "id": "M2",
+        "objective": "Build, integrate, test and independently review",
+        "status": "passed",
+        "repair_iterations": 2,
+        "max_repair": 2,
+        "require_roles": [
+          "reviewer",
+          "challenger",
+          "auditor"
+        ],
+        "satisfied_roles": [
+          "reviewer",
+          "challenger",
+          "auditor"
+        ],
+        "tasks": [
+          {
+            "id": "backend",
+            "role": "implementer",
+            "state": "completed",
+            "attempts": 2,
+            "department": "backend"
+          },
+          {
+            "id": "frontend",
+            "role": "implementer",
+            "state": "completed",
+            "attempts": 1,
+            "department": "frontend"
+          },
+          {
+            "id": "integrate",
+            "role": "tester",
+            "state": "completed",
+            "attempts": 2,
+            "department": "qa"
+          },
+          {
+            "id": "critic",
+            "role": "reviewer",
+            "state": "completed",
+            "attempts": 1,
+            "department": "review"
+          },
+          {
+            "id": "challenger",
+            "role": "challenger",
+            "state": "completed",
+            "attempts": 1,
+            "department": "review"
+          },
+          {
+            "id": "auditor",
+            "role": "auditor",
+            "state": "completed",
+            "attempts": 1,
+            "department": "review"
+          }
+        ],
+        "handoff": "teamwork-e2e-M2.v1.json"
+      },
+      {
+        "id": "M3",
+        "objective": "Final independent success audit",
+        "status": "passed",
+        "repair_iterations": 0,
+        "max_repair": 1,
+        "require_roles": [
+          "success-auditor"
+        ],
+        "satisfied_roles": [
+          "success-auditor"
+        ],
+        "tasks": [
+          {
+            "id": "success",
+            "role": "success-auditor",
+            "state": "completed",
+            "attempts": 1,
+            "department": "review"
+          }
+        ],
+        "handoff": "teamwork-e2e-M3.v1.json"
+      }
+    ],
+    "managed_sessions": [
+      {
+        "task_id": "auditor",
+        "attempt": 1,
+        "provider": "opencode",
+        "session_hash": "14f83a0f5379",
+        "status": "completed",
+        "model": "opencode-go/deepseek-v4.1-flash",
+        "cost": 0.014713764,
+        "tool_count": 0,
+        "tokens": {
+          "cache": {
+            "read": 604288,
+            "write": 0
+          },
+          "cache_read": 604288,
+          "cache_write": 0,
+          "input": 53646,
+          "output": 4979,
+          "reasoning": 3111
+        }
+      },
+      {
+        "task_id": "backend",
+        "attempt": 1,
+        "provider": "opencode",
+        "session_hash": "e53d1b9564cd",
+        "status": "completed",
+        "model": "opencode-go/deepseek-v4.1-flash",
+        "cost": 0.009890232,
+        "tool_count": 0,
+        "tokens": {
+          "cache": {
+            "read": 114944,
+            "write": 0
+          },
+          "cache_read": 114944,
+          "cache_write": 0,
+          "input": 22848,
+          "output": 5904,
+          "reasoning": 4293
+        }
+      },
+      {
+        "task_id": "backend",
+        "attempt": 2,
+        "provider": "opencode",
+        "session_hash": "e53d1b9564cd",
+        "status": "completed",
+        "model": "opencode-go/deepseek-v4.1-flash",
+        "cost": 0.017010438,
+        "tool_count": 0,
+        "tokens": {
+          "cache": {
+            "read": 960896,
+            "write": 0
+          },
+          "cache_read": 960896,
+          "cache_write": 0,
+          "input": 33773,
+          "output": 3849,
+          "reasoning": 11254
+        }
+      },
+      {
+        "task_id": "challenger",
+        "attempt": 1,
+        "provider": "opencode",
+        "session_hash": "3ddea391df19",
+        "status": "completed",
+        "model": "opencode-go/deepseek-v4.1-flash",
+        "cost": 0.025855974,
+        "tool_count": 0,
+        "tokens": {
+          "cache": {
+            "read": 827008,
+            "write": 0
+          },
+          "cache_read": 827008,
+          "cache_write": 0,
+          "input": 57893,
+          "output": 10820,
+          "reasoning": 13665
+        }
+      },
+      {
+        "task_id": "critic",
+        "attempt": 1,
+        "provider": "opencode",
+        "session_hash": "55d3ad3340ae",
+        "status": "completed",
+        "model": "opencode-go/deepseek-v4.1-flash",
+        "cost": 0.01739625,
+        "tool_count": 0,
+        "tokens": {
+          "cache": {
+            "read": 364800,
+            "write": 0
+          },
+          "cache_read": 364800,
+          "cache_write": 0,
+          "input": 60991,
+          "output": 4235,
+          "reasoning": 7687
+        }
+      },
+      {
+        "task_id": "explore",
+        "attempt": 1,
+        "provider": "opencode",
+        "session_hash": "863dd38de9bc",
+        "status": "completed",
+        "model": "opencode-go/deepseek-v4.1-flash",
+        "cost": 0.001566486,
+        "tool_count": 0,
+        "tokens": {
+          "cache": {
+            "read": 51712,
+            "write": 0
+          },
+          "cache_read": 51712,
+          "cache_write": 0,
+          "input": 4505,
+          "output": 670,
+          "reasoning": 556
+        }
+      },
+      {
+        "task_id": "frontend",
+        "attempt": 1,
+        "provider": "opencode",
+        "session_hash": "477924306d46",
+        "status": "completed",
+        "model": "opencode-go/deepseek-v4.1-flash",
+        "cost": 0.029364186,
+        "tool_count": 0,
+        "tokens": {
+          "cache": {
+            "read": 1450112,
+            "write": 0
+          },
+          "cache_read": 1450112,
+          "cache_write": 0,
+          "input": 52087,
+          "output": 14451,
+          "reasoning": 14217
+        }
+      },
+      {
+        "task_id": "integrate",
+        "attempt": 1,
+        "provider": "opencode",
+        "session_hash": "3086bc1bbde9",
+        "status": "completed",
+        "model": "opencode-go/deepseek-v4.1-flash",
+        "cost": 0.013347606,
+        "tool_count": 0,
+        "tokens": {
+          "cache": {
+            "read": 701952,
+            "write": 0
+          },
+          "cache_read": 701952,
+          "cache_write": 0,
+          "input": 40897,
+          "output": 4409,
+          "reasoning": 4103
+        }
+      },
+      {
+        "task_id": "integrate",
+        "attempt": 2,
+        "provider": "opencode",
+        "session_hash": "3086bc1bbde9",
+        "status": "completed",
+        "model": "opencode-go/deepseek-v4.1-flash",
+        "cost": 0.005600898,
+        "tool_count": 0,
+        "tokens": {
+          "cache": {
+            "read": 386816,
+            "write": 0
+          },
+          "cache_read": 386816,
+          "cache_write": 0,
+          "input": 17095,
+          "output": 1646,
+          "reasoning": 1481
+        }
+      },
+      {
+        "task_id": "success",
+        "attempt": 1,
+        "provider": "opencode",
+        "session_hash": "cdd0ea3cefc8",
+        "status": "completed",
+        "model": "opencode-go/deepseek-v4.1-flash",
+        "cost": 0.0056259,
+        "tool_count": 0,
+        "tokens": {
+          "cache": {
+            "read": 176000,
+            "write": 0
+          },
+          "cache_read": 176000,
+          "cache_write": 0,
+          "input": 22082,
+          "output": 1931,
+          "reasoning": 1045
+        }
+      }
+    ],
+    "test_commands": [
+      {
+        "milestone": "M2",
+        "task": "backend",
+        "name": "python3.11 -m unittest tests.test_backend -v",
+        "status": "passed",
+        "exit_code": 0
+      },
+      {
+        "milestone": "M2",
+        "task": "frontend",
+        "name": "node --check frontend/app.js",
+        "status": "passed",
+        "exit_code": 0
+      },
+      {
+        "milestone": "M2",
+        "task": "integrate",
+        "name": "python3.11 -m unittest discover -s tests -v",
+        "status": "passed",
+        "exit_code": 0
+      },
+      {
+        "milestone": "M2",
+        "task": "integrate",
+        "name": "node e2e/check.cjs",
+        "status": "passed",
+        "exit_code": 0
+      },
+      {
+        "milestone": "M2",
+        "task": "critic",
+        "name": "python3.11 -m unittest discover -s tests -v",
+        "status": "passed",
+        "exit_code": 0
+      },
+      {
+        "milestone": "M2",
+        "task": "challenger",
+        "name": "python3.11 -m unittest discover -s tests -v",
+        "status": "passed",
+        "exit_code": 0
+      },
+      {
+        "milestone": "M2",
+        "task": "auditor",
+        "name": "python3.11 -m unittest discover -s tests -v",
+        "status": "passed",
+        "exit_code": 0
+      },
+      {
+        "milestone": "M2",
+        "task": "auditor",
+        "name": "node e2e/check.cjs",
+        "status": "passed",
+        "exit_code": 0
+      },
+      {
+        "milestone": "M3",
+        "task": "success",
+        "name": "python3.11 -m unittest discover -s tests -v",
+        "status": "passed",
+        "exit_code": 0
+      },
+      {
+        "milestone": "M3",
+        "task": "success",
+        "name": "node e2e/check.cjs",
+        "status": "passed",
+        "exit_code": 0
+      }
+    ],
+    "timings": {
+      "explore": {
+        "wall_time_ms": 19151.3,
+        "queue_wait_ms": 3.9,
+        "agent_start_latency_ms": 3.9,
+        "cost": 0.001566486,
+        "tokens": {
+          "input": 4505,
+          "output": 670,
+          "reasoning": 556,
+          "cache_read": 51712,
+          "cache_write": 0,
+          "cache": {
+            "read": 51712,
+            "write": 0
+          }
+        }
+      },
+      "backend": {
+        "wall_time_ms": 203534.3,
+        "queue_wait_ms": 3.7,
+        "agent_start_latency_ms": 3.7,
+        "cost": 0.017010438,
+        "tokens": {
+          "input": 33773,
+          "output": 3849,
+          "reasoning": 11254,
+          "cache_read": 960896,
+          "cache_write": 0,
+          "cache": {
+            "read": 960896,
+            "write": 0
+          }
+        }
+      },
+      "frontend": {
+        "wall_time_ms": 344910.9,
+        "queue_wait_ms": 2.5,
+        "agent_start_latency_ms": 2.5,
+        "cost": 0.029364186,
+        "tokens": {
+          "input": 52087,
+          "output": 14451,
+          "reasoning": 14217,
+          "cache_read": 1450112,
+          "cache_write": 0,
+          "cache": {
+            "read": 1450112,
+            "write": 0
+          }
+        }
+      },
+      "integrate": {
+        "wall_time_ms": 212687.8,
+        "queue_wait_ms": 2.1,
+        "agent_start_latency_ms": 2.1,
+        "cost": 0.005600898,
+        "tokens": {
+          "input": 17095,
+          "output": 1646,
+          "reasoning": 1481,
+          "cache_read": 386816,
+          "cache_write": 0,
+          "cache": {
+            "read": 386816,
+            "write": 0
+          }
+        }
+      },
+      "critic": {
+        "wall_time_ms": 117907.5,
+        "queue_wait_ms": 3.9,
+        "agent_start_latency_ms": 3.9,
+        "cost": 0.01739625,
+        "tokens": {
+          "input": 60991,
+          "output": 4235,
+          "reasoning": 7687,
+          "cache_read": 364800,
+          "cache_write": 0,
+          "cache": {
+            "read": 364800,
+            "write": 0
+          }
+        }
+      },
+      "challenger": {
+        "wall_time_ms": 215640.7,
+        "queue_wait_ms": 3.6,
+        "agent_start_latency_ms": 3.6,
+        "cost": 0.025855974,
+        "tokens": {
+          "input": 57893,
+          "output": 10820,
+          "reasoning": 13665,
+          "cache_read": 827008,
+          "cache_write": 0,
+          "cache": {
+            "read": 827008,
+            "write": 0
+          }
+        }
+      },
+      "auditor": {
+        "wall_time_ms": 105038.5,
+        "queue_wait_ms": 2.7,
+        "agent_start_latency_ms": 2.7,
+        "cost": 0.014713764,
+        "tokens": {
+          "input": 53646,
+          "output": 4979,
+          "reasoning": 3111,
+          "cache_read": 604288,
+          "cache_write": 0,
+          "cache": {
+            "read": 604288,
+            "write": 0
+          }
+        }
+      },
+      "success": {
+        "wall_time_ms": 40737.2,
+        "queue_wait_ms": 2.7,
+        "agent_start_latency_ms": 2.7,
+        "cost": 0.0056259,
+        "tokens": {
+          "input": 22082,
+          "output": 1931,
+          "reasoning": 1045,
+          "cache_read": 176000,
+          "cache_write": 0,
+          "cache": {
+            "read": 176000,
+            "write": 0
+          }
+        }
+      }
+    },
+    "handoffs": [
+      "teamwork-e2e-M1.v1.json",
+      "teamwork-e2e-M2.v1.json",
+      "teamwork-e2e-M3.v1.json"
+    ],
+    "failure_recovery": null,
+    "source_evidence_dir": "$TMPDIR/opencode/teamwork-e2e-sample/.auto-orchestrator/evidence/teamwork-e2e",
+    "note": "Real local OpenCode managed sessions. Raw session IDs are replaced by SHA-256 prefixes."
+  },
+  "failure_recovery": {
+    "run_id": "teamwork-repair",
+    "status": "passed",
+    "verified_progress": 1.0,
+    "estimated_progress": null,
+    "milestones": [
+      {
+        "id": "M1",
+        "objective": "Discover the scaffold and confirm boundaries",
+        "status": "passed",
+        "repair_iterations": 0,
+        "max_repair": 0,
+        "require_roles": [],
+        "satisfied_roles": [],
+        "tasks": [
+          {
+            "id": "explore",
+            "role": "explorer",
+            "state": "completed",
+            "attempts": 1,
+            "department": "research"
+          }
+        ],
+        "handoff": "teamwork-repair-M1.v1.json"
+      },
+      {
+        "id": "M2",
+        "objective": "Build, integrate, test and independently review",
+        "status": "passed",
+        "repair_iterations": 2,
+        "max_repair": 2,
+        "require_roles": [
+          "reviewer",
+          "challenger",
+          "auditor"
+        ],
+        "satisfied_roles": [
+          "reviewer",
+          "challenger",
+          "auditor"
+        ],
+        "tasks": [
+          {
+            "id": "backend",
+            "role": "implementer",
+            "state": "completed",
+            "attempts": 1,
+            "department": "backend"
+          },
+          {
+            "id": "frontend",
+            "role": "implementer",
+            "state": "completed",
+            "attempts": 2,
+            "department": "frontend"
+          },
+          {
+            "id": "integrate",
+            "role": "tester",
+            "state": "completed",
+            "attempts": 2,
+            "department": "qa"
+          },
+          {
+            "id": "critic",
+            "role": "reviewer",
+            "state": "completed",
+            "attempts": 1,
+            "department": "review"
+          },
+          {
+            "id": "challenger",
+            "role": "challenger",
+            "state": "completed",
+            "attempts": 1,
+            "department": "review"
+          },
+          {
+            "id": "auditor",
+            "role": "auditor",
+            "state": "completed",
+            "attempts": 1,
+            "department": "review"
+          }
+        ],
+        "handoff": "teamwork-repair-M2.v1.json"
+      },
+      {
+        "id": "M3",
+        "objective": "Final independent success audit",
+        "status": "passed",
+        "repair_iterations": 0,
+        "max_repair": 1,
+        "require_roles": [
+          "success-auditor"
+        ],
+        "satisfied_roles": [
+          "success-auditor"
+        ],
+        "tasks": [
+          {
+            "id": "success",
+            "role": "success-auditor",
+            "state": "completed",
+            "attempts": 1,
+            "department": "review"
+          }
+        ],
+        "handoff": "teamwork-repair-M3.v1.json"
+      }
+    ],
+    "managed_sessions": [
+      {
+        "task_id": "auditor",
+        "attempt": 1,
+        "provider": "opencode",
+        "session_hash": "28b12d429b08",
+        "status": "completed",
+        "model": "opencode-go/deepseek-v4.1-flash",
+        "cost": 0.011111286,
+        "tool_count": 25,
+        "tokens": {
+          "cache": {
+            "read": 454912,
+            "write": 0
+          },
+          "cache_read": 454912,
+          "cache_write": 0,
+          "input": 45953,
+          "output": 2799,
+          "reasoning": 1957
+        }
+      },
+      {
+        "task_id": "backend",
+        "attempt": 1,
+        "provider": "opencode",
+        "session_hash": "075fd4dcb25d",
+        "status": "completed",
+        "model": "opencode-go/deepseek-v4.1-flash",
+        "cost": 0.00986592,
+        "tool_count": 19,
+        "tokens": {
+          "cache": {
+            "read": 378240,
+            "write": 0
+          },
+          "cache_read": 378240,
+          "cache_write": 0,
+          "input": 37320,
+          "output": 2444,
+          "reasoning": 2778
+        }
+      },
+      {
+        "task_id": "challenger",
+        "attempt": 1,
+        "provider": "opencode",
+        "session_hash": "ac082839d0cb",
+        "status": "completed",
+        "model": "opencode-go/deepseek-v4.1-flash",
+        "cost": 0.022161372,
+        "tool_count": 20,
+        "tokens": {
+          "cache": {
+            "read": 369024,
+            "write": 0
+          },
+          "cache_read": 369024,
+          "cache_write": 0,
+          "input": 58398,
+          "output": 7279,
+          "reasoning": 13212
+        }
+      },
+      {
+        "task_id": "critic",
+        "attempt": 1,
+        "provider": "opencode",
+        "session_hash": "c0865a8e3e08",
+        "status": "completed",
+        "model": "opencode-go/deepseek-v4.1-flash",
+        "cost": 0.01340826,
+        "tool_count": 23,
+        "tokens": {
+          "cache": {
+            "read": 321920,
+            "write": 0
+          },
+          "cache_read": 321920,
+          "cache_write": 0,
+          "input": 47042,
+          "output": 3228,
+          "reasoning": 5749
+        }
+      },
+      {
+        "task_id": "explore",
+        "attempt": 1,
+        "provider": "opencode",
+        "session_hash": "6ad1a636705a",
+        "status": "completed",
+        "model": "opencode-go/deepseek-v4.1-flash",
+        "cost": 0.003971892,
+        "tool_count": 10,
+        "tokens": {
+          "cache": {
+            "read": 43264,
+            "write": 0
+          },
+          "cache_read": 43264,
+          "cache_write": 0,
+          "input": 17910,
+          "output": 1100,
+          "reasoning": 826
+        }
+      },
+      {
+        "task_id": "frontend",
+        "attempt": 1,
+        "provider": "opencode",
+        "session_hash": "dc49b8983f73",
+        "status": "completed",
+        "model": "opencode-go/deepseek-v4.1-flash",
+        "cost": 0.01273689,
+        "tool_count": 32,
+        "tokens": {
+          "cache": {
+            "read": 612480,
+            "write": 0
+          },
+          "cache_read": 612480,
+          "cache_write": 0,
+          "input": 44563,
+          "output": 3050,
+          "reasoning": 3975
+        }
+      },
+      {
+        "task_id": "frontend",
+        "attempt": 2,
+        "provider": "opencode",
+        "session_hash": "dc49b8983f73",
+        "status": "completed",
+        "model": "opencode-go/deepseek-v4.1-flash",
+        "cost": 0.004613022,
+        "tool_count": 10,
+        "tokens": {
+          "cache": {
+            "read": 353024,
+            "write": 0
+          },
+          "cache_read": 353024,
+          "cache_write": 0,
+          "input": 15269,
+          "output": 898,
+          "reasoning": 1208
+        }
+      },
+      {
+        "task_id": "integrate",
+        "attempt": 1,
+        "provider": "opencode",
+        "session_hash": "c9edd81d5172",
+        "status": "completed",
+        "model": "opencode-go/deepseek-v4.1-flash",
+        "cost": 0.009553488,
+        "tool_count": 22,
+        "tokens": {
+          "cache": {
+            "read": 340096,
+            "write": 0
+          },
+          "cache_read": 340096,
+          "cache_write": 0,
+          "input": 40696,
+          "output": 1725,
+          "reasoning": 2323
+        }
+      },
+      {
+        "task_id": "integrate",
+        "attempt": 2,
+        "provider": "opencode",
+        "session_hash": "c9edd81d5172",
+        "status": "completed",
+        "model": "opencode-go/deepseek-v4.1-flash",
+        "cost": 0.003316938,
+        "tool_count": 6,
+        "tokens": {
+          "cache": {
+            "read": 212096,
+            "write": 0
+          },
+          "cache_read": 212096,
+          "cache_write": 0,
+          "input": 14579,
+          "output": 584,
+          "reasoning": 239
+        }
+      },
+      {
+        "task_id": "success",
+        "attempt": 1,
+        "provider": "opencode",
+        "session_hash": "f89c8773fd81",
+        "status": "completed",
+        "model": "opencode-go/deepseek-v4.1-flash",
+        "cost": 0.012498726,
+        "tool_count": 25,
+        "tokens": {
+          "cache": {
+            "read": 324992,
+            "write": 0
+          },
+          "cache_read": 324992,
+          "cache_write": 0,
+          "input": 54633,
+          "output": 3035,
+          "reasoning": 2513
+        }
+      }
+    ],
+    "test_commands": [
+      {
+        "milestone": "M2",
+        "task": "backend",
+        "name": "python3.11 -m unittest tests.test_backend -v",
+        "status": "passed",
+        "exit_code": 0
+      },
+      {
+        "milestone": "M2",
+        "task": "frontend",
+        "name": "node --check frontend/app.js",
+        "status": "passed",
+        "exit_code": 0
+      },
+      {
+        "milestone": "M2",
+        "task": "integrate",
+        "name": "python3.11 -m unittest discover -s tests -v",
+        "status": "passed",
+        "exit_code": 0
+      },
+      {
+        "milestone": "M2",
+        "task": "integrate",
+        "name": "node e2e/check.cjs",
+        "status": "passed",
+        "exit_code": 0
+      },
+      {
+        "milestone": "M2",
+        "task": "critic",
+        "name": "python3.11 -m unittest discover -s tests -v",
+        "status": "passed",
+        "exit_code": 0
+      },
+      {
+        "milestone": "M2",
+        "task": "challenger",
+        "name": "python3.11 -m unittest discover -s tests -v",
+        "status": "passed",
+        "exit_code": 0
+      },
+      {
+        "milestone": "M2",
+        "task": "auditor",
+        "name": "python3.11 -m unittest discover -s tests -v",
+        "status": "passed",
+        "exit_code": 0
+      },
+      {
+        "milestone": "M2",
+        "task": "auditor",
+        "name": "node e2e/check.cjs",
+        "status": "passed",
+        "exit_code": 0
+      },
+      {
+        "milestone": "M3",
+        "task": "success",
+        "name": "python3.11 -m unittest discover -s tests -v",
+        "status": "passed",
+        "exit_code": 0
+      },
+      {
+        "milestone": "M3",
+        "task": "success",
+        "name": "node e2e/check.cjs",
+        "status": "passed",
+        "exit_code": 0
+      }
+    ],
+    "timings": {
+      "explore": {
+        "wall_time_ms": 26502.5,
+        "queue_wait_ms": 2.4,
+        "agent_start_latency_ms": 2.4,
+        "cost": 0.003971892,
+        "tokens": {
+          "input": 17910,
+          "output": 1100,
+          "reasoning": 826,
+          "cache_read": 43264,
+          "cache_write": 0,
+          "cache": {
+            "read": 43264,
+            "write": 0
+          }
+        }
+      },
+      "backend": {
+        "wall_time_ms": 55499.7,
+        "queue_wait_ms": 2.4,
+        "agent_start_latency_ms": 2.4,
+        "cost": 0.00986592,
+        "tokens": {
+          "input": 37320,
+          "output": 2444,
+          "reasoning": 2778,
+          "cache_read": 378240,
+          "cache_write": 0,
+          "cache": {
+            "read": 378240,
+            "write": 0
+          }
+        }
+      },
+      "frontend": {
+        "wall_time_ms": 29841.9,
+        "queue_wait_ms": 2.3,
+        "agent_start_latency_ms": 2.3,
+        "cost": 0.004613022,
+        "tokens": {
+          "input": 15269,
+          "output": 898,
+          "reasoning": 1208,
+          "cache_read": 353024,
+          "cache_write": 0,
+          "cache": {
+            "read": 353024,
+            "write": 0
+          }
+        }
+      },
+      "integrate": {
+        "wall_time_ms": 22865.9,
+        "queue_wait_ms": 2.2,
+        "agent_start_latency_ms": 2.2,
+        "cost": 0.003316938,
+        "tokens": {
+          "input": 14579,
+          "output": 584,
+          "reasoning": 239,
+          "cache_read": 212096,
+          "cache_write": 0,
+          "cache": {
+            "read": 212096,
+            "write": 0
+          }
+        }
+      },
+      "critic": {
+        "wall_time_ms": 94059.1,
+        "queue_wait_ms": 2.4,
+        "agent_start_latency_ms": 2.4,
+        "cost": 0.01340826,
+        "tokens": {
+          "input": 47042,
+          "output": 3228,
+          "reasoning": 5749,
+          "cache_read": 321920,
+          "cache_write": 0,
+          "cache": {
+            "read": 321920,
+            "write": 0
+          }
+        }
+      },
+      "challenger": {
+        "wall_time_ms": 149529.9,
+        "queue_wait_ms": 4.1,
+        "agent_start_latency_ms": 4.1,
+        "cost": 0.022161372,
+        "tokens": {
+          "input": 58398,
+          "output": 7279,
+          "reasoning": 13212,
+          "cache_read": 369024,
+          "cache_write": 0,
+          "cache": {
+            "read": 369024,
+            "write": 0
+          }
+        }
+      },
+      "auditor": {
+        "wall_time_ms": 63630.8,
+        "queue_wait_ms": 2.2,
+        "agent_start_latency_ms": 2.2,
+        "cost": 0.011111286,
+        "tokens": {
+          "input": 45953,
+          "output": 2799,
+          "reasoning": 1957,
+          "cache_read": 454912,
+          "cache_write": 0,
+          "cache": {
+            "read": 454912,
+            "write": 0
+          }
+        }
+      },
+      "success": {
+        "wall_time_ms": 56549.5,
+        "queue_wait_ms": 2.4,
+        "agent_start_latency_ms": 2.4,
+        "cost": 0.012498726,
+        "tokens": {
+          "input": 54633,
+          "output": 3035,
+          "reasoning": 2513,
+          "cache_read": 324992,
+          "cache_write": 0,
+          "cache": {
+            "read": 324992,
+            "write": 0
+          }
+        }
+      }
+    },
+    "handoffs": [
+      "teamwork-repair-M1.v1.json",
+      "teamwork-repair-M2.v1.json",
+      "teamwork-repair-M3.v1.json"
+    ],
+    "failure_recovery": {
+      "injected": true,
+      "injection": "frontend/config.js AO_API_BASE -> unreachable loopback port",
+      "repair_iterations": 2,
+      "root": "$TMPDIR/opencode/teamwork-e2e-failure"
+    },
+    "source_evidence_dir": "$TMPDIR/opencode/teamwork-e2e-failure/.auto-orchestrator/evidence/teamwork-repair",
+    "note": "Real local OpenCode managed sessions. Raw session IDs are replaced by SHA-256 prefixes."
+  },
+  "environment": {
+    "platform": "macOS arm64",
+    "model": "opencode-go/deepseek-v4.1-flash",
+    "opencode": "2.1.1",
+    "playwright": "1.64.1",
+    "date": "2026-10-25/26"
+  }
+}

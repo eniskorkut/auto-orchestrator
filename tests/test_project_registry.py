@@ -48,9 +48,11 @@ class RegistryPathTests(unittest.TestCase):
             with mock.patch.dict(os.environ, {"AUTO_ORCHESTRATOR_HOME": temp}):
                 self.assertEqual(default_registry_path(),
                                  Path(temp) / "projects.json")
-        with mock.patch.dict(os.environ, {}, clear=True):
+        expected_home = Path(temp) / "home"
+        with mock.patch.dict(os.environ, {"AUTO_ORCHESTRATOR_HOME": ""}), \
+                mock.patch.object(Path, "home", return_value=expected_home):
             self.assertEqual(default_registry_path(),
-                             Path.home() / ".auto-orchestrator" / "projects.json")
+                             expected_home / ".auto-orchestrator" / "projects.json")
 
     def test_canonical_root_rejects_missing_files_and_symlinks(self):
         with tempfile.TemporaryDirectory() as temp:

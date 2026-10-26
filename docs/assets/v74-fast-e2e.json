@@ -1,0 +1,153 @@
+{
+  "schema_version": 2,
+  "run_id": "v74-fast-e2e",
+  "mode": "fast",
+  "status": "passed",
+  "verified_progress": 1.0,
+  "milestones": [
+    {
+      "id": "M1",
+      "status": "passed",
+      "repair_iterations": 1,
+      "task_ids": [
+        "backend",
+        "frontend",
+        "integrate"
+      ]
+    }
+  ],
+  "wall_time_seconds": 247.846,
+  "cost_usd": 0.05279,
+  "tests": {
+    "backend": 33,
+    "browser_e2e": "passed"
+  },
+  "sessions": [
+    {
+      "task_id": "backend",
+      "attempt": 1,
+      "session_hash": "567d931615bd",
+      "status": "completed",
+      "model": "opencode-go/deepseek-v4.1-flash",
+      "cost": 0.014470272,
+      "tool_count": 14,
+      "tokens": {
+        "cache": {
+          "read": 244224,
+          "write": 0
+        },
+        "cache_read": 244224,
+        "cache_write": 0,
+        "input": 29272,
+        "output": 7607,
+        "reasoning": 7971
+      }
+    },
+    {
+      "task_id": "backend",
+      "attempt": 2,
+      "session_hash": "567d931615bd",
+      "status": "completed",
+      "model": "opencode-go/deepseek-v4.1-flash",
+      "cost": 0.003441354,
+      "tool_count": 5,
+      "tokens": {
+        "cache": {
+          "read": 208768,
+          "write": 0
+        },
+        "cache_read": 208768,
+        "cache_write": 0,
+        "input": 12339,
+        "output": 828,
+        "reasoning": 779
+      }
+    },
+    {
+      "task_id": "frontend",
+      "attempt": 1,
+      "session_hash": "2ae876336c10",
+      "status": "completed",
+      "model": "opencode-go/deepseek-v4.1-flash",
+      "cost": 0.024170502,
+      "tool_count": 41,
+      "tokens": {
+        "cache": {
+          "read": 809984,
+          "write": 0
+        },
+        "cache_read": 809984,
+        "cache_write": 0,
+        "input": 54725,
+        "output": 13069,
+        "reasoning": 9484
+      }
+    },
+    {
+      "task_id": "integrate",
+      "attempt": 1,
+      "session_hash": "76eb72785989",
+      "status": "completed",
+      "model": "opencode-go/deepseek-v4.1-flash",
+      "cost": 0.010708242,
+      "tool_count": 29,
+      "tokens": {
+        "cache": {
+          "read": 545664,
+          "write": 0
+        },
+        "cache_read": 545664,
+        "cache_write": 0,
+        "input": 36963,
+        "output": 4253,
+        "reasoning": 1625
+      }
+    }
+  ],
+  "agent_intervals": [
+    {
+      "agent": "backend",
+      "start": 105.921,
+      "end": 129.533
+    },
+    {
+      "agent": "frontend",
+      "start": 0.0,
+      "end": 180.47
+    },
+    {
+      "agent": "integrate",
+      "start": 180.658,
+      "end": 247.846
+    }
+  ],
+  "concurrency": {
+    "agent_span_union_seconds": 247.658,
+    "concurrent_overlap_seconds": 23.612,
+    "max_concurrent_agents": 2,
+    "average_concurrency": 1.095,
+    "agent_seconds": 271.27
+  },
+  "critical_path_seconds": 247.658,
+  "task_graph": [
+    {
+      "id": "backend",
+      "depends_on": [],
+      "duration_seconds": 23.612
+    },
+    {
+      "id": "frontend",
+      "depends_on": [],
+      "duration_seconds": 180.47
+    },
+    {
+      "id": "integrate",
+      "depends_on": [
+        "backend",
+        "frontend"
+      ],
+      "duration_seconds": 67.188
+    }
+  ],
+  "note": "Real local OpenCode FAST run; one verification test-command repair. Raw session IDs hashed."
+}

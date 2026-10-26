@@ -20,6 +20,16 @@ RUNTIME_MODULES = (
     "telemetry.py",
     "project_planner.py",
     "executor.py",
+    "teamwork.py",
+    "teamwork_planner.py",
+    "managed_exec.py",
+    "teamwork_runner.py",
+    "teamwork_benchmark.py",
+    "teamwork_cli.py",
+    "teamwork_chat.py",
+    "scheduler.py",
+    "run_owner.py",
+    "repo_profile.py",
 )
 PLATFORM_TOOLS = {
     "codex": ".codex/auto-orchestrator/tools",
@@ -57,6 +67,9 @@ class ProjectDashboardInstallTests(unittest.TestCase):
         install(self.target, "opencode", "inherit", False, False)
         assert_runtime(self, self.target / "tools")
         self.assertTrue((self.target / "AGENTS.md").is_file())
+        command = self.target / ".opencode" / "commands" / "teamwork.md"
+        self.assertTrue(command.is_file())
+        self.assertIn("$ARGUMENTS", command.read_text(encoding="utf-8"))
 
     def test_project_dry_run_writes_nothing(self):
         results = dict(install(self.target, "opencode", "inherit", True, False))

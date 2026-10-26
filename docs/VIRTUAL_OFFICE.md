@@ -160,6 +160,18 @@ An invalid or missing override falls back to the deterministic theme layout. Pro
 
 **Edit layout** enables a grid overlay. Rooms can be dragged with their door and desks; a door can slide along any non-corner wall; desks can be moved inside their room. Changes are snapped to the grid and rejected when they leave bounds, overlap walls, open onto another room or make a seat unreachable. **Save layout** writes the local override; **Reset layout** removes it and reloads the theme layout. Escape cancels an active drag. The editor never mutates evidence or registry data.
 
+## Managed sessions (V7.3)
+
+Real OpenCode managed sessions are exposed by the office API separately from
+native unlinked sessions. They appear in the roster as `task · role`, walk to
+the room derived from their task department, and open a **Managed session**
+inspector with task, provider, model, status, tool count, cost, timestamps and a
+short session hash.
+
+Managed completion is observed from the managed adapter stream; it is **not** a
+native stop. The inspector explicitly says that native stop is not claimed, and
+the native/unlinked evidence path is unchanged.
+
 ## Controls and accessibility
 
 - **Room chips** filter the map and the roster by department. Filtering is visual only.

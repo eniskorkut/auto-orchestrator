@@ -11,8 +11,22 @@ Only the Python standard library is used.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 import re
+import sqlite3
+from pathlib import Path
+
+try:
+    from tools.run_owner import owner_alive, read_json, read_recovery_state
+except ModuleNotFoundError:
+    try:
+        from run_owner import owner_alive, read_json, read_recovery_state
+    except ModuleNotFoundError:  # pragma: no cover
+        owner_alive = None
+        read_json = None
+        read_recovery_state = None
 
 try:
     from tools.event_model import EventModelError, normalize_run_event
@@ -29,7 +43,16 @@ SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$")
 DEPARTMENT_ID = re.compile(r"^[a-z][a-z0-9-]{0,39}$")
 
 ROOMS = ("frontend", "backend", "qa", "review", "research", "meeting", "lobby")
-ROLE_ROOMS = {"tester": "qa", "reviewer": "review", "explorer": "research"}
+ROLE_ROOMS = {
+    "tester": "qa",
+    "reviewer": "review",
+    "explorer": "research",
+    # V7.3 verification roles. They are review-room work, not production.
+    "critic": "review",
+    "challenger": "review",
+    "auditor": "review",
+    "success-auditor": "review",
+}
 
 ACTIVE_TASK_STATES = ("running", "cancel_requested", "timed_out")
 FAILED_TASK_STATES = ("failed", "cancelled")
@@ -443,12 +466,14 @@ def build_office(project: dict, state: dict, *, bindings=None,
             agent["agent_definition_id"]), state, supervisor, detail_provider))
 
     unlinked = _unlinked_sessions(project, state, bindings_by_agent, detail_provider)
+    managed = _managed_sessions(project)
     summary = {
         "agents": len(agents),
         "working": sum(entry["status"] == "working" for entry in agents),
         "unknown": sum(entry["status"] == "unknown" for entry in agents),
         "completed": sum(entry["status"] == "completed" for entry in agents),
         "unlinked": len(unlinked),
+        "managed": len(managed),
     }
     return {
         "project_id": project.get("project_id"),
@@ -456,8 +481,161 @@ def build_office(project: dict, state: dict, *, bindings=None,
         "theme": project.get("theme", "custom"),
         "agents": agents,
         "unlinked_sessions": unlinked,
+        "managed_sessions": managed,
         "summary": summary,
     }
+
+
+MANAGED_STATUS = {
+    "starting": "working",
+    "running": "working",
+    "completed": "completed",
+    "failed": "failed",
+    "cancelled": "unknown",
+    "orphaned": "orphaned",
+}
+
+
+def _run_connection(root: str, run_id: str) -> dict:
+    """Read owner/recovery state without mutating run state."""
+    if owner_alive is None or read_json is None:
+        return {"connected": None, "recovery_state": None}
+    base = Path(root) / ".auto-orchestrator" / "teamwork"
+    active = read_json(base / "active.json", {})
+    matched = isinstance(active, dict) and active.get("run_id") == run_id
+    connected = bool(matched and owner_alive(active.get("owner")))
+    recovery = (read_recovery_state(root, run_id)
+                if read_recovery_state is not None else None)
+    state = recovery.get("state") if isinstance(recovery, dict) else None
+    return {"connected": connected, "recovery_state": state,
+            "recovery": recovery if isinstance(recovery, dict) else None,
+            "heartbeat_at": active.get("heartbeat_at") if matched else None}
+
+
+def _managed_sessions(project: dict) -> list[dict]:
+    """Read latest managed sessions from the project's Supervisor SQLite.
+
+    This is managed-execution evidence, not a native hook. It is labelled
+    separately and never claims native start/stop proof.
+    """
+    root = project.get("root")
+    if not isinstance(root, str):
+        return []
+    database = Path(root) / ".auto-orchestrator" / "supervisor.sqlite3"
+    if not database.is_file():
+        return []
+    rows = []
+    try:
+        connection = sqlite3.connect(f"file:{database}?mode=ro", uri=True, timeout=2)
+        connection.row_factory = sqlite3.Row
+        try:
+            rows = list(connection.execute("""
+              SELECT m.run_id,m.task_id,m.attempt,m.provider,m.session_id,m.status,
+                     m.started_at,m.updated_at,m.finished_at,m.events_path,m.model,
+                     m.cost,m.tokens,m.error,m.cancel_state,m.resume_of,m.tool_count,
+                     t.role,t.department,t.objective,t.state AS task_state
+              FROM managed_sessions m
+              JOIN tasks t ON t.run_id=m.run_id AND t.id=m.task_id
+              ORDER BY m.updated_at DESC, m.run_id, m.task_id, m.attempt DESC
+              LIMIT 128
+            """))
+        finally:
+            connection.close()
+    except (sqlite3.Error, OSError, ValueError):
+        return []
+    latest = {}
+    for row in rows:
+        key = (row["run_id"], row["task_id"])
+        if key not in latest:
+            latest[key] = row
+    result = []
+    connection_cache = {}
+    for row in latest.values():
+        managed_status = row["status"]
+        if managed_status not in MANAGED_STATUS:
+            continue
+        connection = connection_cache.get(row["run_id"])
+        if connection is None:
+            connection = _run_connection(root, row["run_id"])
+            connection_cache[row["run_id"]] = connection
+        role = row["role"] if isinstance(row["role"], str) else "unknown"
+        department = (row["department"] if row["department"] in ROOMS
+                      else ROLE_ROOMS.get(role, "lobby"))
+        session_id = row["session_id"] if isinstance(row["session_id"], str) else ""
+        tokens = row["tokens"]
+        if isinstance(tokens, str):
+            try:
+                tokens = json.loads(tokens)
+            except ValueError:
+                tokens = None
+        running = managed_status in ("starting", "running")
+        orphaned = bool(running and connection.get("connected") is False)
+        effective_status = "orphaned" if orphaned else managed_status
+        result.append({
+            "kind": "managed",
+            "name": row["task_id"],
+            "role": role,
+            "objective": row["objective"],
+            "platform": row["provider"],
+            "provider": row["provider"],
+            "model": row["model"],
+            "status": MANAGED_STATUS.get(effective_status, "unknown"),
+            "managed_status": effective_status,
+            "raw_status": managed_status,
+            "orphaned": orphaned,
+            "recovery_state": connection.get("recovery_state"),
+            "recovery": connection,
+            "status_label": ("Orphaned" if orphaned
+                             else managed_status.replace("-", " ").title()),
+            "room": department,
+            "room_source": "managed.task",
+            "session_key": f"m:{row['run_id']}:{row['task_id']}:{row['attempt']}",
+            "session_hash": (hashlib.sha256(session_id.encode()).hexdigest()[:12]
+                             if session_id else None),
+            "spawnable": True,
+            "binding": None,
+            "color": {
+                "backend": "#e8a87c", "frontend": "#4f8cff", "qa": "#70e0a0",
+                "review": "#c4b5fd", "research": "#7dd3fc", "meeting": "#f2c96a",
+                "lobby": "#9aa7b8", "tester": "#70e0a0", "reviewer": "#c4b5fd",
+                "critic": "#c4b5fd", "challenger": "#c4b5fd",
+                "auditor": "#c4b5fd", "success-auditor": "#c4b5fd",
+                "explorer": "#7dd3fc", "implementer": "#e8a87c",
+            }.get(department, "#9aa7b8"),
+            "current": {
+                "run_id": row["run_id"], "task_id": row["task_id"],
+                "task_role": role, "task_state": row["task_state"],
+                "department": department, "run_status": effective_status,
+            },
+            "evidence": {
+                "source": "managed-opencode" if row["provider"] == "opencode"
+                          else f"managed-{row['provider']}",
+                "confidence": "observed" if running else "recorded",
+                "detail": ("Managed session event stream; native start/stop is "
+                           "not claimed."),
+                "open_span": running and not orphaned,
+                "native_stop_observed": False,
+            },
+            "managed": {
+                "run_id": row["run_id"], "task_id": row["task_id"],
+                "attempt": row["attempt"], "provider": row["provider"],
+                "status": effective_status, "raw_status": managed_status,
+                "orphaned": orphaned, "recovery_state": connection.get("recovery_state"),
+                "recovery": connection.get("recovery"),
+                "model": row["model"],
+                "cost": row["cost"], "tokens": tokens,
+                "tool_count": row["tool_count"] or 0,
+                "started_at": row["started_at"], "updated_at": row["updated_at"],
+                "finished_at": row["finished_at"], "session_hash":
+                    (hashlib.sha256(session_id.encode()).hexdigest()[:12]
+                     if session_id else None),
+                "events_name": (Path(row["events_path"]).name
+                                if isinstance(row["events_path"], str) else None),
+                "error": row["error"], "cancel_state": row["cancel_state"],
+                "resume_of": row["resume_of"],
+            },
+        })
+    return result
 
 
 def _unlinked_sessions(project: dict, state: dict, bindings: dict,

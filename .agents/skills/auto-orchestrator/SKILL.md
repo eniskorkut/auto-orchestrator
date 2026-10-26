@@ -82,3 +82,27 @@ advisory; observed agent starts and maximum concurrency must be read from
 native event spans, not inferred from `max_agents`. Only explicitly approved
 literal test `alternates` may satisfy the V5 Quality Gate. See source
 `docs/V64_RELIABILITY.md`.
+
+## V7.4 — single-chat Teamwork
+
+When the user asks for `/teamwork`, a full-stack implementation with independent
+backend/frontend work, or an explicitly managed agent team, use the installed
+`tools/teamwork_chat.py` bridge from this same chat. Do not ask the user to open
+another chat or run separate terminal commands.
+
+- `/teamwork <request>` → write the exact request to a new file under
+  `.auto-orchestrator/teamwork/requests/` and run
+  `python tools/teamwork_chat.py --root . start --mode auto --request-file <file>`.
+  Never interpolate untrusted request text into a shell command.
+- `/teamwork --mode fast|balanced|rigorous <request>` → pass the requested mode.
+- `/teamwork status|agents|milestones|cancel|resume` → call the matching bridge
+  subcommand; never create a duplicate active run.
+- Child sessions are separate OpenCode managed sessions with their own worktrees
+  and lifecycle records. Do not mix them with the main chat.
+- V7.4.1 run ownership uses PID + start token + heartbeat. A stale or unverifiable
+  owner is fail-closed; never signal it. `resume` reconciles only verified owned
+  children and reports `native_cancel_ack: false`.
+- Report only measured state. Cancellation is a local process signal unless a
+  native ACK is explicitly present; never invent one.
+- The adaptive planner must keep FAST/ BALANCED/ RIGOROUS verification depth
+  distinct and must not claim time savings from overlapping intervals alone.

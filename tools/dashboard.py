@@ -32,9 +32,16 @@ from urllib.parse import unquote, urlparse
 try:
     from tools.perf import analyze, diagnose, observed_overlap, path_for
     from tools.quality_gate import assess, load_policy
+    from tools.run_owner import (lease_held, owner_alive, read_json,
+                                 read_recovery_state)
 except ModuleNotFoundError:  # Running as ``python tools/dashboard.py``.
     from perf import analyze, diagnose, observed_overlap, path_for
     from quality_gate import assess, load_policy
+    try:
+        from run_owner import (lease_held, owner_alive, read_json,
+                               read_recovery_state)
+    except ModuleNotFoundError:  # pragma: no cover - older install
+        owner_alive = read_json = read_recovery_state = None
 
 try:
     from tools import event_stream, office_model, project_registry
@@ -1470,6 +1477,167 @@ class Catalog:
         except office_model.OfficeModelError as exc:
             raise DashboardError(str(exc)) from exc
 
+    # -- teamwork milestones -------------------------------------------
+    @staticmethod
+    def _public_session(row: dict) -> dict:
+        session_id = row.get("session_id")
+        return {
+            "task_id": row.get("task_id"),
+            "attempt": row.get("attempt"),
+            "provider": row.get("provider"),
+            "status": row.get("status"),
+            "started_at": row.get("started_at"),
+            "updated_at": row.get("updated_at"),
+            "finished_at": row.get("finished_at"),
+            "model": row.get("model"),
+            "cost": row.get("cost"),
+            "tokens": row.get("tokens"),
+            "error": row.get("error"),
+            "cancel_state": row.get("cancel_state"),
+            "resume_of": row.get("resume_of"),
+            "pid_verified": bool(row.get("pid") and row.get("pid_start_token")),
+            "session_hash": (hashlib.sha256(session_id.encode("utf-8")).hexdigest()[:12]
+                             if isinstance(session_id, str) and session_id else None),
+        }
+
+    @staticmethod
+    def _attach_recovery(root: Path, run: dict) -> dict:
+        run_id = run.get("run_id")
+        if not isinstance(run_id, str):
+            return run
+        base = Path(root) / ".auto-orchestrator" / "teamwork"
+        active = read_json(base / "active.json", {}) if read_json else {}
+        if not isinstance(active, dict) or active.get("run_id") != run_id:
+            active = {}
+        connected = bool(owner_alive(active.get("owner"))) if owner_alive else False
+        if not connected and lease_held is not None:
+            connected = lease_held(root, run_id)
+        stored = read_recovery_state(root, run_id) if read_recovery_state else None
+        stored = stored if isinstance(stored, dict) else {}
+        stored_state = stored.get("state")
+        run_status = run.get("status")
+        recovery_transitions = {
+            "reconciling", "orphaned", "retry_ready", "resuming", "verifying",
+        }
+        if run_status == "passed":
+            state = (stored_state if stored_state in recovery_transitions | {"recovered"}
+                     else None)
+        elif run_status == "failed":
+            state = "recovery_failed" if stored_state in recovery_transitions else None
+        elif run_status == "cancelled":
+            state = "cancelled"
+        elif not connected:
+            state = "runner_disconnected"
+        else:
+            state = stored_state or "active"
+        sessions = run.get("managed_sessions", [])
+        orphaned = 0
+        if not connected and run_status not in ("passed", "cancelled"):
+            for session in sessions:
+                if session.get("status") in ("starting", "running"):
+                    session["effective_status"] = "orphaned"
+                    orphaned += 1
+        run["owner_connected"] = connected
+        run["recovery_state"] = state
+        run["recovery"] = {
+            "state": state,
+            "owner_connected": connected,
+            "last_transition": stored,
+            "local_signal_only": True,
+            "native_cancel_ack": False,
+        }
+        run["orphaned_managed_sessions"] = orphaned
+        if isinstance(run.get("scheduler"), dict) and not connected:
+            run["scheduler"] = {**run["scheduler"], "active_sessions": 0}
+        return run
+
+    @classmethod
+    def _public_milestones(cls, status: dict) -> dict:
+        runs = dict(status)
+        runs["managed_sessions"] = [cls._public_session(row)
+                                    for row in status.get("managed_sessions", [])]
+        for milestone in runs.get("milestones", []):
+            handoff = milestone.get("handoff_path")
+            milestone["handoff"] = (Path(handoff).name if isinstance(handoff, str)
+                                    else None)
+            milestone.pop("handoff_path", None)
+        runs.pop("tasks", None)
+        runs["demo"] = False
+        return runs
+
+    def milestones(self, project_id: str, run_id: str | None = None) -> dict:
+        entry = self._entry(project_id)
+        if entry.store.demo:
+            payload = _demo_milestones(project_id, entry.project.get("theme", "ai"))
+            if run_id is not None:
+                selected = next((run for run in payload["runs"] if run["run_id"] == run_id), None)
+                if selected is None:
+                    raise DashboardError("Unknown teamwork run")
+                return selected
+            return payload
+        root = Path(entry.store.root)
+        plans = sorted((root / ".auto-orchestrator" / "plans").glob("*.json"))
+        try:
+            try:
+                from tools.teamwork import TeamworkEngine, TeamworkError
+            except ModuleNotFoundError:
+                from teamwork import TeamworkEngine, TeamworkError  # type: ignore
+        except ModuleNotFoundError:
+            TeamworkEngine = None  # type: ignore
+            TeamworkError = ValueError  # type: ignore
+        rows = []
+        engine = None
+        if TeamworkEngine is not None:
+            try:
+                for path in plans:
+                    if path.is_symlink() or not path.is_file():
+                        continue
+                    try:
+                        plan = json.loads(path.read_text(encoding="utf-8"))
+                    except (OSError, ValueError):
+                        continue
+                    if not isinstance(plan, dict) or not plan.get("milestones"):
+                        continue
+                    current_run = plan.get("run_id")
+                    if not isinstance(current_run, str) or not ID.fullmatch(current_run):
+                        continue
+                    if run_id is not None and current_run != run_id:
+                        continue
+                    if engine is None:
+                        engine = TeamworkEngine(root)
+                    try:
+                        rows.append(self._attach_recovery(
+                            root, self._public_milestones(engine.status(current_run))))
+                    except (TeamworkError, OSError, ValueError):
+                        continue
+            finally:
+                if engine is not None:
+                    engine.close()
+        rows.sort(key=lambda item: item.get("milestones", [{}])[0].get("started_at") or 0,
+                  reverse=True)
+        if run_id is not None:
+            if not rows:
+                raise DashboardError("Unknown teamwork run")
+            return rows[0]
+        passed = sum(1 for run in rows for milestone in run.get("milestones", [])
+                     if milestone.get("status") == "passed")
+        total = sum(len(run.get("milestones", [])) for run in rows)
+        return {
+            "version": 1,
+            "project_id": project_id,
+            "runs": rows,
+            "current_run_id": rows[0]["run_id"] if rows else None,
+            "progress": {
+                "passed": passed,
+                "total": total,
+                "verified": passed,
+                "denominator": total,
+            },
+            "verified_progress": (passed / total) if total else 0.0,
+            "estimated_progress": None,
+            "demo": False,
+        }
+
     # -- live events ----------------------------------------------------
     def _provider(self, project_id: str):
         return lambda: self.project_state(project_id)
@@ -1485,6 +1653,100 @@ class Catalog:
     def close(self) -> None:
         if self._streams is not None:
             self._streams.close()
+
+
+def _demo_milestones(project_id: str, theme: str = "ai") -> dict:
+    """Clearly synthetic milestones for the demo catalog; never written to disk."""
+    milestones = [
+        {
+            "id": "M1", "objective": "Discover the existing interfaces",
+            "dependencies": [], "status": "passed", "started_at": 0, "completed_at": 0,
+            "repair_iterations": 0, "max_repair": 1,
+            "acceptance": ["Boundaries and test strategy recorded"],
+            "verification_policy": {"require_roles": [], "max_repair": 1},
+            "require_roles": [], "satisfied_roles": [], "missing_roles": [],
+            "verdicts": {}, "handoff": "M1-demo.json", "last_error": None,
+            "tasks": [{
+                "id": "schema", "role": "explorer", "state": "completed",
+                "milestone": "M1", "phase": "build", "attempts": 1,
+                "max_retries": 1, "department": "research", "reason": None,
+                "result": {"summary": "Synthetic demo discovery", "tests": [], "findings": [],
+                           "verdict": None},
+                "native_stop_observed": False, "review_attested": False,
+                "provider": "demo", "model": None, "verify_commands": [],
+            }],
+        },
+        {
+            "id": "M2", "objective": "Build and verify the feature",
+            "dependencies": ["M1"], "status": "verifying", "started_at": 0,
+            "completed_at": None, "repair_iterations": 0, "max_repair": 2,
+            "acceptance": ["Tests pass", "Reviewer verdict is pass"],
+            "verification_policy": {"require_roles": ["reviewer"], "max_repair": 2},
+            "require_roles": ["reviewer"], "satisfied_roles": [], "missing_roles": ["reviewer"],
+            "verdicts": {}, "handoff": None, "last_error": None,
+            "tasks": [
+                {"id": "api", "role": "implementer", "state": "completed",
+                 "milestone": "M2", "phase": "build", "attempts": 1, "max_retries": 2,
+                 "department": "backend", "reason": None,
+                 "result": {"summary": "Synthetic demo API", "tests": [{"name": "demo", "status": "passed"}],
+                            "findings": [], "verdict": None},
+                 "native_stop_observed": False, "review_attested": False,
+                 "provider": "demo", "model": None, "verify_commands": []},
+                {"id": "review", "role": "reviewer", "state": "pending",
+                 "milestone": "M2", "phase": "verify", "attempts": 0, "max_retries": 1,
+                 "department": "review", "reason": None, "result": None,
+                 "native_stop_observed": False, "review_attested": False,
+                 "provider": "demo", "model": None, "verify_commands": []},
+            ],
+        },
+        {
+            "id": "M3", "objective": "Final success audit",
+            "dependencies": ["M2"], "status": "planned", "started_at": None,
+            "completed_at": None, "repair_iterations": 0, "max_repair": 1,
+            "acceptance": ["Final E2E passes"],
+            "verification_policy": {"require_roles": ["success-auditor"], "max_repair": 1},
+            "require_roles": ["success-auditor"], "satisfied_roles": [],
+            "missing_roles": ["success-auditor"], "verdicts": {}, "handoff": None,
+            "last_error": None, "tasks": [],
+        },
+    ]
+    passed = sum(1 for milestone in milestones if milestone["status"] == "passed")
+    run_id = "demo-project" if theme == "ai" else f"demo-{theme}"
+    return {
+        "version": 1, "project_id": project_id, "demo": True,
+        "runs": [{
+            "run_id": run_id, "pattern": "distributed_coding",
+            "work_mode": "balanced", "risk_assessment": {
+                "mode": "balanced", "score": 26, "confidence": "low",
+                "reason": "demo default safe budget",
+                "factors": {"profile_available": False},
+            },
+            "max_parallel": 3, "status": "running", "complete": False,
+            "milestones": milestones, "task_count": 3, "milestone_count": 3,
+            "passed_milestones": passed, "verified_progress": passed / 3,
+            "estimated_progress": None,
+            "progress": {"passed": passed, "total": 3, "verified": passed,
+                         "denominator": 3},
+            "managed_sessions": [], "demo": True,
+            "scheduler": {"active_sessions": 1, "queued_tasks": 1,
+                          "repairing": False, "max_parallel": 3},
+            "owner_connected": True,
+            "recovery_state": "active",
+            "recovery": {
+                "state": "active", "owner_connected": True,
+                "last_transition": {"state": "active", "updated_at": None},
+                "local_signal_only": True, "native_cancel_ack": False,
+            },
+            "orphaned_managed_sessions": 0,
+            "usage": {"cost_total_usd": None, "cost_measured": False,
+                      "tool_count_total": None,
+                      "tokens": {"input": None, "output": None, "cache_read": None},
+                      "tokens_measured": False},
+        }],
+        "current_run_id": run_id,
+        "progress": {"passed": passed, "total": 3, "verified": passed, "denominator": 3},
+        "verified_progress": passed / 3, "estimated_progress": None, "demo": True,
+    }
 
 
 def _demo_catalog() -> Catalog:
@@ -1863,6 +2125,23 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if len(parts) == 2 and parts[1] == "office":
             try:
                 return self._json(catalog.office(project_id))
+            except DashboardError as exc:
+                return self._project_failure(project_id, exc)
+            except (OSError, ValueError) as exc:
+                return self._error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+        if len(parts) == 2 and parts[1] == "milestones":
+            try:
+                return self._json(catalog.milestones(project_id))
+            except DashboardError as exc:
+                return self._project_failure(project_id, exc)
+            except (OSError, ValueError) as exc:
+                return self._error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+        if len(parts) == 3 and parts[1] == "milestones":
+            run_id = unquote(parts[2])
+            if not ID.fullmatch(run_id):
+                return self._error(HTTPStatus.NOT_FOUND, "Unknown teamwork run")
+            try:
+                return self._json(catalog.milestones(project_id, run_id))
             except DashboardError as exc:
                 return self._project_failure(project_id, exc)
             except (OSError, ValueError) as exc:

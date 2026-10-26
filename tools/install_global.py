@@ -25,6 +25,10 @@ MANIFEST = 'auto-orchestrator-global-manifest.json'
 V71_MODULES = ('project_registry.py', 'event_stream.py', 'event_model.py',
                'office_model.py', 'capabilities.py', 'telemetry.py',
                'project_planner.py', 'executor.py')
+V73_MODULES = ('teamwork.py', 'teamwork_planner.py', 'managed_exec.py',
+               'teamwork_runner.py', 'teamwork_benchmark.py',
+               'teamwork_cli.py', 'teamwork_chat.py', 'scheduler.py', 'run_owner.py',
+               'repo_profile.py')
 
 class InstallError(ValueError):
     pass
@@ -85,7 +89,7 @@ def installed_map(home:Path,platforms:set[str],opencode_version:str,codex_model:
         for name in ('supervisor.py','router.py','router_eval.py','worktree.py','benchmark.py','quality_gate.py','review_gate.py'):
             files[codex/'auto-orchestrator/tools'/name]=(ROOT/'tools'/name).read_bytes()
         dashboard_at(codex/'auto-orchestrator/tools')
-        for name in V71_MODULES:
+        for name in V71_MODULES + V73_MODULES:
             files[codex/'auto-orchestrator/tools'/name]=(ROOT/'tools'/name).read_bytes()
         hooks_path=codex/'hooks.json'
         if not hooks_path.exists():
@@ -113,13 +117,17 @@ def installed_map(home:Path,platforms:set[str],opencode_version:str,codex_model:
             if opencode_version=='v2':
                 content=content.replace('permission:\n  edit: deny','permissions:\n  - action: edit\n    resource: "*"\n    effect: deny')
             files[oc/'agents'/source.name]=content.encode()
+        commands = ROOT/'.opencode/commands'
+        if commands.is_dir():
+            for source in commands.glob('*.md'):
+                files[oc/'commands'/source.name]=source.read_bytes()
         plugin=ROOT/('adapters/opencode-v2/auto_orchestrator.js' if opencode_version=='v2' else '.opencode/plugins/auto_orchestrator.js')
         files[oc/'plugins/auto_orchestrator.js']=plugin.read_bytes()
         files[oc/'auto-orchestrator/tools/perf.py']=(ROOT/'tools/perf.py').read_bytes()
         for name in ('supervisor.py','router.py','router_eval.py','worktree.py','benchmark.py','quality_gate.py','review_gate.py'):
             files[oc/'auto-orchestrator/tools'/name]=(ROOT/'tools'/name).read_bytes()
         dashboard_at(oc/'auto-orchestrator/tools')
-        for name in V71_MODULES:
+        for name in V71_MODULES + V73_MODULES:
             files[oc/'auto-orchestrator/tools'/name]=(ROOT/'tools'/name).read_bytes()
     if 'antigravity' in platforms:
         gemini=home/'.gemini'
@@ -133,7 +141,7 @@ def installed_map(home:Path,platforms:set[str],opencode_version:str,codex_model:
         for name in ('supervisor.py','router.py','router_eval.py','worktree.py','benchmark.py','quality_gate.py','review_gate.py'):
             files[gemini/'config/auto-orchestrator/tools'/name]=(ROOT/'tools'/name).read_bytes()
         dashboard_at(gemini/'config/auto-orchestrator/tools')
-        for name in V71_MODULES:
+        for name in V71_MODULES + V73_MODULES:
             files[gemini/'config/auto-orchestrator/tools'/name]=(ROOT/'tools'/name).read_bytes()
         hooks_path=gemini/'config/hooks.json'
         if not hooks_path.exists():
@@ -156,7 +164,7 @@ def installed_map(home:Path,platforms:set[str],opencode_version:str,codex_model:
         for name in ('supervisor.py','router.py','router_eval.py','worktree.py','quality_gate.py','review_gate.py','perf.py','hook_bridge.py'):
             files[cursor/'auto-orchestrator/tools'/name]=(ROOT/'tools'/name).read_bytes()
         dashboard_at(cursor/'auto-orchestrator/tools')
-        for name in V71_MODULES:
+        for name in V71_MODULES + V73_MODULES:
             files[cursor/'auto-orchestrator/tools'/name]=(ROOT/'tools'/name).read_bytes()
     return files
 

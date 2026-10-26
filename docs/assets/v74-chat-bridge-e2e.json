@@ -1,0 +1,107 @@
+{
+  "schema_version": 1,
+  "kind": "single-chat-bridge-fast",
+  "run_id": "team-1792972407-93255",
+  "mode": "fast",
+  "status": "passed",
+  "verified_progress": 1.0,
+  "milestones": [
+    {
+      "id": "M1",
+      "status": "passed",
+      "repair_iterations": 2,
+      "max_repair": 2
+    }
+  ],
+  "wall_time_seconds": 62.264,
+  "cost_usd": 0.023094,
+  "sessions": [
+    {
+      "task_id": "build-backend",
+      "attempt": 1,
+      "session_hash": "7e25ae6cb017",
+      "status": "completed",
+      "model": "opencode-go/deepseek-v4.1-flash",
+      "cost": 0.006750252,
+      "tool_count": 10,
+      "tokens": {
+        "cache": {
+          "read": 99584,
+          "write": 0
+        },
+        "cache_read": 99584,
+        "cache_write": 0,
+        "input": 18022,
+        "output": 3772,
+        "reasoning": 2475
+      }
+    },
+    {
+      "task_id": "build-backend",
+      "attempt": 2,
+      "session_hash": "7e25ae6cb017",
+      "status": "completed",
+      "model": "opencode-go/deepseek-v4.1-flash",
+      "cost": 0.004214838,
+      "tool_count": 5,
+      "tokens": {
+        "cache": {
+          "read": 144896,
+          "write": 0
+        },
+        "cache_read": 144896,
+        "cache_write": 0,
+        "input": 11349,
+        "output": 1285,
+        "reasoning": 2178
+      }
+    },
+    {
+      "task_id": "verify",
+      "attempt": 1,
+      "session_hash": "903fc7024124",
+      "status": "completed",
+      "model": "opencode-go/deepseek-v4.1-flash",
+      "cost": 0.00851784,
+      "tool_count": 20,
+      "tokens": {
+        "cache": {
+          "read": 218880,
+          "write": 0
+        },
+        "cache_read": 218880,
+        "cache_write": 0,
+        "input": 27920,
+        "output": 2868,
+        "reasoning": 3254
+      }
+    },
+    {
+      "task_id": "verify",
+      "attempt": 2,
+      "session_hash": "903fc7024124",
+      "status": "completed",
+      "model": "opencode-go/deepseek-v4.1-flash",
+      "cost": 0.003611466,
+      "tool_count": 9,
+      "tokens": {
+        "cache": {
+          "read": 191872,
+          "write": 0
+        },
+        "cache_read": 191872,
+        "cache_write": 0,
+        "input": 13727,
+        "output": 945,
+        "reasoning": 683
+      }
+    }
+  ],
+  "commands_used": [
+    "start",
+    "status",
+    "agents",
+    "milestones"
+  ],
+  "note": "Started through tools/teamwork_chat.py in a real scaffold; repair loop recovered from missing /health and passed. Raw session ids hashed."
+}

@@ -118,13 +118,21 @@ def install(target: Path, platform: str, codex_model: str, dry_run: bool, force_
                 ROOT/'tools/event_stream.py', ROOT/'tools/event_model.py',
                 ROOT/'tools/office_model.py', ROOT/'tools/capabilities.py',
                 ROOT/'tools/telemetry.py', ROOT/'tools/project_planner.py',
-                ROOT/'tools/executor.py']
+                ROOT/'tools/executor.py', ROOT/'tools/teamwork.py',
+                ROOT/'tools/teamwork_planner.py', ROOT/'tools/managed_exec.py',
+                ROOT/'tools/teamwork_runner.py', ROOT/'tools/teamwork_benchmark.py', ROOT/'tools/teamwork_cli.py',
+                ROOT/'tools/teamwork_chat.py', ROOT/'tools/scheduler.py',
+                ROOT/'tools/run_owner.py',
+                ROOT/'tools/repo_profile.py']
     sources.extend(sorted(p for p in (ROOT/'tools/dashboard_assets').rglob('*') if p.is_file()))
     if 'codex' in selected:
         sources.extend(sorted((ROOT/'.codex/agents').glob('*.toml')))
         sources.append(ROOT/'.codex/hooks.json')
     if 'opencode' in selected:
         sources.extend(sorted((ROOT/'.opencode/agents').glob('*.md')))
+        commands = ROOT/'.opencode/commands'
+        if commands.is_dir():
+            sources.extend(sorted(commands.glob('*.md')))
         sources.append(ROOT/('adapters/opencode-v2/auto_orchestrator.js' if opencode_version == 'v2' else '.opencode/plugins/auto_orchestrator.js'))
     if 'antigravity' in selected:
         sources.extend(sorted((ROOT/'.agents/agents').glob('*.md')))
@@ -155,7 +163,7 @@ def install(target: Path, platform: str, codex_model: str, dry_run: bool, force_
     results=[]
     for source in sources:
         dest=destination(source)
-        results.append((str(dest.relative_to(target)),write_file(dest,rendered(source,target),dry_run,force_generated)))
+        results.append((dest.relative_to(target).as_posix(),write_file(dest,rendered(source,target),dry_run,force_generated)))
     if 'codex' in selected:
         results.append(('.codex/config.toml',write_file(conf,MODEL_SETTING[codex_model],dry_run,force=True)))
     results.append(('AGENTS.md',patch_guidance(g,dry_run)))

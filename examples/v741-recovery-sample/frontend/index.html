@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Tasks</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="app__header">
+        <h1 class="app__title">Tasks</h1>
+        <p class="app__subtitle">A tiny in-memory task list.</p>
+      </header>
+
+      <form class="task-form" id="task-form" novalidate>
+        <label class="task-form__label" for="task-title">New task</label>
+        <div class="task-form__row">
+          <input
+            class="task-form__input"
+            id="task-title"
+            name="title"
+            type="text"
+            maxlength="80"
+            placeholder="What needs doing?"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <button class="button button--primary" id="task-submit" type="submit">
+            Add task
+          </button>
+        </div>
+      </form>
+
+      <p class="alert" id="form-error" role="alert" data-testid="error" hidden></p>
+
+      <section class="task-section" aria-labelledby="task-list-heading">
+        <h2 class="task-section__heading" id="task-list-heading">
+          Your tasks
+          <span class="task-count" id="task-count" data-testid="task-count">0</span>
+        </h2>
+
+        <p class="empty" id="task-empty" data-testid="empty-state" hidden>
+          No tasks yet. Add your first one above.
+        </p>
+
+        <ul
+          class="task-list"
+          id="task-list"
+          data-testid="task-list"
+          aria-busy="true"
+        ></ul>
+      </section>
+
+      <p class="sr-only" id="status" role="status" aria-live="polite"></p>
+    </main>
+
+    <script src="config.js"></script>
+    <script src="app.js" defer></script>
+  </body>
+</html>

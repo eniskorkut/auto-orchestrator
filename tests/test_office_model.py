@@ -18,6 +18,7 @@ from tools.event_model import (
 from tools.office_model import (
     DISPATCHING_DETAIL,
     NO_BINDING_DETAIL,
+    ROLE_ROOMS,
     STALE_DETAIL,
     WORKING_DETAIL,
     build_inspector,
@@ -120,7 +121,8 @@ class OfficeStatusTests(OfficeTestCase):
         self.assertIsNone(entry["binding"])
         self.assertIsNone(entry["current"]["run_id"])
         self.assertEqual(office["summary"], {"agents": 1, "working": 0, "unknown": 1,
-                                             "completed": 0, "unlinked": 0})
+                                             "completed": 0, "unlinked": 0,
+                                             "managed": 0})
 
     def test_failed_run_maps_to_failed(self):
         write_run(self.root, "failed-run",
@@ -544,6 +546,38 @@ class OfficeRoomTests(OfficeTestCase):
         self.assertTrue(inspector["agent"]["spawnable"])
         self.assertEqual(inspector["agent"]["current"]["task_role"], "tester")
         self.assertEqual(inspector["agent"]["current"]["department"], "qa")
+
+
+class OfficeTeamworkRoleTests(OfficeTestCase):
+    def test_v73_verification_roles_map_to_review_or_qa(self):
+        roles = ("critic", "challenger", "auditor", "success-auditor")
+        for role in roles:
+            with self.subTest(role=role):
+                self.assertIn(ROLE_ROOMS[role], ("review", "qa"))
+
+        tasks = [{
+            "id": f"task-{index}", "role": role,
+            "objective": f"Verify {role}", "read_scope": [], "write_scope": [],
+        } for index, role in enumerate(roles)]
+        supervisor = Supervisor(self.root)
+        try:
+            supervisor.init("teamwork-roles", {"max_parallel": 3, "tasks": tasks})
+        finally:
+            supervisor.close()
+        agents = [agent(f"a_{index:012d}", name=role.title())
+                  for index, role in enumerate(roles, start=1)]
+        bindings = [binding(agent_id=f"a_{index:012d}", run_id="teamwork-roles",
+                            native_hash=hashlib.sha256(role.encode()).hexdigest(),
+                            task_id=f"task-{index - 1}")
+                    for index, role in enumerate(roles, start=1)]
+        office = build_office(project(*agents), Store(self.root).state(),
+                              bindings=bindings)
+        by_id = {entry["agent_definition_id"]: entry for entry in office["agents"]}
+        for index, role in enumerate(roles, start=1):
+            entry = by_id[f"a_{index:012d}"]
+            self.assertEqual(entry["current"]["task_role"], role)
+            self.assertEqual(entry["room_source"], "task.role")
+            self.assertEqual(entry["room"], ROLE_ROOMS[role])
 
 
 class EventModelTests(unittest.TestCase):

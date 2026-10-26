@@ -441,7 +441,8 @@
     const counts = { desks: list.length, agents: 0, unlinked: 0 };
     for (const key of STATUS_BUCKET_ORDER) counts[key] = 0;
     for (const entry of list) {
-      const status = statusKey(entry.kind === 'session' ? entry.session?.status : entry.agent?.status);
+      const status = statusKey(entry.kind === 'session' ? entry.session?.status
+        : entry.kind === 'managed' ? entry.managed?.status : entry.agent?.status);
       if (entry.kind === 'session') counts.unlinked += 1;
       else counts.agents += 1;
       if (!Object.prototype.hasOwnProperty.call(counts, status)) counts[status] = 0;
@@ -659,7 +660,15 @@
       status: session.status,
       spawnable: true,
     }));
-    return [...agents, ...sessions];
+    const managed = (payload?.managed_sessions || []).map((item, index) => ({
+      kind: 'managed',
+      key: item.session_key || item.managed?.session_hash || `m:${index}`,
+      managed: item,
+      room: item.room || 'lobby',
+      status: item.status,
+      spawnable: item.spawnable !== false,
+    }));
+    return [...agents, ...sessions, ...managed];
   }
 
   function buildOfficeShell(root, lang) {
@@ -724,12 +733,17 @@
 
   function officeStatusText(entry, lang) {
     const i18n = ts();
-    const status = entry.kind === 'session' ? entry.session?.status : entry.agent?.status;
+    const status = entry.kind === 'session' ? entry.session?.status
+      : entry.kind === 'managed' ? entry.managed?.status : entry.agent?.status;
     return i18n ? i18n.statusLabel(status || 'unknown', lang) : String(status || 'Unknown');
   }
 
   function officeEntryName(entry) {
     if (entry.kind === 'session') return translator(officeMapState.lang)('office.ghostName');
+    if (entry.kind === 'managed') {
+      const item = entry.managed || {};
+      return `${item.name || item.task_id || 'managed'} · ${item.role || 'agent'}`;
+    }
     return entry.agent?.name || shortId(entry.agent?.agent_definition_id, 14);
   }
 
@@ -792,7 +806,8 @@
         'aria-label': t('office.inspectStatus', { name, status }),
         onclick: (event) => openOfficeEntry(entry, event.currentTarget),
       },
-        h('span', { class: 'office-agent-dot', 'data-status': entry.kind === 'session' ? 'unknown' : entry.agent?.status }),
+        h('span', { class: 'office-agent-dot', 'data-status': entry.kind === 'session' ? 'unknown'
+          : entry.kind === 'managed' ? entry.managed?.status : entry.agent?.status }),
         h('span', { class: 'office-agent-copy' },
           h('strong', { text: name }),
           h('span', { text: `${room} · ${status}` }),
@@ -807,6 +822,8 @@
     if (!entry) return;
     if (entry.kind === 'session') {
       officeMapState.options?.callbacks?.onInspectSession?.(entry.session, trigger);
+    } else if (entry.kind === 'managed') {
+      officeMapState.options?.callbacks?.onInspectManaged?.(entry.managed, trigger);
     } else if (entry.agent) {
       officeMapState.options?.callbacks?.onInspect?.(entry.agent, trigger);
     }
@@ -1298,11 +1315,24 @@
       h('header', { class: 'inspector-header' },
         h('div', { class: 'inspector-heading' },
           h('div', { class: 'eyebrow', text: project?.name || t('inspector.title') }),
-          h('h2', { id: 'inspector-title', class: 'inspector-name', text: t('inspector.unlinkedTitle') }),
-          h('p', { class: 'inspector-role', text: t('office.ghostNote') }),
+          h('h2', {
+            id: 'inspector-title', class: 'inspector-name',
+            text: session?.managed ? t('inspector.managedTitle') : t('inspector.unlinkedTitle'),
+          }),
+          h('p', {
+            class: 'inspector-role',
+            text: session?.managed
+              ? `${session.role || 'agent'} · ${session.objective || session.task_id || ''}`
+              : t('office.ghostNote'),
+          }),
           h('div', { class: 'inspector-status-row' },
             statusBadge(session?.status, lang),
-            h('span', { class: 'inspector-status-detail', text: session?.open ? t('inspector.sessionOpen') : t('inspector.sessionClosed') }),
+            h('span', {
+              class: 'inspector-status-detail',
+              text: session?.managed
+                ? `${session.managed_status || session.status} · ${session.provider || 'managed'}`
+                : (session?.open ? t('inspector.sessionOpen') : t('inspector.sessionClosed')),
+            }),
           ),
         ),
         h('button', {
@@ -1317,14 +1347,15 @@
           t('status.openSpanNote'))
         : null,
       h('div', { class: 'inspector-warning' },
-        h('strong', { text: `${t('inspector.unlinkedTitle')}. ` }),
-        t('inspector.unlinkedLead')),
+        h('strong', { text: `${session?.managed ? t('inspector.managedTitle') : t('inspector.unlinkedTitle')}. ` }),
+        session?.managed ? t('inspector.managedLead') : t('inspector.unlinkedLead')),
       section(t('inspector.identity'), null,
         h('dl', { class: 'inspector-fields' },
-          field(t('inspector.name'), null, { empty: t('inspector.notAttested') }),
-          field(t('inspector.role'), null, { empty: t('inspector.notAttested') }),
+          field(t('inspector.name'), session?.managed ? String(session.name || session.task_id || '') : null, { empty: t('inspector.notAttested') }),
+          field(t('inspector.role'), session?.managed ? String(session.role || '') : null, { empty: t('inspector.notAttested') }),
           field(t('inspector.project'), project?.name ? String(project.name) : null, { empty: t('inspector.notAttested') }),
           field(t('inspector.platform'), session?.platform ? h('span', { class: 'mono', text: String(session.platform) }) : null, { empty: t('inspector.notAttested'), lang: 'en' }),
+          field(t('inspector.model'), session?.managed && session.model ? h('span', { class: 'mono', text: String(session.model) }) : null, { empty: t('inspector.notAttested') }),
           field(t('inspector.nativeSession'), null, { empty: t('inspector.noNativeSession') }),
         ),
       ),
@@ -1337,17 +1368,41 @@
             }, String(runId))
             : null, { empty: t('inspector.sessionNone'), wide: true }),
           field(t('inspector.sessionStatus'), meta.label),
-          field(t('inspector.sessionSpan'), session?.open ? t('inspector.sessionOpen') : t('inspector.sessionClosed')),
+          session?.managed ? field(t('inspector.recovery'),
+            session.recovery_state ? t(`milestone.recovery.${session.recovery_state}`) : null) : null,
+          session?.managed ? field(t('inspector.orphaned'),
+            session.orphaned ? t('common.yes') : t('common.no')) : null,
+          field(t('inspector.sessionSpan'), session?.managed
+            ? (session.open ? t('inspector.managedSpanOpen') : t('inspector.managedSpanClosed'))
+            : (session?.open ? t('inspector.sessionOpen') : t('inspector.sessionClosed'))),
           field(t('inspector.sessionDuration'), session?.duration == null ? null : fmtDuration(session.duration)),
           field(t('inspector.sessionLastEvent'), session?.last_event_at ? `${fmtDateTime(session.last_event_at, lang)} · ${fmtRelative(session.last_event_at, lang)}` : null),
+          session?.managed ? field(t('inspector.task'), String(session.task_id || ''), { wide: true }) : null,
+          session?.managed ? field(t('inspector.toolCount'), String(session.tool_count ?? 0)) : null,
+          session?.managed ? field(t('inspector.cost'), session.cost == null ? null : `$${Number(session.cost).toFixed(6)}`) : null,
+          session?.managed ? field(t('inspector.sessionStarted'), session.started_at ? fmtDateTime(session.started_at, lang) : null) : null,
+          session?.managed ? field(t('inspector.sessionFinished'), session.finished_at ? fmtDateTime(session.finished_at, lang) : null) : null,
+          session?.managed ? field(t('inspector.sessionHash'), session.session_hash ? h('span', { class: 'mono', text: String(session.session_hash) }) : null) : null,
         ),
-        h('p', { class: 'inspector-note', text: t('inspector.noEvents') }),
+        h('p', { class: 'inspector-note', text: session?.managed ? t('inspector.managedNote') : t('inspector.noEvents') }),
+        session?.managed && session.recovery?.recovery
+          ? h('div', { class: 'inspector-recovery' },
+            h('strong', { text: t('inspector.recoveryTimeline') }),
+            h('p', { class: 'inspector-note mono', text: [
+              session.recovery.recovery.state,
+              session.recovery.recovery.updated_at
+                ? fmtDateTime(session.recovery.recovery.updated_at, lang) : null,
+              session.recovery.heartbeat_at
+                ? `heartbeat ${fmtRelative(session.recovery.heartbeat_at, lang)}` : null,
+            ].filter(Boolean).join(' · ') }),
+          )
+          : null,
       ),
       section(t('inspector.evidence'), null,
         h('p', { class: 'inspector-note', text: t('inspector.noEvents') }),
         h('ul', { class: 'diagnostic-list' },
-          h('li', { class: 'mono', text: `${t('inspector.evidenceSource')}: office/unlinked_sessions` }),
-          h('li', { class: 'mono', text: `${t('inspector.confidence')}: ${t('status.unknownEvidence')}` }),
+          h('li', { class: 'mono', text: `${t('inspector.evidenceSource')}: ${session?.managed ? `managed/${session.provider || 'unknown'}` : 'office/unlinked_sessions'}` }),
+          h('li', { class: 'mono', text: `${t('inspector.confidence')}: ${session?.managed ? t('status.observed') : t('status.unknownEvidence')}` }),
         ),
       ),
       terminalPanel({ supported: false }, lang),

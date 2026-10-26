@@ -11,12 +11,16 @@ npm run test:browser:update   # intentionally refresh visual baselines
 
 The config starts `python3.11 tools/dashboard.py --demo --port 8799` unless a
 server already answers on that port. Override `AO_PYTHON` or `AO_TEST_PORT` if
-needed.
+needed. Set `AO_BROWSER_CHANNEL=none` with a Playwright-installed Chromium in
+CI. Set `AO_SKIP_VISUALS=1` when platform-specific visual baselines are not
+available; functional E2E still runs.
 
 - `office.spec.mjs` covers the continuous canvas, room filters, registry-only
   agents, project isolation, inspector resizing and narrow-width readability,
   the layout editor, reduced motion, keyboard access, mobile pan/zoom and the
   visual baselines.
+- `teamwork.spec.mjs` covers the milestone progress panel, task filtering,
+  office milestone strip and narrow-screen behavior.
 - `helpers.mjs` resolves demo project ids, waits for walks to settle and reads
   the renderer's read-only debug state. It never changes evidence.
 - `screenshots/` contains the visual baselines and full-page review captures at
