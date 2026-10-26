@@ -310,7 +310,9 @@ engine and a common `universal_teamwork.py` command surface.
 - **Grill-Me:** inspects code/memory first, never treats a recommendation as a
   confirmation, and blocks implementation while critical questions are open.
 - **Safety:** a project-level writer lease prevents two IDEs from writing at
-  once; unconfirmed recommendations are rejected by the ledger API.
+  once; unconfirmed recommendations are rejected by the ledger API. Starting
+  from Codex/Cursor/Antigravity never silently launches OpenCode unless the
+  user explicitly passes `--provider opencode`.
 - **UI:** Project Memory panel shows decisions, open requirements, interviews and
   the last IDE without filling the Canvas office.
 - **Evidence:** real CLI cross-IDE interview resume, assumption guard,

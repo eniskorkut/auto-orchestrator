@@ -150,6 +150,22 @@ class AdaptivePlannerTests(unittest.TestCase):
         self.assertIsNone(plan["verification_budget"]["token_budget"])
 
 
+class ExecutionProviderTests(unittest.TestCase):
+    def test_codex_provider_is_read_only_and_never_silently_opencode(self):
+        plan = plan_request("Küçük bir hata düzelt", run_id="provider-test",
+                            mode="auto", provider="codex")
+        self.assertTrue(plan["tasks"])
+        for task in plan["tasks"]:
+            self.assertEqual(task["provider"], "codex")
+            self.assertEqual(task["sandbox"], "read-only")
+            self.assertEqual(task["approval_policy"], "never")
+
+    def test_unknown_provider_is_rejected(self):
+        with self.assertRaises(TeamworkPlannerError):
+            plan_request("Küçük bir hata düzelt", run_id="provider-test",
+                         provider="cursor")
+
+
 class PlannerTests(unittest.TestCase):
     def test_full_deterministic_plan_has_m1_to_m5(self):
         plan = plan_request(

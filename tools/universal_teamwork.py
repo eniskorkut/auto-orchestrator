@@ -51,12 +51,13 @@ def _platform(args):
 
 def _chat_args(root, *, command, request=None, request_file=None,
                request_stdin=False, mode="auto", run_id=None, model=None,
-               max_seconds=7200, origin_platform="unknown"):
+               max_seconds=7200, origin_platform="unknown", provider=None):
     return type("Args", (), {
         "root": str(root), "command": command, "request": request,
         "request_file": request_file, "request_stdin": request_stdin,
         "mode": mode, "run_id": run_id, "model": model,
         "max_seconds": max_seconds, "origin_platform": origin_platform,
+        "provider": provider,
     })()
 
 
@@ -91,7 +92,8 @@ def start(args) -> dict:
         request_file=args.request_file if not args.interview_id else None,
         request_stdin=args.request_stdin if not args.interview_id else False,
         mode=args.mode, run_id=args.run_id, model=args.model,
-        max_seconds=args.max_seconds, origin_platform=platform))
+        max_seconds=args.max_seconds, origin_platform=platform,
+        provider=getattr(args, "provider", None)))
     result["platform"] = platform
     return result
 
@@ -233,6 +235,9 @@ def main(argv=None) -> int:
     start_p.add_argument("--interview-id")
     start_p.add_argument("--run-id")
     start_p.add_argument("--model", default=teamwork_chat.DEFAULT_MODEL)
+    start_p.add_argument("--provider", choices=["opencode", "codex"],
+                         help="explicit managed execution provider; required "
+                              "to opt in from Codex/Cursor/Antigravity")
     start_p.add_argument("--max-seconds", type=float, default=7200)
 
     context_p = sub.add_parser("context")

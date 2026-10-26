@@ -386,6 +386,18 @@ def start(args) -> dict:
                     f"unfinished teamwork run {active['run_id']} exists; "
                     "use resume instead of starting a duplicate"
                 )
+        provider = getattr(args, "provider", None)
+        platform = getattr(args, "origin_platform", "unknown") or "unknown"
+        if provider is None:
+            if platform in ("codex", "cursor", "antigravity"):
+                raise ChatError(
+                    f"no managed execution adapter is selected for {platform}; "
+                    "use the platform's native agents, or pass --provider "
+                    "opencode explicitly to opt in to the OpenCode bridge"
+                )
+            provider = "opencode"
+        if provider not in ("opencode", "codex"):
+            raise ChatError("provider must be opencode or codex")
         request = _request_text(root, args)
         plan_path = _plan_path(root, run_id)
         if plan_path.exists():
@@ -395,9 +407,12 @@ def start(args) -> dict:
         try:
             plan = plan_request(request, run_id=run_id, model=model,
                                 mode=mode, repo_profile=profile,
-                                project_id=identity["project_id"])
+                                project_id=identity["project_id"],
+                                provider=provider)
         except (TeamworkPlannerError, ValueError) as exc:
             raise ChatError(str(exc)) from exc
+        plan["origin_platform"] = platform
+        plan["execution_provider"] = provider
         plan_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         _write_json(plan_path, plan)
         engine = TeamworkEngine(root)
@@ -409,8 +424,6 @@ def start(args) -> dict:
         process = _spawn(root, log, plan_path, recover=False,
                          owner_token=token, model=model,
                          max_seconds=float(args.max_seconds))
-        plan["origin_platform"] = getattr(args, "origin_platform", "unknown")
-        _write_json(plan_path, plan)
         active = _new_active(root, run_id, plan["work_mode"], plan_path,
                              log, model, token, process,
                              recovery_state="active")
@@ -425,7 +438,8 @@ def start(args) -> dict:
         "owner_verified": True,
         "plan": str(plan_path), "log": str(log),
         "risk_assessment": plan.get("risk_assessment"),
-        "child_sessions": "separate managed OpenCode sessions",
+        "child_sessions": f"separate managed {provider} sessions",
+        "execution_provider": provider,
         "note": "Use status/agents/milestones; cancel is a local signal only.",
     }
 
@@ -659,6 +673,7 @@ def main(argv=None) -> int:
                          choices=["auto", "fast", "balanced", "rigorous"])
     start_p.add_argument("--run-id")
     start_p.add_argument("--model", default=DEFAULT_MODEL)
+    start_p.add_argument("--provider", choices=["opencode", "codex"])
     start_p.add_argument("--max-seconds", type=float, default=7200)
     sub.add_parser("request-path")
     for name in ("status", "agents", "milestones", "cancel", "resume"):

@@ -11,6 +11,8 @@ Common command surface:
 
 ```bash
 python3.11 tools/universal_teamwork.py --root . --platform <platform> start --request-file <file>
+# Codex read-only managed execution:
+python3.11 tools/universal_teamwork.py --root . --platform codex --provider codex start --request-file <file>
 python3.11 tools/universal_teamwork.py --root . --platform <platform> status
 python3.11 tools/universal_teamwork.py --root . --platform <platform> agents
 python3.11 tools/universal_teamwork.py --root . --platform <platform> milestones
@@ -22,10 +24,20 @@ python3.11 tools/universal_teamwork.py --root . --platform <platform> resume
 python3.11 tools/universal_teamwork.py --root . --platform <platform> grill ...
 ```
 
-The existing OpenCode managed bridge is the execution fallback on this machine.
-The platform field records where the request originated; it does not silently
-start another IDE's process. A platform change is a new session that inherits
-verified durable state, not a running child session.
+Execution follows the active platform instead of silently switching IDEs:
+
+- `--platform opencode` uses the existing managed OpenCode adapter.
+- `--platform codex` requires an explicit `--provider codex`. The plan then uses
+  Codex tasks with `sandbox=read-only` and `approval_policy=never`; Codex write
+  mode and approval bridging remain unverified and are not claimed.
+- `--platform cursor` and `--platform antigravity` have no managed execution
+  adapter in this repository. Their native agents/skills run the work; starting
+  the OpenCode bridge from them requires an explicit `--provider opencode`
+  opt-in. Plain `start` refuses instead of launching another IDE's process.
+- An unknown/local CLI origin keeps the historical `opencode` default.
+
+A platform change is a new session that inherits verified durable state, not a
+running child session.
 
 Shared execution metadata is persisted in the existing plan/Supervisor state and
 project memory: `project_id`, `run_id`, `milestone_id`, `task_id`, `attempt_id`,

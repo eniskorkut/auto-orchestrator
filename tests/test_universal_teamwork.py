@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
+from tools import teamwork_chat
 from tools import universal_teamwork as universal
 from tools.project_memory import ProjectMemory
 
@@ -41,6 +42,17 @@ class UniversalTeamworkTests(unittest.TestCase):
         with ProjectMemory(self.root) as memory:
             self.assertTrue(any(item["status"] == "confirmed"
                                 for item in memory.list_decisions()))
+
+    def test_codex_start_requires_explicit_provider(self):
+        (self.root / ".git").mkdir()
+        with self.assertRaises(teamwork_chat.ChatError) as raised:
+            universal.start(self._args(
+                request="Küçük bir değişiklik yap", request_file=None,
+                request_stdin=False, mode="auto", run_id=None, model=None,
+                max_seconds=10, grill=False, grill_mode="auto",
+                interview_id=None, provider=None))
+        self.assertIn("no managed execution adapter", str(raised.exception))
+        self.assertFalse((self.root / ".auto-orchestrator" / "plans").exists())
 
     def test_start_requires_request_without_approved_interview(self):
         with self.assertRaises(universal.UniversalError):
