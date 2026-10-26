@@ -1,6 +1,9 @@
-// Runtime configuration for the task manager frontend.
-//
-// The API requests are relative to this base, so an empty string means "same
-// origin as the page". Change it to an absolute origin (for example
-// "http://127.0.0.1:8080") when the frontend is served from somewhere else.
-window.AO_API_BASE = "";
+/* Runtime configuration for the task app.
+ *
+ * Empty string means "same origin as the page", which is how the backend
+ * serves the frontend in development. A deployment that hosts the API
+ * elsewhere can set window.AO_API_BASE before this script runs.
+ */
+if (typeof window.AO_API_BASE !== "string") {
+  window.AO_API_BASE = "";
+}

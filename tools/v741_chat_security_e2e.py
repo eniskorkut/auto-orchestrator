@@ -31,6 +31,27 @@ def _args(root: Path, run_id=None, request_file=None):
                              "model": DEFAULT_MODEL, "max_seconds": 3600})()
 
 
+def _sanitize(value):
+    if isinstance(value, dict):
+        clean = {}
+        for key, item in value.items():
+            if key == "pid":
+                clean["pid_recorded"] = True
+                continue
+            if key == "log" and isinstance(item, str):
+                clean[key] = "$TMPDIR/opencode/v741-chat-security/.auto-orchestrator/teamwork/v741-chat-security.log"
+                continue
+            clean[key] = _sanitize(item)
+        return clean
+    if isinstance(value, list):
+        return [_sanitize(item) for item in value]
+    if isinstance(value, str):
+        value = value.replace(str(Path.home()), "$HOME")
+        value = value.replace(tempfile.gettempdir(), "$TMPDIR")
+        return value
+    return value
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path,
@@ -52,7 +73,9 @@ def main(argv=None) -> int:
     )
     request_dir = root / ".auto-orchestrator" / "teamwork" / "requests"
     request_dir.mkdir(parents=True, exist_ok=True)
-    request_path = request_dir / "request-security.md"
+    generated = teamwork_chat.request_path(
+        type("Args", (), {"root": str(root)})())
+    request_path = root / generated["relative_path"]
     request_path.write_text(request, encoding="utf-8")
     start_args = _args(root, args.run_id, request_file=str(request_path))
     started = time.monotonic()
@@ -112,7 +135,7 @@ def main(argv=None) -> int:
             "never inserted into a shell command. Cancellation is a local signal."
         ),
     }
-    text = json.dumps(payload, indent=2, ensure_ascii=False) + "\n"
+    text = json.dumps(_sanitize(payload), indent=2, ensure_ascii=False) + "\n"
     print(text, end="")
     if args.json_out:
         args.json_out.parent.mkdir(parents=True, exist_ok=True)

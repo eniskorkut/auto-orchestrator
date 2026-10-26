@@ -1,235 +1,327 @@
+"use strict";
+
+/*
+ * Static task manager frontend. No build step, no dependencies.
+ *
+ * Talks to the documented JSON API:
+ *   GET    /api/tasks        -> { tasks: [...] }
+ *   POST   /api/tasks        -> { task: {...} } (or 400 { error })
+ *   PATCH  /api/tasks/<id>   -> { task: {...} } (or 404 { error })
+ *
+ * Every request is relative to window.AO_API_BASE (see config.js).
+ */
 (function () {
-  "use strict";
+  const TASKS_PATH = "/api/tasks";
+  const MAX_TITLE_LENGTH = 80;
 
-  var MAX_TITLE_LENGTH = 80;
+  const apiBase = (
+    typeof window.AO_API_BASE === "string" ? window.AO_API_BASE : ""
+  ).replace(/\/+$/, "");
 
-  var form = document.getElementById("task-form");
-  var input = document.getElementById("task-title");
-  var submitButton = form ? form.querySelector('button[type="submit"]') : null;
-  var errorBox = document.getElementById("task-error");
-  var list = document.getElementById("task-list");
-  var emptyState = document.getElementById("task-empty");
+  const state = {
+    tasks: [],
+    loading: true,
+    busy: false,
+  };
 
-  var tasks = [];
-  var creating = false;
+  const els = {};
 
-  function apiBase() {
-    var base = window.AO_API_BASE;
-    return typeof base === "string" ? base.replace(/\/+$/, "") : "";
-  }
+  function init() {
+    els.form = document.getElementById("task-form");
+    els.input = document.getElementById("task-title");
+    els.submit = document.getElementById("task-submit");
+    els.error = document.getElementById("form-error");
+    els.list = document.getElementById("task-list");
+    els.count = document.getElementById("task-count");
+    els.empty = document.getElementById("task-empty");
+    els.status = document.getElementById("status");
 
-  function apiUrl(path) {
-    return apiBase() + path;
-  }
-
-  function showError(message) {
-    if (!errorBox) {
+    if (!els.form || !els.input || !els.list) {
       return;
     }
-    errorBox.textContent = message;
-    errorBox.hidden = false;
+
+    els.form.addEventListener("submit", handleSubmit);
+    els.input.addEventListener("input", function () {
+      if (!els.error.hidden) {
+        clearError();
+      }
+    });
+
+    render();
+    loadTasks();
   }
 
-  function clearError() {
-    if (!errorBox) {
-      return;
-    }
-    errorBox.textContent = "";
-    errorBox.hidden = true;
+  function url(path) {
+    return apiBase + path;
   }
 
   async function request(path, options) {
-    var response;
+    const init = Object.assign({}, options);
+    const headers = { Accept: "application/json" };
+    if (init.body !== undefined) {
+      headers["Content-Type"] = "application/json";
+    }
+    init.headers = Object.assign(headers, init.headers || {});
+
+    let response;
     try {
-      response = await fetch(apiUrl(path), options);
+      response = await fetch(url(path), init);
     } catch (cause) {
-      throw new Error("Could not reach the server. Is it running?");
+      throw new Error("Could not reach the server. Check your connection.");
     }
 
-    var payload = null;
-    try {
-      payload = await response.json();
-    } catch (cause) {
-      payload = null;
+    const text = await response.text();
+    let payload = null;
+    if (text) {
+      try {
+        payload = JSON.parse(text);
+      } catch (cause) {
+        payload = null;
+      }
     }
 
     if (!response.ok) {
-      var message =
-        payload && typeof payload.error === "string" && payload.error
-          ? payload.error
+      const message =
+        payload && typeof payload.error === "string" && payload.error.trim()
+          ? payload.error.trim()
           : "Request failed with status " + response.status + ".";
-      throw new Error(message);
+      const error = new Error(message);
+      error.status = response.status;
+      throw error;
     }
 
     return payload;
   }
 
-  function fetchTasks() {
-    return request("/api/tasks", { headers: { Accept: "application/json" } }).then(
-      function (payload) {
-        return Array.isArray(payload && payload.tasks) ? payload.tasks : [];
-      }
-    );
+  function validateTitle(raw) {
+    const title = String(raw == null ? "" : raw).trim();
+    if (!title) {
+      return { ok: false, error: "Enter a task title." };
+    }
+    if (title.length > MAX_TITLE_LENGTH) {
+      return {
+        ok: false,
+        error:
+          "Keep the title to " + MAX_TITLE_LENGTH + " characters or fewer.",
+      };
+    }
+    return { ok: true, title: title };
   }
 
-  function createTask(title) {
-    return request("/api/tasks", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ title: title }),
-    }).then(function (payload) {
-      if (!payload || !payload.task) {
-        throw new Error("The server did not return the created task.");
-      }
-      return payload.task;
-    });
-  }
-
-  function updateTaskDone(id, done) {
-    return request("/api/tasks/" + encodeURIComponent(id), {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ done: done }),
-    }).then(function (payload) {
-      if (!payload || !payload.task) {
-        throw new Error("The server did not return the updated task.");
-      }
-      return payload.task;
-    });
-  }
-
-  function renderTasks() {
-    if (!list) {
+  async function handleSubmit(event) {
+    event.preventDefault();
+    if (state.busy) {
       return;
     }
 
-    list.textContent = "";
-    tasks.forEach(function (task) {
-      list.appendChild(renderTask(task));
-    });
-
-    var isEmpty = tasks.length === 0;
-    list.hidden = isEmpty;
-    if (emptyState) {
-      emptyState.hidden = !isEmpty;
+    const result = validateTitle(els.input.value);
+    if (!result.ok) {
+      showError(result.error);
+      els.input.focus();
+      return;
     }
+
+    clearError();
+    setBusy(true);
+    try {
+      const payload = await request(TASKS_PATH, {
+        method: "POST",
+        body: JSON.stringify({ title: result.title }),
+      });
+      const task = payload && payload.task;
+      if (!task || typeof task !== "object") {
+        throw new Error("The server returned an unexpected response.");
+      }
+
+      state.tasks.push(task);
+      els.input.value = "";
+      render();
+      announce('Added "' + task.title + '".');
+    } catch (error) {
+      showError(messageOf(error, "Could not create the task."));
+    } finally {
+      setBusy(false);
+    }
+
+    els.input.focus();
+  }
+
+  async function loadTasks() {
+    state.loading = true;
+    render();
+    try {
+      const payload = await request(TASKS_PATH);
+      if (!payload || !Array.isArray(payload.tasks)) {
+        throw new Error("The server returned an unexpected response.");
+      }
+      state.tasks = payload.tasks;
+    } catch (error) {
+      state.tasks = [];
+      showError(messageOf(error, "Could not load tasks."));
+    } finally {
+      state.loading = false;
+      render();
+    }
+  }
+
+  async function toggleTask(task, checkbox) {
+    const nextDone = checkbox.checked;
+    const previousDone = Boolean(task.done);
+
+    clearError();
+    checkbox.disabled = true;
+    checkbox.setAttribute("aria-busy", "true");
+
+    try {
+      const payload = await request(
+        TASKS_PATH + "/" + encodeURIComponent(String(task.id)),
+        {
+          method: "PATCH",
+          body: JSON.stringify({ done: nextDone }),
+        }
+      );
+      const updated =
+        payload && payload.task && typeof payload.task === "object"
+          ? payload.task
+          : Object.assign({}, task, { done: nextDone });
+
+      task.done = Boolean(updated.done);
+      if (typeof updated.title === "string") {
+        task.title = updated.title;
+      }
+      applyTaskDone(task, checkbox);
+      announce(
+        '"' + task.title + '" marked ' + (task.done ? "done" : "not done") + "."
+      );
+    } catch (error) {
+      task.done = previousDone;
+      applyTaskDone(task, checkbox);
+      showError(messageOf(error, "Could not update the task."));
+    } finally {
+      checkbox.disabled = false;
+      checkbox.removeAttribute("aria-busy");
+    }
+  }
+
+  function applyTaskDone(task, checkbox) {
+    const done = Boolean(task.done);
+    checkbox.checked = done;
+    checkbox.setAttribute("aria-label", toggleLabel(task));
+    const item = checkbox.closest("li");
+    if (item) {
+      item.dataset.done = done ? "true" : "false";
+      item.dataset.taskId = String(task.id);
+      item.classList.toggle("task--done", done);
+    }
+  }
+
+  function toggleLabel(task) {
+    return (
+      'Mark "' + task.title + '" as ' + (task.done ? "not done" : "done")
+    );
+  }
+
+  function render() {
+    if (!els.list) {
+      return;
+    }
+
+    els.list.textContent = "";
+    for (const task of state.tasks) {
+      els.list.appendChild(renderTask(task));
+    }
+
+    if (els.count) {
+      els.count.textContent = String(state.tasks.length);
+    }
+    if (els.empty) {
+      els.empty.hidden = state.loading || state.tasks.length > 0;
+    }
+    syncBusyState();
   }
 
   function renderTask(task) {
-    var item = document.createElement("li");
-    item.className = "task" + (task.done ? " task--done" : "");
+    const item = document.createElement("li");
+    item.className = "task";
+    item.dataset.testid = "task-item";
     item.dataset.taskId = String(task.id);
+    const done = Boolean(task.done);
+    item.dataset.done = done ? "true" : "false";
+    if (done) {
+      item.classList.add("task--done");
+    }
 
-    var checkbox = document.createElement("input");
+    const checkbox = document.createElement("input");
     checkbox.type = "checkbox";
     checkbox.className = "task__checkbox";
-    checkbox.checked = Boolean(task.done);
-    checkbox.setAttribute(
-      "aria-label",
-      'Mark "' + String(task.title) + '" as done'
-    );
+    checkbox.id = "task-" + task.id;
+    checkbox.dataset.testid = "task-toggle";
+    checkbox.checked = done;
+    checkbox.setAttribute("aria-label", toggleLabel(task));
     checkbox.addEventListener("change", function () {
-      toggleTask(task, checkbox, item);
+      toggleTask(task, checkbox);
     });
 
-    var title = document.createElement("span");
-    title.className = "task__title";
-    title.textContent = String(task.title);
+    const label = document.createElement("label");
+    label.className = "task__title";
+    label.htmlFor = checkbox.id;
+    label.textContent = task.title;
 
     item.appendChild(checkbox);
-    item.appendChild(title);
+    item.appendChild(label);
     return item;
   }
 
-  function toggleTask(task, checkbox, item) {
-    var nextDone = checkbox.checked;
-    checkbox.disabled = true;
-
-    updateTaskDone(task.id, nextDone)
-      .then(function (updated) {
-        task.done = Boolean(updated.done);
-        checkbox.checked = task.done;
-        item.classList.toggle("task--done", task.done);
-        clearError();
-      })
-      .catch(function (error) {
-        checkbox.checked = !nextDone;
-        showError(error.message);
-      })
-      .finally(function () {
-        checkbox.disabled = false;
-      });
+  function setBusy(busy) {
+    state.busy = Boolean(busy);
+    if (els.submit) {
+      els.submit.disabled = state.busy;
+    }
+    if (els.form) {
+      els.form.setAttribute("aria-busy", state.busy ? "true" : "false");
+    }
+    syncBusyState();
   }
 
-  function validate(title) {
-    if (!title) {
-      return "Please enter a task title.";
-    }
-    if (title.length > MAX_TITLE_LENGTH) {
-      return "A task title can be at most " + MAX_TITLE_LENGTH + " characters.";
-    }
-    return "";
-  }
-
-  function onSubmit(event) {
-    event.preventDefault();
-    if (creating) {
+  function syncBusyState() {
+    if (!els.list) {
       return;
     }
-
-    var title = input ? input.value.trim() : "";
-    var validationError = validate(title);
-    if (validationError) {
-      showError(validationError);
-      if (input) {
-        input.focus();
-      }
-      return;
-    }
-
-    creating = true;
-    if (submitButton) {
-      submitButton.disabled = true;
-    }
-    clearError();
-
-    createTask(title)
-      .then(function (task) {
-        tasks.push(task);
-        renderTasks();
-        if (input) {
-          input.value = "";
-          input.focus();
-        }
-      })
-      .catch(function (error) {
-        showError(error.message);
-      })
-      .finally(function () {
-        creating = false;
-        if (submitButton) {
-          submitButton.disabled = false;
-        }
-      });
+    const busy = state.loading || state.busy;
+    els.list.setAttribute("aria-busy", busy ? "true" : "false");
   }
 
-  function init() {
-    if (!form || !input || !list) {
+  function showError(message) {
+    if (!els.error) {
       return;
     }
-
-    form.addEventListener("submit", onSubmit);
-
-    fetchTasks()
-      .then(function (loaded) {
-        tasks = loaded;
-        renderTasks();
-      })
-      .catch(function (error) {
-        renderTasks();
-        showError(error.message);
-      });
+    els.error.textContent = message;
+    els.error.hidden = false;
   }
 
-  init();
+  function clearError() {
+    if (!els.error) {
+      return;
+    }
+    els.error.textContent = "";
+    els.error.hidden = true;
+  }
+
+  function announce(message) {
+    if (els.status) {
+      els.status.textContent = message;
+    }
+  }
+
+  function messageOf(error, fallback) {
+    return error && typeof error.message === "string" && error.message
+      ? error.message
+      : fallback;
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init);
+  } else {
+    init();
+  }
 })();

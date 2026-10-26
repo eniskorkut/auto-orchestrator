@@ -4,7 +4,7 @@
   "run_id": "v741-chat-security",
   "mode": "balanced",
   "status": "cancelled",
-  "wall_time_seconds": 2.182,
+  "wall_time_seconds": 1.119,
   "request": {
     "sha256": "81235016a963d8982887e5b8fdfa825835b59676830efac2bf3dc93f88778a3d",
     "characters": 394,
@@ -82,25 +82,27 @@
     "orphaned_tasks": [],
     "owner_connected": false,
     "owner_process_alive": false,
+    "runner_lease_held": false,
     "owner_verified": false,
-    "heartbeat_age_seconds": 2.125,
+    "heartbeat_age_seconds": 1.063,
     "recovery": {
-      "state": "recovery_failed",
+      "state": "cancelled",
       "owner_connected": false,
       "owner_verified": false,
-      "heartbeat_age_seconds": 2.125,
+      "heartbeat_age_seconds": 1.063,
       "last_transition": {
         "version": 1,
         "run_id": "v741-chat-security",
         "state": "reconciling",
-        "updated_at": 1792992760.6043992,
+        "updated_at": 1792997279.8545642,
         "requested": "cancel",
         "owner_connected": true
       },
       "local_signal_only": true,
-      "native_cancel_ack": false
+      "native_cancel_ack": false,
+      "cancelled": true
     },
-    "recovery_state": "recovery_failed",
+    "recovery_state": "cancelled",
     "pid_alive": false,
     "log": "$TMPDIR/opencode/v741-chat-security/.auto-orchestrator/teamwork/v741-chat-security.log"
   },

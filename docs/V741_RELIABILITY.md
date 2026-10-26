@@ -29,8 +29,10 @@ fixes.
 - `identity_matches()` and `owner_alive()` that never signal a process;
 - `terminate_owned()` which refuses to signal when the live identity does not
   match the recorded owner;
-- an atomic cross-process project lock (`state.lock`) that is reclaimed only
-  after the recorded owner identity is gone;
+- an OS-backed cross-process lock (`state.lock`) released automatically when
+  its holder exits, plus a per-process thread lock for same-process callers;
+- a runner lease held for the whole runner lifetime, so a live or hung runner
+  is distinguishable from a dead one without trusting PID reuse;
 - atomic active-state updates and private recovery-state files.
 
 `teamwork_chat.py` now treats `active.json` as metadata only. It stores the
@@ -49,7 +51,8 @@ the milestone state machine:
 
 `active → runner_disconnected → reconciling → orphaned → retry_ready → resuming → verifying → recovered`
 
-`recovery_failed` is terminal. The states are evidence labels; `recovered` is
+`recovery_failed` is terminal. `cancelled` is a terminal display state for a
+user-requested stop, not a successful recovery. The states are evidence labels; `recovered` is
 written only after the final product verification path succeeds.
 
 Recovery behavior:
@@ -82,12 +85,12 @@ Measured result:
 |---|---:|
 | Final status | **passed** |
 | Milestone | M1 passed |
-| Wall time | 212.474 s |
-| Crash point | 1.012 s after launch |
+| Wall time | 307.863 s |
+| Crash point | 1.023 s after launch |
 | Backend/frontend children alive after runner crash | true / true |
 | Recovery timeline | active → runner_disconnected → resuming → retry_ready → recovered |
 | Repair iterations | 1 / 2 |
-| Backend tests in integrated tree | 14 passed |
+| Backend tests in integrated tree | 13 passed |
 | Browser E2E | passed |
 | Duplicate completed attempts | none |
 | Native cancel ACK | false (local signal only) |
@@ -116,6 +119,8 @@ shell string. The command instructs the agent to:
 - UTF-8, no NUL, non-empty, maximum 20,000 characters;
 - request file is a regular file (not a symlink), inside the private request
   directory, with a bounded byte size;
+- `request-path` generates a random, shell-safe filename inside the private
+  request directory; the user request is never used to choose the filename;
 - run IDs match `[A-Za-z0-9][A-Za-z0-9._-]{0,79}` and contain no `..`;
 - plan paths stay inside `.auto-orchestrator/plans/`;
 - model strings are short and single-line.
@@ -205,7 +210,7 @@ Screenshots (demo data, clearly labelled):
 
 ## 10. Tests and limitations
 
-Local V7.4.1 verification: 456 Python tests (1 skipped), 90 Node tests and 19
+Local V7.4.1 verification: 464 Python tests (1 skipped), 90 Node tests and 19
 Playwright tests passed. The CI matrix is checked after the branch push. The
 recovery/security/efficiency harnesses are real-provider tests and are not part
 of the default credential-free CI.

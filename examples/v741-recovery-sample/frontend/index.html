@@ -1,44 +1,61 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="color-scheme" content="light dark" />
-    <title>Task Manager</title>
-    <link rel="stylesheet" href="/styles.css" />
+    <title>Tasks</title>
+    <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <main class="app">
       <header class="app__header">
         <h1 class="app__title">Tasks</h1>
-        <p class="app__subtitle">A small in-memory task manager.</p>
+        <p class="app__subtitle">A tiny in-memory task list.</p>
       </header>
 
-      <form id="task-form" class="task-form" novalidate>
-        <label class="visually-hidden" for="task-title">Task title</label>
-        <input
-          id="task-title"
-          class="task-form__input"
-          name="title"
-          type="text"
-          maxlength="80"
-          placeholder="What needs doing?"
-          autocomplete="off"
-          required
-        />
-        <button class="task-form__submit" type="submit">Add task</button>
+      <form class="task-form" id="task-form" novalidate>
+        <label class="task-form__label" for="task-title">New task</label>
+        <div class="task-form__row">
+          <input
+            class="task-form__input"
+            id="task-title"
+            name="title"
+            type="text"
+            maxlength="80"
+            placeholder="What needs doing?"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <button class="button button--primary" id="task-submit" type="submit">
+            Add task
+          </button>
+        </div>
       </form>
 
-      <p id="task-error" class="task-error" role="alert" hidden></p>
+      <p class="alert" id="form-error" role="alert" data-testid="error" hidden></p>
 
-      <p id="task-empty" class="task-empty" hidden>
-        No tasks yet. Add your first one above.
-      </p>
+      <section class="task-section" aria-labelledby="task-list-heading">
+        <h2 class="task-section__heading" id="task-list-heading">
+          Your tasks
+          <span class="task-count" id="task-count" data-testid="task-count">0</span>
+        </h2>
 
-      <ul id="task-list" class="task-list" aria-label="Tasks"></ul>
+        <p class="empty" id="task-empty" data-testid="empty-state" hidden>
+          No tasks yet. Add your first one above.
+        </p>
+
+        <ul
+          class="task-list"
+          id="task-list"
+          data-testid="task-list"
+          aria-busy="true"
+        ></ul>
+      </section>
+
+      <p class="sr-only" id="status" role="status" aria-live="polite"></p>
     </main>
 
-    <script src="/config.js"></script>
-    <script src="/app.js"></script>
+    <script src="config.js"></script>
+    <script src="app.js" defer></script>
   </body>
 </html>

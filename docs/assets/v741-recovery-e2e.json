@@ -5,8 +5,8 @@
   "mode": "fast",
   "status": "passed",
   "runner_exit_code": -15,
-  "wall_time_seconds": 212.474,
-  "crash_at_seconds": 1.012,
+  "wall_time_seconds": 307.863,
+  "crash_at_seconds": 1.023,
   "timeline": [
     "active",
     "runner_disconnected",
@@ -24,13 +24,13 @@
     "sessions": {
       "backend": {
         "status": "running",
-        "tool_count": 0,
-        "pid_recorded": true
+        "pid_recorded": true,
+        "tool_count": 0
       },
       "frontend": {
         "status": "running",
-        "tool_count": 0,
-        "pid_recorded": true
+        "pid_recorded": true,
+        "tool_count": 0
       }
     },
     "milestones": [
@@ -44,7 +44,7 @@
           "Browser E2E passes."
         ],
         "status": "running",
-        "started_at": 1792992248.421247,
+        "started_at": 1792996837.381973,
         "completed_at": null,
         "repair_iterations": 0,
         "max_repair": 2,
@@ -177,7 +177,7 @@
           "Browser E2E passes."
         ],
         "status": "running",
-        "started_at": 1792992248.421247,
+        "started_at": 1792996837.381973,
         "completed_at": null,
         "repair_iterations": 0,
         "max_repair": 2,
@@ -296,13 +296,13 @@
   "resume_response": {
     "run_id": "v741-recovery-e2e",
     "status": "resumed",
+    "pid_recorded": true,
     "owner_verified": true,
     "log": "$TMPDIR/opencode/v741-recovery/.auto-orchestrator/teamwork/v741-recovery-e2e.resume.log",
     "recover": true,
     "recovery_state": "resuming",
     "native_cancel_ack": false,
-    "local_signal_only": true,
-    "pid_recorded": true
+    "local_signal_only": true
   },
   "final": {
     "status": "passed",
@@ -329,8 +329,8 @@
         "task_id": "backend",
         "attempt": 2,
         "status": "completed",
-        "tool_count": 16,
-        "cost": 0.009608934,
+        "tool_count": 11,
+        "cost": 0.008275302,
         "pid_verified": true,
         "cancel_state": "none"
       },
@@ -347,8 +347,8 @@
         "task_id": "frontend",
         "attempt": 2,
         "status": "completed",
-        "tool_count": 16,
-        "cost": 0.017730492,
+        "tool_count": 28,
+        "cost": 0.022768524,
         "pid_verified": true,
         "cancel_state": "none"
       },
@@ -356,8 +356,8 @@
         "task_id": "integrate",
         "attempt": 1,
         "status": "completed",
-        "tool_count": 15,
-        "cost": 0.00629214,
+        "tool_count": 14,
+        "cost": 0.004632654,
         "pid_verified": true,
         "cancel_state": "none"
       }
@@ -378,17 +378,66 @@
   },
   "independent_verification": {
     "backend": {
-      "command": "python3.11 -m unittest discover -s tests -q",
+      "command": "$HOME/.local/bin/python3.11 -m unittest discover -s tests -q",
       "exit_code": 0,
-      "duration_seconds": 5.782,
-      "output_tail": "----------------------------------------------------------------------\nRan 14 tests in 5.701s\n\nOK\n"
+      "duration_seconds": 1.167,
+      "output_tail": "----------------------------------------------------------------------\nRan 13 tests in 1.083s\n\nOK\n"
     },
     "browser_e2e": {
       "command": "node e2e/check.cjs",
       "exit_code": 0,
-      "duration_seconds": 3.827,
-      "output_tail": "  ok - page loads from the backend (GET / -> 200)\n  ok - window.AO_API_BASE is \"\"\n  ok - initial task list renders empty\n  ok - empty title shows a validation error and creates nothing\n  ok - whitespace-only title is rejected\n  ok - creates a task, clears the input, and persists it through the API\n  ok - toggles done through the API and reflects it in the DOM\n  ok - done state survives a page reload\n  ok - untoggles done and reflects it in the DOM and API\n  ok - no uncaught page errors\n\nE2E check passed.\n"
+      "duration_seconds": 2.81,
+      "output_tail": "Starting backend: $TMPDIR/opencode/v741-recovery/backend/app.py\nBackend ready on http://127.0.0.1:56852\n1. Loading the app\n2. Creating a task\n3. Rejecting an empty title\n4. Rejecting a whitespace-only title\n5. Toggling the task done\n6. Reloading to confirm the toggle persisted\n\nE2E passed: load, create, empty-title rejection, toggle, reload.\n"
     }
+  },
+  "recovery_state_file": {
+    "version": 1,
+    "run_id": "v741-recovery-e2e",
+    "state": "recovered",
+    "updated_at": 1792997140.098658,
+    "final_status": "passed",
+    "recovered_orphans": [
+      {
+        "task_id": "backend",
+        "status": "orphaned",
+        "blocked": false,
+        "process": {
+          "recorded": true,
+          "pid_recorded": true,
+          "owned": true,
+          "exited_before_signal": false,
+          "signaled": true,
+          "terminated": true,
+          "group_terminated": true,
+          "local_signal_only": true,
+          "native_cancel_ack": false
+        },
+        "preserved_worktree_changes": [],
+        "native_cancel_ack": false,
+        "local_signal_only": true,
+        "reason": "Runner restarted. Previous managed attempt is not reattached. Owned orphan was already stopped or was terminated locally; the worktree and its changes were preserved for a new attempt."
+      },
+      {
+        "task_id": "frontend",
+        "status": "orphaned",
+        "blocked": false,
+        "process": {
+          "recorded": true,
+          "pid_recorded": true,
+          "owned": true,
+          "exited_before_signal": false,
+          "signaled": true,
+          "terminated": true,
+          "group_terminated": true,
+          "local_signal_only": true,
+          "native_cancel_ack": false
+        },
+        "preserved_worktree_changes": [],
+        "native_cancel_ack": false,
+        "local_signal_only": true,
+        "reason": "Runner restarted. Previous managed attempt is not reattached. Owned orphan was already stopped or was terminated locally; the worktree and its changes were preserved for a new attempt."
+      }
+    ]
   },
   "native_cancel_ack": false,
   "local_signal_only": true,

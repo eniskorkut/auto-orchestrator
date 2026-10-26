@@ -38,7 +38,7 @@ except ModuleNotFoundError:  # python tools/v741_recovery_e2e.py
         atomic_write_json,
         identity_matches,
         owner_record,
-        read_process_identity,
+        read_recovery_state,
         wait_for_exit,
     )
     from teamwork import TeamworkEngine  # type: ignore
@@ -46,6 +46,30 @@ except ModuleNotFoundError:  # python tools/v741_recovery_e2e.py
     from v74_e2e import fast_plan  # type: ignore
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _sanitize(value):
+    """Remove local paths and raw process ids from public evidence."""
+    if isinstance(value, dict):
+        clean = {}
+        for key, item in value.items():
+            if key in ("pid", "process_group"):
+                clean["pid_recorded"] = True
+                continue
+            if key == "log" and isinstance(item, str):
+                clean[key] = "$TMPDIR/opencode/v741-recovery/.auto-orchestrator/teamwork/v741-recovery-e2e.resume.log" if "resume" in item else "$TMPDIR/opencode/v741-recovery/.auto-orchestrator/teamwork/v741-recovery-e2e.log"
+                continue
+            clean[key] = _sanitize(item)
+        return clean
+    if isinstance(value, list):
+        return [_sanitize(item) for item in value]
+    if isinstance(value, str):
+        value = value.replace(str(ROOT), "$REPO")
+        value = value.replace(str(Path.home()), "$HOME")
+        value = value.replace("/private" + tempfile.gettempdir(), "$TMPDIR")
+        value = value.replace(tempfile.gettempdir(), "$TMPDIR")
+        return value
+    return value
 
 
 def _engine_status(root: Path, run_id: str) -> dict:
@@ -204,9 +228,20 @@ def main(argv=None) -> int:
         }
         if status.get("status") == "passed":
             raise RuntimeError("run finished before the crash; rerun with a slower task")
-        # Resume through the real single-chat bridge.
-        result = teamwork_chat.resume(
-            type("Args", (), {"root": str(root), "run_id": args.run_id})())
+        # Resume through the real single-chat bridge. Allow a short grace for
+        # the killed process's OS lease to be released.
+        result = None
+        resume_deadline = time.monotonic() + 30
+        while time.monotonic() < resume_deadline:
+            result = teamwork_chat.resume(
+                type("Args", (), {"root": str(root), "run_id": args.run_id})())
+            if result.get("status") == "resumed":
+                break
+            if result.get("status") != "already_running":
+                raise RuntimeError(f"resume was rejected: {result}")
+            time.sleep(0.5)
+        if not result or result.get("status") != "resumed":
+            raise RuntimeError("resume did not acquire the runner lease")
         timeline.append("resuming")
         seen_recovery = set()
         final_status = None
@@ -307,7 +342,7 @@ def main(argv=None) -> int:
                 "ACK is claimed."
             ),
         }
-        text = json.dumps(payload, indent=2, ensure_ascii=False) + "\n"
+        text = json.dumps(_sanitize(payload), indent=2, ensure_ascii=False) + "\n"
         print(text, end="")
         if args.json_out:
             args.json_out.parent.mkdir(parents=True, exist_ok=True)

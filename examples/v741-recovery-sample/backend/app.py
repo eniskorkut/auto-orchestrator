@@ -1,32 +1,27 @@
-"""In-memory task manager backend (Python 3.11, standard library only).
+#!/usr/bin/env python3.11
+"""In-memory task manager backend.
 
-Implements the API described in CONTRACT.md:
-
-    GET   /api/tasks
-    POST  /api/tasks
-    PATCH /api/tasks/<id>
-
-and serves the static files of the sibling ``frontend/`` directory.
+Implements the API described in CONTRACT.md using only the Python 3.11
+standard library. Tasks live in memory for the lifetime of the process.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import re
+import sys
 import threading
-from http import HTTPStatus
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
-MAX_TITLE_LENGTH = 80
-MAX_BODY_BYTES = 1 << 20  # 1 MiB
+TITLE_MAX_LENGTH = 80
+MAX_BODY_BYTES = 64 * 1024
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_FRONTEND_DIR = REPO_ROOT / "frontend"
+FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 
-# Only these paths are served, which also rules out path traversal.
-STATIC_ROUTES = {
+STATIC_FILES = {
     "/": ("index.html", "text/html; charset=utf-8"),
     "/index.html": ("index.html", "text/html; charset=utf-8"),
     "/app.js": ("app.js", "text/javascript; charset=utf-8"),
@@ -34,48 +29,47 @@ STATIC_ROUTES = {
     "/config.js": ("config.js", "text/javascript; charset=utf-8"),
 }
 
+TASK_PATH = re.compile(r"^/api/tasks/([1-9][0-9]*)$")
+
 
 class ValidationError(ValueError):
-    """Raised when a request payload does not satisfy the contract."""
+    """Raised when a request body does not match the contract."""
 
 
-def parse_title(payload: object) -> str:
-    """Return the trimmed title or raise ``ValidationError``."""
-    if not isinstance(payload, dict):
-        raise ValidationError("body must be a JSON object")
+class RequestError(Exception):
+    """A request-level error that maps to a JSON error response."""
 
-    title = payload.get("title")
-    if not isinstance(title, str):
-        raise ValidationError("title is required and must be a string")
+    def __init__(self, message: str, status: int = 400) -> None:
+        super().__init__(message)
+        self.message = message
+        self.status = status
 
-    title = title.strip()
+
+def validate_title(raw: object) -> str:
+    """Trim and validate a task title.
+
+    Valid titles have 1..TITLE_MAX_LENGTH non-whitespace characters after
+    trimming surrounding whitespace.
+    """
+    if not isinstance(raw, str):
+        raise ValidationError("title must be a string")
+    title = raw.strip()
     if not title:
         raise ValidationError("title must not be empty")
-    if len(title) > MAX_TITLE_LENGTH:
+    if len(title) > TITLE_MAX_LENGTH:
         raise ValidationError(
-            f"title must be at most {MAX_TITLE_LENGTH} characters"
+            f"title must be at most {TITLE_MAX_LENGTH} characters"
         )
     return title
 
 
-def parse_done(payload: object) -> bool:
-    """Return the ``done`` flag or raise ``ValidationError``."""
-    if not isinstance(payload, dict):
-        raise ValidationError("body must be a JSON object")
-
-    done = payload.get("done")
-    if not isinstance(done, bool):
-        raise ValidationError("done is required and must be a boolean")
-    return done
-
-
 class TaskStore:
-    """Thread-safe in-memory task store."""
+    """Thread-safe in-memory task collection."""
 
     def __init__(self) -> None:
+        self._lock = threading.Lock()
         self._tasks: list[dict[str, object]] = []
         self._next_id = 1
-        self._lock = threading.Lock()
 
     def list_tasks(self) -> list[dict[str, object]]:
         with self._lock:
@@ -83,7 +77,11 @@ class TaskStore:
 
     def create_task(self, title: str) -> dict[str, object]:
         with self._lock:
-            task = {"id": self._next_id, "title": title, "done": False}
+            task: dict[str, object] = {
+                "id": self._next_id,
+                "title": title,
+                "done": False,
+            }
             self._next_id += 1
             self._tasks.append(task)
             return dict(task)
@@ -97,168 +95,151 @@ class TaskStore:
         return None
 
 
-def make_handler(
-    store: TaskStore, frontend_dir: Path = DEFAULT_FRONTEND_DIR
-) -> type[BaseHTTPRequestHandler]:
-    """Build a request handler class bound to a store and frontend directory."""
+class TaskRequestHandler(BaseHTTPRequestHandler):
+    """HTTP handler for the task API and the static frontend."""
 
-    class TaskRequestHandler(BaseHTTPRequestHandler):
-        server_version = "TeamworkTasks/1.0"
-        sys_version = ""
-        protocol_version = "HTTP/1.1"
+    server_version = "TaskAPI/1.0"
+    sys_version = ""
 
-        # -- helpers ---------------------------------------------------
+    @property
+    def store(self) -> TaskStore:
+        return self.server.store  # type: ignore[attr-defined]
 
-        def _send_json(self, status: HTTPStatus, payload: object) -> None:
-            body = json.dumps(payload).encode("utf-8")
-            self.send_response(status)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-store")
-            self.end_headers()
-            if self.command != "HEAD":
-                self.wfile.write(body)
+    # -- response helpers -------------------------------------------------
 
-        def _send_error_json(self, status: HTTPStatus, message: str) -> None:
-            self._send_json(status, {"error": message})
+    def _send_bytes(self, status: int, body: bytes, content_type: str) -> None:
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
 
-        def _read_json_body(self) -> object:
-            raw_length = self.headers.get("Content-Length")
-            if raw_length is None:
-                raise ValidationError("request body required")
-            try:
-                length = int(raw_length)
-            except ValueError as exc:
-                raise ValidationError("invalid Content-Length") from exc
-            if length < 0 or length > MAX_BODY_BYTES:
-                self.close_connection = True
-                raise ValidationError("request body too large")
-            if length == 0:
-                raise ValidationError("request body required")
+    def _send_json(self, status: int, payload: object) -> None:
+        body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        self._send_bytes(status, body, "application/json; charset=utf-8")
 
-            raw = self.rfile.read(length)
-            try:
-                return json.loads(raw.decode("utf-8"))
-            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-                raise ValidationError("body must be valid JSON") from exc
+    def _send_error_json(self, status: int, message: str) -> None:
+        self._send_json(status, {"error": message})
 
-        def _serve_static(self, path: str) -> None:
-            route = STATIC_ROUTES.get(path)
-            if route is None:
-                self._send_error_json(HTTPStatus.NOT_FOUND, "not found")
-                return
+    def _read_json_object(self) -> dict[str, object]:
+        raw_length = self.headers.get("Content-Length")
+        try:
+            length = int(raw_length) if raw_length is not None else 0
+        except ValueError as exc:
+            raise RequestError("invalid Content-Length header") from exc
 
-            filename, content_type = route
-            try:
-                body = (frontend_dir / filename).read_bytes()
-            except OSError:
-                self._send_error_json(HTTPStatus.NOT_FOUND, "not found")
-                return
+        if length <= 0:
+            raise RequestError("request body must be a JSON object")
+        if length > MAX_BODY_BYTES:
+            raise RequestError("request body is too large", status=413)
 
-            self.send_response(HTTPStatus.OK)
-            self.send_header("Content-Type", content_type)
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-store")
-            self.end_headers()
-            if self.command != "HEAD":
-                self.wfile.write(body)
+        raw = self.rfile.read(length)
+        try:
+            data = json.loads(raw)
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise RequestError("request body must be valid JSON") from exc
+        if not isinstance(data, dict):
+            raise RequestError("request body must be a JSON object")
+        return data
 
-        # -- verbs -----------------------------------------------------
+    # -- routing ----------------------------------------------------------
 
-        def do_GET(self) -> None:  # noqa: N802 - http.server API
-            path = urlsplit(self.path).path
-            if path == "/api/tasks":
-                self._send_json(HTTPStatus.OK, {"tasks": store.list_tasks()})
-                return
-            if path in STATIC_ROUTES:
-                self._serve_static(path)
-                return
-            self._send_error_json(HTTPStatus.NOT_FOUND, "not found")
+    def do_GET(self) -> None:
+        path = urlsplit(self.path).path
+        if path == "/api/tasks":
+            self._send_json(200, {"tasks": self.store.list_tasks()})
+            return
+        self._serve_static(path)
 
-        def do_HEAD(self) -> None:  # noqa: N802 - http.server API
-            self.do_GET()
+    def do_POST(self) -> None:
+        path = urlsplit(self.path).path
+        if path != "/api/tasks":
+            self._send_error_json(404, "not found")
+            return
+        try:
+            body = self._read_json_object()
+            title = validate_title(body.get("title"))
+        except (RequestError, ValidationError) as exc:
+            status = exc.status if isinstance(exc, RequestError) else 400
+            self._send_error_json(status, str(exc))
+            return
+        self._send_json(201, {"task": self.store.create_task(title)})
 
-        def do_POST(self) -> None:  # noqa: N802 - http.server API
-            path = urlsplit(self.path).path
-            if path != "/api/tasks":
-                # The body was not consumed; do not reuse this connection.
-                self.close_connection = True
-                self._send_error_json(HTTPStatus.NOT_FOUND, "not found")
-                return
-            try:
-                title = parse_title(self._read_json_body())
-            except ValidationError as exc:
-                self._send_error_json(HTTPStatus.BAD_REQUEST, str(exc))
-                return
-            self._send_json(HTTPStatus.CREATED, {"task": store.create_task(title)})
+    def do_PATCH(self) -> None:
+        path = urlsplit(self.path).path
+        match = TASK_PATH.match(path)
+        if match is None:
+            self._send_error_json(404, "not found")
+            return
+        try:
+            body = self._read_json_object()
+            done = body.get("done")
+            if not isinstance(done, bool):
+                raise ValidationError("done must be a boolean")
+        except (RequestError, ValidationError) as exc:
+            status = exc.status if isinstance(exc, RequestError) else 400
+            self._send_error_json(status, str(exc))
+            return
 
-        def do_PATCH(self) -> None:  # noqa: N802 - http.server API
-            path = urlsplit(self.path).path
-            prefix = "/api/tasks/"
-            if not path.startswith(prefix):
-                self.close_connection = True
-                self._send_error_json(HTTPStatus.NOT_FOUND, "not found")
-                return
+        task = self.store.set_done(int(match.group(1)), done)
+        if task is None:
+            self._send_error_json(404, "task not found")
+            return
+        self._send_json(200, {"task": task})
 
-            raw_id = path[len(prefix) :]
-            try:
-                task_id = int(raw_id)
-            except ValueError:
-                self.close_connection = True
-                self._send_error_json(HTTPStatus.NOT_FOUND, "not found")
-                return
+    # -- static frontend --------------------------------------------------
 
-            try:
-                done = parse_done(self._read_json_body())
-            except ValidationError as exc:
-                self._send_error_json(HTTPStatus.BAD_REQUEST, str(exc))
-                return
+    def _serve_static(self, path: str) -> None:
+        entry = STATIC_FILES.get(path)
+        if entry is None:
+            self._send_error_json(404, "not found")
+            return
+        filename, content_type = entry
+        try:
+            body = (FRONTEND_DIR / filename).read_bytes()
+        except OSError:
+            self._send_error_json(404, "not found")
+            return
+        self._send_bytes(200, body, content_type)
 
-            task = store.set_done(task_id, done)
-            if task is None:
-                self._send_error_json(HTTPStatus.NOT_FOUND, "task not found")
-                return
-            self._send_json(HTTPStatus.OK, {"task": task})
-
-        def log_message(self, format: str, *args: object) -> None:
-            # Keep stdout/stderr clean for --print-port consumers and tests.
-            pass
-
-    return TaskRequestHandler
+    # Keep test and CLI output clean; request logs are not part of the API.
+    def log_message(self, format: str, *args: object) -> None:  # noqa: A002
+        pass
 
 
-def make_server(
-    host: str = "127.0.0.1",
-    port: int = 0,
-    frontend_dir: Path = DEFAULT_FRONTEND_DIR,
-) -> ThreadingHTTPServer:
-    """Create a configured HTTP server (not yet serving)."""
-    server = ThreadingHTTPServer((host, port), make_handler(TaskStore(), frontend_dir))
-    server.daemon_threads = True
-    return server
+class TaskHTTPServer(ThreadingHTTPServer):
+    """Threaded HTTP server carrying its own in-memory task store."""
+
+    daemon_threads = True
+    allow_reuse_address = True
+
+    def __init__(
+        self,
+        server_address: tuple[str, int],
+        handler_class: type[BaseHTTPRequestHandler] = TaskRequestHandler,
+    ) -> None:
+        self.store = TaskStore()
+        super().__init__(server_address, handler_class)
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="In-memory task manager backend")
-    parser.add_argument("--host", default="127.0.0.1", help="bind host (default: %(default)s)")
-    parser.add_argument("--port", type=int, default=8000, help="bind port (default: %(default)s)")
-    parser.add_argument(
-        "--print-port",
-        action="store_true",
-        help="print the bound port to stdout once listening",
-    )
-    parser.add_argument(
-        "--frontend-dir",
-        type=Path,
-        default=DEFAULT_FRONTEND_DIR,
-        help="directory containing the static frontend files",
-    )
-    return parser
+def create_server(host: str = "127.0.0.1", port: int = 0) -> TaskHTTPServer:
+    """Create a server bound to ``host:port`` without serving yet."""
+    return TaskHTTPServer((host, port))
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
-    server = make_server(args.host, args.port, args.frontend_dir)
+    parser = argparse.ArgumentParser(description="In-memory task manager backend")
+    parser.add_argument("--host", default="127.0.0.1", help="bind address")
+    parser.add_argument("--port", type=int, default=8000, help="bind port (0 = ephemeral)")
+    parser.add_argument(
+        "--print-port",
+        action="store_true",
+        help="print the bound port before serving",
+    )
+    args = parser.parse_args(argv)
+
+    server = create_server(args.host, args.port)
     if args.print_port:
         print(server.server_address[1], flush=True)
     try:
@@ -271,4 +252,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    sys.exit(main())
