@@ -6,6 +6,7 @@ source contents, prompts, secrets, environment values or absolute paths.
 """
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -22,10 +23,67 @@ LANGUAGE_SUFFIX = {
     ".sql": "sql",
 }
 TEST_MARKERS = ("test_", "_test.", ".test.", ".spec.")
+MANIFEST_LIMIT = 131072
 
 
 class RepoProfileError(ValueError):
     pass
+
+
+def _manifest_text(path: Path) -> str:
+    try:
+        if path.is_symlink() or not path.is_file():
+            return ""
+        if path.stat().st_size > MANIFEST_LIMIT:
+            return ""
+        return path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
+def _detect_test_commands(root: Path, languages: dict, tests: int) -> list[dict]:
+    sources = []
+
+    def add(command, source, confidence="high"):
+        if command and all(item["command"] != command for item in sources):
+            sources.append({"command": command, "source": source,
+                            "confidence": confidence})
+
+    package = root / "package.json"
+    if package.is_file():
+        try:
+            data = json.loads(_manifest_text(package) or "{}")
+            scripts = data.get("scripts") if isinstance(data, dict) else None
+            if isinstance(scripts, dict) and isinstance(scripts.get("test"), str):
+                add("npm test", "package.json scripts.test")
+        except ValueError:
+            pass
+    pyproject = _manifest_text(root / "pyproject.toml").lower()
+    if pyproject:
+        if "pytest" in pyproject or "[tool.pytest" in pyproject:
+            add("python3.11 -m pytest -q", "pyproject.toml pytest configuration")
+        elif tests:
+            add("python3.11 -m unittest discover -s tests -q",
+                "Python tests detected", "medium")
+    if (root / "pytest.ini").is_file() or (root / "tox.ini").is_file():
+        add("python3.11 -m pytest -q", "pytest configuration file")
+    if (root / "Cargo.toml").is_file():
+        add("cargo test", "Cargo.toml")
+    if (root / "go.mod").is_file():
+        add("go test ./...", "go.mod")
+    if (root / "pom.xml").is_file():
+        add("mvn test", "pom.xml")
+    if (root / "build.gradle").is_file() or (root / "build.gradle.kts").is_file():
+        add("./gradlew test", "Gradle build")
+    makefile = _manifest_text(root / "Makefile")
+    if "\ntest:" in "\n" + makefile:
+        add("make test", "Makefile test target")
+    if not sources and tests and "python" in languages:
+        add("python3.11 -m unittest discover -s tests -q",
+            "Python tests detected", "medium")
+    if not sources and tests and ("javascript" in languages or "typescript" in languages):
+        add("npm test", "JavaScript/TypeScript tests detected", "low")
+    return sources
 
 
 def profile_repository(root: Path, *, max_files: int = MAX_FILES) -> dict:
@@ -78,11 +136,8 @@ def profile_repository(root: Path, *, max_files: int = MAX_FILES) -> dict:
                 has_agents = True
         if truncated:
             break
-    test_commands = []
-    if tests:
-        test_commands.append("python3.11 -m unittest discover -s tests -q")
-    if "javascript" in languages or "typescript" in languages:
-        test_commands.append("npm test -- --runInBand")
+    test_sources = _detect_test_commands(root, languages, tests)
+    test_commands = [item["command"] for item in test_sources]
     return {
         "version": 1,
         "files": min(files, max_files),
@@ -96,6 +151,7 @@ def profile_repository(root: Path, *, max_files: int = MAX_FILES) -> dict:
         "has_manifest": has_manifest,
         "has_agents_md": has_agents,
         "test_commands": test_commands[:4],
+        "test_command_sources": test_sources[:4],
         "limits": [
             "Counts are bounded; hidden/build/vendor directories are skipped.",
             "No source, prompt, secret or absolute path is included.",

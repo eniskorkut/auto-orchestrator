@@ -31,6 +31,30 @@ class RepoProfileTests(unittest.TestCase):
             self.assertNotIn(str(root), serialized)
             self.assertIn("python3.11 -m unittest", profile["test_commands"][0])
 
+    def test_manifest_specific_test_commands_are_detected(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "package.json").write_text(
+                '{"scripts": {"test": "node --test"}}\n', encoding="utf-8")
+            (root / "src").mkdir()
+            (root / "src" / "app.js").write_text("x", encoding="utf-8")
+            (root / "tests").mkdir()
+            (root / "tests" / "app.test.js").write_text("x", encoding="utf-8")
+            profile = profile_repository(root)
+            self.assertEqual(profile["test_commands"][0], "npm test")
+            self.assertEqual(profile["test_command_sources"][0]["source"],
+                             "package.json scripts.test")
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "pyproject.toml").write_text(
+                "[tool.pytest.ini_options]\naddopts = '-q'\n", encoding="utf-8")
+            (root / "tests").mkdir()
+            (root / "tests" / "test_app.py").write_text("x", encoding="utf-8")
+            profile = profile_repository(root)
+            self.assertEqual(profile["test_commands"][0],
+                             "python3.11 -m pytest -q")
+
     def test_bounds_and_errors(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

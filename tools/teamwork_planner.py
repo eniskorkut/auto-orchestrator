@@ -157,9 +157,15 @@ def assess_complexity(request, *, repo_profile=None, requested_mode=None):
     score += min(12, len(languages) * 2)
     score = min(100, score)
     confidence = "high" if profile and files > 0 else "low"
+    safety_upgrade = False
     if requested_mode in ("fast", "balanced", "rigorous"):
         mode = requested_mode
         reason = "explicit user mode"
+        if requested_mode == "fast" and (security or migration or breaking):
+            mode = "balanced" if score < 50 else "rigorous"
+            safety_upgrade = True
+            reason = ("safety upgrade: FAST is not allowed for security, "
+                      "migration or breaking-change work")
     elif score >= 50:
         mode = "rigorous"
         reason = "high risk/complexity score"
@@ -177,6 +183,7 @@ def assess_complexity(request, *, repo_profile=None, requested_mode=None):
         "confidence": confidence,
         "reason": reason,
         "factors": factors,
+        "safety_upgrade": safety_upgrade,
         "fallback_policy": "BALANCED when repository facts are missing",
     }
 
@@ -613,6 +620,21 @@ def plan_request(request, *, run_id, project_id=None, max_parallel=3,
             milestones, tasks = _full_plan(selected, text, model)
     else:  # explicit auto must have resolved to a concrete mode
         milestones, tasks = _balanced_plan(selected, text, model)
+    detected_command = None
+    command_source = None
+    if isinstance(repo_profile, dict):
+        sources = repo_profile.get("test_command_sources")
+        if isinstance(sources, list) and sources and isinstance(sources[0], dict):
+            candidate = sources[0].get("command")
+            if isinstance(candidate, str) and candidate.strip() and len(candidate) <= 500:
+                detected_command = candidate.strip()
+                command_source = sources[0].get("source")
+    if detected_command:
+        for task in tasks:
+            task["verify_commands"] = [
+                detected_command if command == TEST_COMMAND else command
+                for command in task.get("verify_commands", [])
+            ]
     used_layers = sorted({
         task["department"] for task in tasks
         if task["department"] in ("backend", "frontend")
@@ -622,7 +644,9 @@ def plan_request(request, *, run_id, project_id=None, max_parallel=3,
         + (", ".join(path + "/" for path in used_layers) if used_layers
            else "src/")
         + " and tests/.",
-        "Replace the template test command with the repository's real command.",
+        ("Confirm the detected test command: " + detected_command
+         if detected_command else
+         "Replace the template test command with the repository's real command."),
     ]
     if any(task["write_scope"] for task in tasks):
         repo_inputs.append("Confirm the package manager and build commands.")
@@ -634,6 +658,25 @@ def plan_request(request, *, run_id, project_id=None, max_parallel=3,
         "pattern": selected,
         "work_mode": chosen_mode or "legacy",
         "risk_assessment": assessment,
+        "test_command": detected_command or TEST_COMMAND,
+        "test_command_source": command_source or "planner default",
+        "verification_budget": {
+            "mode": chosen_mode or "legacy",
+            "risk_score": assessment.get("score") if assessment else None,
+            "max_parallel": max_parallel,
+            "repair_policy": (
+                "bounded by milestone max_repair"
+                if chosen_mode in ("fast", "balanced", "rigorous")
+                else "legacy milestone policy"
+            ),
+            "review_depth": {
+                "fast": "targeted",
+                "balanced": "risk-based",
+                "rigorous": "full",
+            }.get(chosen_mode, "legacy"),
+            "token_budget": None,
+            "note": "Token/cost budget is not fabricated; provider usage is measured at run time.",
+        },
         "request": _request_text(request),
         "repo_profile": {
             key: repo_profile.get(key) for key in

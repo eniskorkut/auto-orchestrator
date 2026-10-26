@@ -90,6 +90,42 @@ class AdaptivePlannerTests(unittest.TestCase):
         with self.assertRaises(TeamworkPlannerError):
             self._plan("turbo")
 
+    def test_fast_is_safety_upgraded_for_critical_risk(self):
+        plan = plan_request(
+            "Add an auth migration with a breaking API change",
+            run_id="safety", model="test-model", mode="fast",
+            repo_profile={"files": 500, "modules": 12, "tests": 50,
+                          "backend": True, "frontend": True},
+        )
+        self.assertEqual(plan["work_mode"], "rigorous")
+        self.assertTrue(plan["risk_assessment"]["safety_upgrade"])
+        self.assertEqual(plan["verification_budget"]["review_depth"], "full")
+
+    def test_detected_test_command_replaces_planner_default(self):
+        plan = plan_request(
+            "Build the backend", run_id="command", model="test-model",
+            mode="balanced",
+            repo_profile={
+                "files": 10, "modules": 2, "tests": 3,
+                "backend": True, "languages": ["python"],
+                "test_commands": ["python3.11 -m pytest -q"],
+                "test_command_sources": [{
+                    "command": "python3.11 -m pytest -q",
+                    "source": "pyproject.toml pytest configuration",
+                }],
+            },
+        )
+        self.assertEqual(plan["test_command"], "python3.11 -m pytest -q")
+        self.assertEqual(plan["test_command_source"],
+                         "pyproject.toml pytest configuration")
+        self.assertTrue(all(
+            "python3.11 -m pytest -q" in task["verify_commands"]
+            for task in plan["tasks"]
+            if task["role"] == "tester"
+        ))
+        self.assertEqual(plan["verification_budget"]["mode"], "balanced")
+        self.assertIsNone(plan["verification_budget"]["token_budget"])
+
 
 class PlannerTests(unittest.TestCase):
     def test_full_deterministic_plan_has_m1_to_m5(self):
