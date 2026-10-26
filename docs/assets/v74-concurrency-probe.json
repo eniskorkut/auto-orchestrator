@@ -1,0 +1,55 @@
+{
+  "schema_version": 2,
+  "kind": "live-opencode-managed-concurrency",
+  "model": "opencode-go/deepseek-v4.1-flash",
+  "opencode": "local CLI",
+  "sessions": [
+    {
+      "task_id": "probe-frontend",
+      "status": "completed",
+      "session_hash": "cbcfc0d51742",
+      "tool_count": 1,
+      "cost": 0.001776858,
+      "tokens": {
+        "input": 11655,
+        "output": 40,
+        "reasoning": 0,
+        "cache_read": 1536,
+        "cache_write": 0,
+        "cache": {
+          "read": 1536,
+          "write": 0
+        }
+      }
+    },
+    {
+      "task_id": "probe-backend",
+      "status": "completed",
+      "session_hash": "df0bd2209454",
+      "tool_count": 1,
+      "cost": 0.001814058,
+      "tokens": {
+        "input": 11655,
+        "output": 40,
+        "reasoning": 62,
+        "cache_read": 1536,
+        "cache_write": 0,
+        "cache": {
+          "read": 1536,
+          "write": 0
+        }
+      }
+    }
+  ],
+  "wall_time_seconds": 8.653,
+  "expected_serial_seconds": 10.0,
+  "metrics": {
+    "agent_span_union_seconds": 8.652,
+    "concurrent_overlap_seconds": 8.412,
+    "max_concurrent_agents": 2,
+    "average_concurrency": 1.972,
+    "agent_seconds": 17.064
+  },
+  "verified": true,
+  "note": "Real local OpenCode sessions; intervals use the same process wall clock (epoch); monotonic time is used for wall duration. Provider timestamps are not compared across hosts."
+}

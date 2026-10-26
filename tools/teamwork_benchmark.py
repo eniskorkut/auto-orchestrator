@@ -19,6 +19,7 @@ import sys
 from pathlib import Path
 
 MAX_INTERVALS = 200
+SCHEMA_VERSION = 2
 
 
 class BenchmarkError(ValueError):
@@ -38,6 +39,12 @@ def _integer(value, field: str, *, minimum: int = 0) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
         raise BenchmarkError(f"{field} must be an integer >= {minimum}")
     return value
+
+
+def _optional_metric(value, field: str):
+    if value is None:
+        return None
+    return _number(value, field)
 
 
 def _text(value, field: str, limit: int = 200) -> str:
@@ -67,6 +74,21 @@ def normalize_run(value: dict) -> dict:
             "agent": _text(interval.get("agent", "agent"), f"agent_intervals[{index}].agent", 80),
             "start": start, "end": end,
         })
+    task_graph = value.get("tasks", [])
+    if not isinstance(task_graph, list) or len(task_graph) > 500:
+        raise BenchmarkError("tasks must be a bounded array")
+    normalized_tasks = []
+    for index, item in enumerate(task_graph):
+        if not isinstance(item, dict):
+            raise BenchmarkError(f"tasks[{index}] must be an object")
+        task_id = _text(item.get("id"), f"tasks[{index}].id", 80)
+        deps = item.get("depends_on", [])
+        if not isinstance(deps, list) or any(not isinstance(d, str) for d in deps):
+            raise BenchmarkError(f"tasks[{index}].depends_on must be strings")
+        duration = _number(item.get("duration_seconds", 0),
+                           f"tasks[{index}].duration_seconds")
+        normalized_tasks.append({"id": task_id, "depends_on": deps,
+                                 "duration_seconds": duration})
     verified = value.get("verified")
     if not isinstance(verified, bool):
         raise BenchmarkError("verified must be a boolean")
@@ -82,37 +104,109 @@ def normalize_run(value: dict) -> dict:
         "tests_total": _integer(value.get("tests_total", 0), "tests_total"),
         "repairs": _integer(value.get("repairs", 0), "repairs"),
         "retries": _integer(value.get("retries", 0), "retries"),
-        "cost_usd": _number(value.get("cost_usd", 0), "cost_usd"),
+        "cost_usd": (_number(value.get("cost_usd"), "cost_usd")
+                     if value.get("cost_usd") is not None else None),
+        "cost_measured": value.get("cost_usd") is not None,
         "agent_intervals": normalized_intervals,
+        "critical_path_seconds": _optional_metric(
+            value.get("critical_path_seconds"), "critical_path_seconds"),
+        "scheduler_idle_seconds": _optional_metric(
+            value.get("scheduler_idle_seconds"), "scheduler_idle_seconds"),
+        "dispatch_latency_ms": _optional_metric(
+            value.get("dispatch_latency_ms"), "dispatch_latency_ms"),
+        "verification_overhead_seconds": _optional_metric(
+            value.get("verification_overhead_seconds"), "verification_overhead_seconds"),
+        "repair_overhead_seconds": _optional_metric(
+            value.get("repair_overhead_seconds"), "repair_overhead_seconds"),
         "model": _text(value.get("model", "unknown"), "model", 120),
         "hardware": _text(value.get("hardware", "unrecorded"), "hardware", 200),
         "cache": _text(value.get("cache", "unrecorded"), "cache", 120),
         "acceptance": [_text(item, "acceptance", 300)
                        for item in value.get("acceptance", [])][:50],
+        "tasks": normalized_tasks,
     }
 
 
 def overlap_seconds(intervals: list[dict]) -> float:
-    """Observed union length of agent intervals, not a sum of double-counted overlap."""
+    """Observed union length of agent intervals (legacy name).
+
+    This is *not* concurrent overlap: it counts every instant at least one agent
+    was active. Use :func:`concurrency_metrics` for true overlap.
+    """
+    return concurrency_metrics(intervals)["agent_span_union_seconds"]
+
+
+def concurrency_metrics(intervals: list[dict]) -> dict:
     if not intervals:
-        return 0.0
-    spans = sorted((item["start"], item["end"]) for item in intervals)
-    total = 0.0
-    current_start, current_end = spans[0]
-    for start, end in spans[1:]:
-        if start <= current_end:
-            current_end = max(current_end, end)
-        else:
-            total += current_end - current_start
-            current_start, current_end = start, end
-    return round(total + current_end - current_start, 3)
+        return {
+            "agent_span_union_seconds": 0.0,
+            "concurrent_overlap_seconds": 0.0,
+            "max_concurrent_agents": 0,
+            "average_concurrency": 0.0,
+            "agent_seconds": 0.0,
+        }
+    events = []
+    for item in intervals:
+        events.append((item["start"], 1))
+        events.append((item["end"], -1))
+    # End events sort before start events at the same instant: touching
+    # intervals are not concurrent overlap.
+    events.sort(key=lambda pair: (pair[0], pair[1]))
+    active = 0
+    overlap = 0.0
+    union = 0.0
+    last = events[0][0]
+    max_active = 0
+    for timestamp, delta in events:
+        width = timestamp - last
+        if width > 0 and active >= 1:
+            union += width
+        if width > 0 and active >= 2:
+            overlap += width
+        active += delta
+        max_active = max(max_active, active)
+        last = timestamp
+    agent_seconds = sum(item["end"] - item["start"] for item in intervals)
+    return {
+        "agent_span_union_seconds": round(union, 3),
+        "concurrent_overlap_seconds": round(overlap, 3),
+        "max_concurrent_agents": max_active,
+        "average_concurrency": round(agent_seconds / union, 3) if union > 0 else 0.0,
+        "agent_seconds": round(agent_seconds, 3),
+    }
+
+
+def critical_path_seconds(tasks: list[dict]) -> float | None:
+    if not tasks:
+        return None
+    by_id = {task["id"]: task for task in tasks}
+    if len(by_id) != len(tasks):
+        raise BenchmarkError("task ids must be unique")
+    memo = {}
+    visiting = set()
+
+    def visit(task_id):
+        if task_id in memo:
+            return memo[task_id]
+        if task_id in visiting:
+            raise BenchmarkError("task graph contains a cycle")
+        if task_id not in by_id:
+            raise BenchmarkError("task dependency is unknown")
+        visiting.add(task_id)
+        dependency_max = max((visit(dep) for dep in by_id[task_id]["depends_on"]),
+                             default=0.0)
+        visiting.remove(task_id)
+        memo[task_id] = dependency_max + by_id[task_id]["duration_seconds"]
+        return memo[task_id]
+
+    return round(max(visit(task_id) for task_id in by_id), 3)
 
 
 def compare(serial: dict, parallel: dict) -> dict:
     left = normalize_run(serial)
     right = normalize_run(parallel)
-    serial_overlap = overlap_seconds(left["agent_intervals"])
-    parallel_overlap = overlap_seconds(right["agent_intervals"])
+    serial_conc = concurrency_metrics(left["agent_intervals"])
+    parallel_conc = concurrency_metrics(right["agent_intervals"])
     comparable = (
         left["verified"] and right["verified"]
         and left["total_tasks"] == right["total_tasks"]
@@ -131,13 +225,22 @@ def compare(serial: dict, parallel: dict) -> dict:
     else:
         improvement_reason = "wall time is missing or zero"
     return {
-        "version": 1,
+        "version": SCHEMA_VERSION,
+        "metrics_schema": {
+            "version": SCHEMA_VERSION,
+            "agent_span_union_seconds": "union of all agent-active instants",
+            "concurrent_overlap_seconds": "seconds with at least two agents active",
+            "max_concurrent_agents": "observed peak concurrency",
+            "average_concurrency": "agent-seconds divided by union span",
+        },
         "serial": left,
         "parallel": right,
         "observed": {
-            "serial_agent_span_seconds": serial_overlap,
-            "parallel_agent_span_seconds": parallel_overlap,
-            "parallel_minus_serial_span_seconds": round(parallel_overlap - serial_overlap, 3),
+            "serial": serial_conc,
+            "parallel": parallel_conc,
+            "parallel_minus_serial_span_seconds": round(
+                parallel_conc["agent_span_union_seconds"]
+                - serial_conc["agent_span_union_seconds"], 3),
         },
         "measured_wall_time": {
             "serial_seconds": left["wall_time_seconds"],
@@ -153,7 +256,15 @@ def compare(serial: dict, parallel: dict) -> dict:
         "cost": {
             "serial_usd": left["cost_usd"],
             "parallel_usd": right["cost_usd"],
-            "difference_usd": round(left["cost_usd"] - right["cost_usd"], 6),
+            "difference_usd": (round(left["cost_usd"] - right["cost_usd"], 6)
+                               if left["cost_usd"] is not None
+                               and right["cost_usd"] is not None else None),
+            "measured": bool(left["cost_measured"] and right["cost_measured"]),
+        },
+        "critical_path": {
+            "serial_seconds": critical_path_seconds(left["tasks"]),
+            "parallel_seconds": critical_path_seconds(right["tasks"]),
+            "source": "declared task DAG and measured durations; null when omitted",
         },
         "quality": {
             "serial_verified_tasks": left["verified_tasks"],
@@ -188,6 +299,8 @@ def main(argv=None) -> int:
     else:
         print(f"Serial: {result['serial']['wall_time_seconds']}s, "
               f"parallel: {result['parallel']['wall_time_seconds']}s")
+        print(f"Concurrent overlap: serial={result['observed']['serial']['concurrent_overlap_seconds']}s, "
+              f"parallel={result['observed']['parallel']['concurrent_overlap_seconds']}s")
         print(f"Verified improvement: {result['verified_improvement']}")
     return 0
 
