@@ -1875,7 +1875,7 @@ class CodexAdapter(_ManagedAdapter):
                         "write": run.tokens["cache_write"],
                     },
                 },
-                "cost": round(run.cost, 9),
+                "cost": None,
                 "unknown_notifications": (
                     run.rpc.unknown_count() if run.rpc is not None else 0
                 ),

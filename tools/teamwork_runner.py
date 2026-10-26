@@ -104,7 +104,7 @@ class TaskRun:
     events_path: str | None = None
     tool_count: int = 0
     tokens: dict = field(default_factory=dict)
-    cost: float = 0.0
+    cost: float | None = 0.0
     text: str = ""
     errors: list = field(default_factory=list)
     process_pid: int | None = None
@@ -591,7 +591,8 @@ class TeamworkRunner:
         run.events_path = state.get("events_path") or run.events_path
         run.tool_count = int(state.get("tool_count") or 0)
         run.tokens = dict(state.get("tokens") or {})
-        run.cost = float(state.get("cost") or 0)
+        cost = state.get("cost")
+        run.cost = float(cost) if isinstance(cost, (int, float)) else None
         run.text = str(state.get("text") or "")[-MAX_TEXT:]
         run.errors = list(state.get("errors") or [])
         return state
