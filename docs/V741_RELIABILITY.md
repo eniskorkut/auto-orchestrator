@@ -203,7 +203,7 @@ Screenshots (demo data, clearly labelled):
 | Platform | Status in V7.4.1 |
 |---|---|
 | OpenCode | Managed execution live-verified locally; single-chat bridge; owner-verified recovery; local cancel only |
-| Codex | Managed adapter contract-tested only; binary not installed in this environment; no live claim |
+| Codex | V7.4.1 scope: managed adapter contract-tested only, binary absent. V7.5 branch later removes this limitation with a live Codex 0.164.0 smoke. |
 | Antigravity | No managed runner; not implemented |
 | Cursor | No managed runner; not implemented |
 | Native observation | Unchanged capability matrix; no new native cancel/resume/terminal claim |

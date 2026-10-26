@@ -104,7 +104,7 @@ class TaskRun:
     events_path: str | None = None
     tool_count: int = 0
     tokens: dict = field(default_factory=dict)
-    cost: float = 0.0
+    cost: float | None = 0.0
     text: str = ""
     errors: list = field(default_factory=list)
     process_pid: int | None = None
@@ -200,6 +200,30 @@ def default_browser_env(root: Path) -> dict:
     return env
 
 
+def adapter_options(task: dict, default_model, browser_env: dict):
+    """Validate provider options before they become a cache key."""
+    provider_value = task.get("provider") or "opencode"
+    if not isinstance(provider_value, str) or not provider_value.strip():
+        raise RunnerError("Task provider must be a non-empty string")
+    provider = provider_value.strip().lower()
+    sandbox = task.get("sandbox")
+    approval_policy = task.get("approval_policy")
+    if sandbox is not None and not isinstance(sandbox, str):
+        raise RunnerError("Task sandbox must be a string")
+    if approval_policy is not None and not isinstance(approval_policy, str):
+        raise RunnerError("Task approval_policy must be a string")
+    options = {"model": task.get("model") or default_model,
+               "env": browser_env}
+    if provider == "codex":
+        if sandbox is not None:
+            options["sandbox"] = sandbox
+        if approval_policy is not None:
+            options["approval_policy"] = approval_policy
+    cache_key = (provider, options.get("sandbox"),
+                 options.get("approval_policy"))
+    return provider, options, cache_key
+
+
 class TeamworkRunner:
     def __init__(
         self,
@@ -260,6 +284,12 @@ class TeamworkRunner:
         self._context_cache: dict[str, str] = {}
 
     def close(self) -> None:
+        for adapter in list(self.adapters.values()):
+            try:
+                adapter.close()
+            except (ManagedError, OSError, ValueError):
+                pass
+        self.adapters.clear()
         self._heartbeat_stop.set()
         if self._heartbeat_thread is not None:
             self._heartbeat_thread.join(timeout=2)
@@ -507,15 +537,15 @@ class TeamworkRunner:
     def _adapter(self, task: dict, run: TaskRun):
         if self.adapter is not None:
             return self.adapter
-        provider = task.get("provider") or "opencode"
-        cached = self.adapters.get(provider)
+        provider, options, cache_key = adapter_options(
+            task, self.model, self.browser_env)
+        cached = self.adapters.get(cache_key)
         if cached is not None:
             return cached
-        adapter = adapter_for(provider, self.root, model=task.get("model") or self.model,
-                              env=self.browser_env)
+        adapter = adapter_for(provider, self.root, **options)
         if not adapter.available():
             raise RunnerError(f"Managed provider is unavailable: {provider}")
-        self.adapters[provider] = adapter
+        self.adapters[cache_key] = adapter
         return adapter
 
     def _resume_session(self, task_id: str, attempt: int) -> str | None:
@@ -583,7 +613,8 @@ class TeamworkRunner:
         run.events_path = state.get("events_path") or run.events_path
         run.tool_count = int(state.get("tool_count") or 0)
         run.tokens = dict(state.get("tokens") or {})
-        run.cost = float(state.get("cost") or 0)
+        cost = state.get("cost")
+        run.cost = float(cost) if isinstance(cost, (int, float)) else None
         run.text = str(state.get("text") or "")[-MAX_TEXT:]
         run.errors = list(state.get("errors") or [])
         return state

@@ -142,7 +142,7 @@ def _finite_number(value, *, integer: bool = False):
         return 0 if integer else 0.0
     try:
         number = float(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return 0 if integer else 0.0
     if not math.isfinite(number) or number < 0:
         return 0 if integer else 0.0
@@ -1321,13 +1321,29 @@ class _JsonRpcConnection:
 
 
 class CodexAdapter(_ManagedAdapter):
-    """Contract-tested JSON-RPC adapter for ``codex app-server``.
+    """JSON-RPC adapter for ``codex app-server``.
 
-    The binary is not installed in the reference environment, so
-    :meth:`available` is false unless a real or fake executable is supplied.
+    The adapter is contract-tested with a fake server and has a local V7.5 live
+    smoke against Codex CLI 0.164.0. It still treats provider availability as
+    runtime state: :meth:`available` is false when the binary is absent.
     """
 
     provider = "codex"
+
+    def __init__(self, root: Path, *, sandbox: str | None = None,
+                 approval_policy: str = "never", **kwargs):
+        super().__init__(root, **kwargs)
+        if sandbox not in (None, "read-only", "workspace-write"):
+            raise ManagedError(
+                "Codex sandbox must be read-only or workspace-write; "
+                "danger-full-access is not accepted by Teamwork"
+            )
+        if approval_policy != "never":
+            raise ManagedError(
+                "Codex approval bridging is not implemented; only 'never' is accepted"
+            )
+        self.sandbox = sandbox
+        self.approval_policy = approval_policy
 
     def available(self) -> bool:
         return self._resolve_binary("codex") is not None
@@ -1337,7 +1353,7 @@ class CodexAdapter(_ManagedAdapter):
             "provider": self.provider,
             "managed_session": True,
             "event_stream": True,
-            "tool_activity": False,
+            "tool_activity": True,
             "completion": True,
             "resume": True,
             "native_cancel_ack": False,
@@ -1389,15 +1405,22 @@ class CodexAdapter(_ManagedAdapter):
             )
             run.rpc.notify("initialized", {})
             if resume:
+                resume_params = {"threadId": resume, "cwd": str(cwd)}
+                if self.sandbox is not None:
+                    resume_params["sandbox"] = self.sandbox
+                if self.approval_policy is not None:
+                    resume_params["approvalPolicy"] = self.approval_policy
                 result = run.rpc.request(
-                    "thread/resume",
-                    {"threadId": resume, "cwd": str(cwd)},
-                    timeout=START_TIMEOUT,
+                    "thread/resume", resume_params, timeout=START_TIMEOUT
                 )
             else:
                 params = {"cwd": str(cwd)}
                 if selected_model:
                     params["model"] = str(selected_model)
+                if self.sandbox is not None:
+                    params["sandbox"] = self.sandbox
+                if self.approval_policy is not None:
+                    params["approvalPolicy"] = self.approval_policy
                 result = run.rpc.request(
                     "thread/start", params, timeout=START_TIMEOUT
                 )
@@ -1576,6 +1599,27 @@ class CodexAdapter(_ManagedAdapter):
                     self._extract_error(params) or "provider returned an error",
                 )
                 record["status"] = "failed"
+            elif method == "thread/tokenUsage/updated":
+                usage = params.get("tokenUsage")
+                usage = usage if isinstance(usage, dict) else {}
+                total = usage.get("total")
+                total = total if isinstance(total, dict) else {}
+                values = {
+                    "input": _finite_number(total.get("inputTokens"), integer=True),
+                    "output": _finite_number(total.get("outputTokens"), integer=True),
+                    "reasoning": _finite_number(
+                        total.get("reasoningOutputTokens"), integer=True),
+                    "cache_read": _finite_number(
+                        total.get("cachedInputTokens"), integer=True),
+                    "cache_write": _finite_number(
+                        total.get("cacheWriteInputTokens"), integer=True),
+                }
+                if any(values.values()):
+                    run.tokens.update(values)
+                    run.tokens["total"] = _finite_number(
+                        total.get("totalTokens"), integer=True)
+                    record["token_usage"] = dict(run.tokens)
+                record["status"] = "observed"
             elif method in ("item/completed", "item/started", "turn/started"):
                 text = self._extract_text(params)
                 if text:
@@ -1588,6 +1632,25 @@ class CodexAdapter(_ManagedAdapter):
                             limit=MAX_TEXT,
                             prompt=run.redaction_prompt,
                         )
+                item = params.get("item") if isinstance(params.get("item"), dict) else {}
+                item_type = item.get("type")
+                if (method == "item/started"
+                        and item_type in ("commandExecution", "fileChange",
+                                          "mcpToolCall", "webSearch")):
+                    call_id = item.get("id")
+                    call_id = (_text(str(call_id), limit=80,
+                                     prompt=run.redaction_prompt, secrets=True)
+                               if call_id is not None else None)
+                    if (len(run.tools) < MAX_TOOLS
+                            and (call_id is None or all(
+                                tool.get("call_id") != call_id
+                                for tool in run.tools))):
+                        run.tools.append({
+                            "name": str(item_type)[:64],
+                            "tool": str(item_type)[:64],
+                            "status": "started",
+                            "call_id": call_id,
+                        })
                 record["status"] = "observed"
             elif method is not None:
                 self._warn(run, f"unknown notification: {method}")
@@ -1814,6 +1877,16 @@ class CodexAdapter(_ManagedAdapter):
                 "local_signal_only": False,
                 "text": run.text,
                 "final_text": run.text,
+                "tools": [dict(tool) for tool in run.tools],
+                "tool_count": len(run.tools),
+                "tokens": {
+                    **dict(run.tokens),
+                    _CACHE_KEY: {
+                        "read": run.tokens["cache_read"],
+                        "write": run.tokens["cache_write"],
+                    },
+                },
+                "cost": None,
                 "unknown_notifications": (
                     run.rpc.unknown_count() if run.rpc is not None else 0
                 ),

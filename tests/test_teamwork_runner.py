@@ -11,7 +11,13 @@ import unittest
 from pathlib import Path
 
 from tools.teamwork import TeamworkEngine, TeamworkError
-from tools.teamwork_runner import RunnerError, TeamworkRunner, parse_verdict, path_allowed
+from tools.teamwork_runner import (
+    RunnerError,
+    TeamworkRunner,
+    adapter_options,
+    parse_verdict,
+    path_allowed,
+)
 
 
 def git(root: Path, *args: str) -> str:
@@ -34,6 +40,9 @@ class FakeAdapter:
 
     def available(self):
         return True
+
+    def close(self):
+        return None
 
     def capabilities(self):
         return {"provider": "fake", "managed_session": True}
@@ -256,6 +265,22 @@ class RunnerGitRecoveryTests(unittest.TestCase):
 
 
 class RunnerHelpersTests(unittest.TestCase):
+    def test_codex_provider_options_are_normalized_and_validated(self):
+        provider, options, key = adapter_options({
+            "id": "codex", "provider": " Codex ",
+            "model": "gpt-6.1-sol", "sandbox": "read-only",
+            "approval_policy": "never",
+        }, "default", {})
+        self.assertEqual(provider, "codex")
+        self.assertEqual(options["sandbox"], "read-only")
+        self.assertEqual(options["approval_policy"], "never")
+        self.assertEqual(key, ("codex", "read-only", "never"))
+        with self.assertRaises(RunnerError):
+            adapter_options({"provider": "codex", "sandbox": []}, "default", {})
+        with self.assertRaises(RunnerError):
+            adapter_options({"provider": "codex", "approval_policy": {}},
+                            "default", {})
+
     def test_path_scope_and_verdict_parser(self):
         self.assertTrue(path_allowed("backend/app.py", ["backend/"]))
         self.assertFalse(path_allowed("frontend/app.js", ["backend/"]))

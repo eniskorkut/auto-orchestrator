@@ -70,7 +70,7 @@ as `managed_execution` by `python tools/capabilities.py show --json`.
 | Platform | Managed status | Live smoke | Cancel ACK | Resume | Terminal |
 |---|---|---|---|---|---|
 | OpenCode | `live-verified-local` (`opencode run --format json`); V7.4.1 owner-verified crash recovery | yes, local 2.1.1 | **false** (local process signal only) | yes (`--session`) | no |
-| Codex | `contract-only` (`codex app-server` JSON-RPC) | no binary locally | false | contract only | no |
+| Codex | `live-verified-local` (`codex app-server` JSON-RPC) | yes, local 0.164.0; `gpt-6.1-sol` | **false** (local interrupt, no ACK) | adapter supports `thread/resume`; live resume not smoked | no |
 | Antigravity | `not-implemented` | no | false | no | no |
 | Cursor | `not-implemented` | no | false | no | no |
 
@@ -78,10 +78,15 @@ The OpenCode adapter records session id, sanitized tool activity, usage/cost,
 resume and completion from the real CLI stream. V7.4.1 additionally records the
 child PID and process start token for recovery; only an identity-verified owned
 process may be signalled. It does **not** claim native cancellation
-acknowledgement, background-stop proof or a terminal. The Codex
-adapter is tested against a fake app-server only until a real binary is
-available. Antigravity and Cursor have no external managed-session integration
-in this version.
+acknowledgement, background-stop proof or a terminal.
+
+The Codex adapter now records live `thread/start`, `turn/start`, token usage,
+tool-item counts and `turn/completed` from a local Codex 0.164.0 app-server using
+the ChatGPT login. Native cancellation acknowledgement, IDE-native subagent
+status and a live resume claim remain unsupported. Evidence:
+`docs/assets/v75-codex-smoke.json` (V7.5 branch). Fake app-server tests remain as
+fast contract regressions; they are not the live evidence. Antigravity and
+Cursor have no external managed-session integration in this version.
 
 ## Platform evidence and limits
 
