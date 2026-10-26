@@ -25,6 +25,7 @@ import time
 from pathlib import Path
 
 try:
+    from tools.project_identity import ensure_project_identity
     from tools.repo_profile import RepoProfileError, profile_repository
     from tools.run_owner import (
         OwnershipError,
@@ -34,6 +35,8 @@ try:
         owner_alive,
         owner_record,
         project_lock,
+        project_writer_held,
+        project_writer_held,
         read_json,
         read_process_identity,
         read_recovery_state,
@@ -43,6 +46,7 @@ try:
     from tools.teamwork import TeamworkEngine, TeamworkError
     from tools.teamwork_planner import TeamworkPlannerError, plan_request
 except ModuleNotFoundError:  # python tools/teamwork_chat.py
+    from project_identity import ensure_project_identity  # type: ignore
     from repo_profile import RepoProfileError, profile_repository  # type: ignore
     from run_owner import (  # type: ignore
         OwnershipError,
@@ -52,6 +56,8 @@ except ModuleNotFoundError:  # python tools/teamwork_chat.py
         owner_alive,
         owner_record,
         project_lock,
+        project_writer_held,
+        project_writer_held,
         read_json,
         read_process_identity,
         read_recovery_state,
@@ -358,6 +364,11 @@ def start(args) -> dict:
     token = os.urandom(16).hex()
     with project_lock(root, timeout=10):
         active = _active(root)
+        if project_writer_held(root):
+            raise ChatError(
+                "another Teamwork writer is active for this project; "
+                "wait for it to finish or hand off the project"
+            )
         old_run_id = active.get("run_id")
         if _owner_process_alive(active) or (
                 isinstance(old_run_id, str) and lease_held(root, old_run_id)):
@@ -379,10 +390,12 @@ def start(args) -> dict:
         plan_path = _plan_path(root, run_id)
         if plan_path.exists():
             raise ChatError("run id already exists; choose another --run-id")
+        identity = ensure_project_identity(root)
         profile = profile_repository(root)
         try:
             plan = plan_request(request, run_id=run_id, model=model,
-                                mode=mode, repo_profile=profile)
+                                mode=mode, repo_profile=profile,
+                                project_id=identity["project_id"])
         except (TeamworkPlannerError, ValueError) as exc:
             raise ChatError(str(exc)) from exc
         plan_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -396,9 +409,12 @@ def start(args) -> dict:
         process = _spawn(root, log, plan_path, recover=False,
                          owner_token=token, model=model,
                          max_seconds=float(args.max_seconds))
+        plan["origin_platform"] = getattr(args, "origin_platform", "unknown")
+        _write_json(plan_path, plan)
         active = _new_active(root, run_id, plan["work_mode"], plan_path,
                              log, model, token, process,
                              recovery_state="active")
+        active["origin_platform"] = plan["origin_platform"]
         _write_json(_state_path(root), active)
         write_recovery_state(root, run_id, "active",
                              mode=plan["work_mode"],
@@ -444,6 +460,8 @@ def status(args) -> dict:
                               connected=connected)
     reported_status = state.get("status")
     cancel_path = _state_path(root, f"cancel-{run_id}.json")
+    pause_path = _state_path(root, f"pause-{run_id}.json")
+    paused = pause_path.exists() and reported_status not in ("passed", "failed", "cancelled")
     if cancel_path.exists() and reported_status != "passed" and not connected:
         reported_status = "cancelled"
         recovery["state"] = "cancelled"
@@ -453,8 +471,9 @@ def status(args) -> dict:
     return {
         "run_id": run_id,
         "mode": state.get("work_mode", active.get("mode")),
-        "status": reported_status,
+        "status": "paused" if paused else reported_status,
         "engine_status": state.get("status"),
+        "paused": paused,
         "verified_progress": state.get("verified_progress"),
         "estimated_progress": None,
         "current_milestone": current.get("id") if current else None,
@@ -566,6 +585,14 @@ def resume(args) -> dict:
         if not run_id:
             raise ChatError("no active teamwork run")
         run_id = _safe_run_id(run_id)
+        try:
+            _state_path(root, f"pause-{run_id}.json").unlink()
+        except FileNotFoundError:
+            pass
+        if project_writer_held(root):
+            return {"run_id": run_id, "status": "already_running",
+                    "owner_connected": True, "project_writer_held": True,
+                    "note": "another IDE holds the project writer lease; no duplicate writer"}
         runner_lease_held = lease_held(root, run_id)
         if _owner_process_alive(active) or runner_lease_held:
             return {"run_id": run_id, "status": "already_running",
@@ -592,6 +619,10 @@ def resume(args) -> dict:
                     "note": "successful or cancelled runs are not restarted"}
         try:
             _state_path(root, f"cancel-{run_id}.json").unlink()
+        except FileNotFoundError:
+            pass
+        try:
+            _state_path(root, f"pause-{run_id}.json").unlink()
         except FileNotFoundError:
             pass
         log = _state_path(root, f"{run_id}.resume.log")

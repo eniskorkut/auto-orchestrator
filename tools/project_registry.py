@@ -58,6 +58,19 @@ MAX_AGENTS = 64
 MAX_BINDINGS = 256
 
 PROJECT_ID = re.compile(r"^p_[0-9a-f]{16}$")
+
+
+def _manifest_project_id(root: Path) -> str | None:
+    """Read a portable project id without creating or mutating state."""
+    try:
+        path = Path(root) / ".auto-orchestrator" / "project.json"
+        if path.is_symlink() or not path.is_file() or path.stat().st_size > 16_384:
+            return None
+        value = json.loads(path.read_text(encoding="utf-8"))
+        candidate = value.get("project_id") if isinstance(value, dict) else None
+        return candidate if isinstance(candidate, str) and PROJECT_ID.fullmatch(candidate) else None
+    except (OSError, ValueError):
+        return None
 AGENT_ID = re.compile(r"^a_[0-9a-f]{12}$")
 NATIVE_HASH = re.compile(r"^[0-9a-f]{64}$")
 COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
@@ -228,8 +241,9 @@ def _validate_project(raw: dict, seen_ids: set[str],
     if any(_same_root(root, previous) for previous in seen_roots.values()):
         raise RegistryError("Duplicate canonical project root")
     seen_roots[key] = root
-    if project_id_for(root) != project_id:
-        raise RegistryError("Project id does not match the canonical root")
+    manifest_id = _manifest_project_id(root)
+    if project_id_for(root) != project_id and manifest_id != project_id:
+        raise RegistryError("Project id does not match the canonical root or portable manifest")
     if root.is_symlink():
         raise RegistryError("Project root must not be a symbolic link")
     if root.exists():
@@ -515,7 +529,17 @@ class ProjectRegistry:
                 return project, False
         if len(data["projects"]) >= MAX_PROJECTS:
             raise RegistryError("Registry has too many projects")
-        project_id = project_id_for(canonical)
+        manifest_id = _manifest_project_id(canonical)
+        project_id = manifest_id or project_id_for(canonical)
+        for existing in data["projects"]:
+            if existing["project_id"] == project_id and not _same_root(
+                    canonical, Path(existing["root"])):
+                # The portable manifest proves that this is the same logical
+                # project moved to a new working directory.
+                existing["root"] = str(canonical)
+                existing["updated_at"] = time.time() if now is None else _number(now, 0)
+                self.save(data)
+                return existing, False
         if any(project["project_id"] == project_id for project in data["projects"]):
             raise RegistryError("Project id collision for distinct roots")
         if theme not in THEMES:

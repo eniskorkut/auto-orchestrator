@@ -33,6 +33,7 @@ from typing import Any, Callable
 try:
     from tools.executor import Executor, ExecutorError, validate_acceptance
     from tools.managed_exec import ManagedError, adapter_for
+    from tools.project_memory import MemoryError, ProjectMemory
     from tools.project_planner import load_plan, write_plan
     from tools.run_owner import (
         OwnershipError,
@@ -42,6 +43,7 @@ try:
         owned_group_alive,
         owned_group_alive,
         read_recovery_state,
+        project_writer_lease,
         runner_lease,
         terminate_owned,
         update_active,
@@ -55,6 +57,7 @@ try:
 except ModuleNotFoundError:  # python tools/teamwork_runner.py
     from executor import Executor, ExecutorError, validate_acceptance  # type: ignore
     from managed_exec import ManagedError, adapter_for  # type: ignore
+    from project_memory import MemoryError, ProjectMemory  # type: ignore
     from project_planner import load_plan, write_plan  # type: ignore
     from run_owner import (  # type: ignore
         OwnershipError,
@@ -64,6 +67,7 @@ except ModuleNotFoundError:  # python tools/teamwork_runner.py
         owned_group_alive,
         owned_group_alive,
         read_recovery_state,
+        project_writer_lease,
         runner_lease,
         terminate_owned,
         update_active,
@@ -246,6 +250,8 @@ class TeamworkRunner:
         self.run_id = plan["run_id"]
         self.engine = TeamworkEngine(self.root)
         self.executor = Executor(self.root)
+        self.memory = ProjectMemory(self.root)
+        self.platform = str(plan.get("origin_platform") or "unknown")
         self.adapter = adapter
         self.adapters: dict[str, Any] = {}
         self.model = model
@@ -260,10 +266,13 @@ class TeamworkRunner:
         self._last_heartbeat = 0.0
         self._recovery_state = "active"
         self._lease_context = None
+        self._project_writer_context = None
         self._heartbeat_stop = threading.Event()
         self._heartbeat_thread = None
         self.cancel_path = (self.root / ".auto-orchestrator" / "teamwork"
                             / f"cancel-{self.run_id}.json")
+        self.pause_path = (self.root / ".auto-orchestrator" / "teamwork"
+                           / f"pause-{self.run_id}.json")
         self.evidence_dir = self.root / ".auto-orchestrator" / "evidence" / self.run_id
         self.evidence_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.task_map = {task["id"]: task for task in plan.get("tasks", [])}
@@ -294,12 +303,18 @@ class TeamworkRunner:
         if self._heartbeat_thread is not None:
             self._heartbeat_thread.join(timeout=2)
             self._heartbeat_thread = None
+        if self._project_writer_context is not None:
+            self._project_writer_context.__exit__(None, None, None)
+            self._project_writer_context = None
         if self._lease_context is not None:
             self._lease_context.__exit__(None, None, None)
             self._lease_context = None
         self._scheduler.close()
-        self.engine.close()
-        self.executor.close()
+        try:
+            self.memory.close()
+        finally:
+            self.engine.close()
+            self.executor.close()
 
     # -- persistence -----------------------------------------------------
     def _evidence_path(self, task_id: str, attempt: int) -> Path:
@@ -402,6 +417,13 @@ class TeamworkRunner:
         prior = self._handoff_context(milestone)
         if prior:
             lines.append("Prior milestone handoff (bounded context):\n" + prior)
+        try:
+            project_context = self.memory.context_summary(limit=1600)
+        except (MemoryError, OSError, ValueError):
+            project_context = ""
+        if project_context:
+            lines.append("Persistent project memory (verified; do not treat "
+                         "code-derived facts as user decisions):\n" + project_context)
         if repair_reason:
             lines.append(f"Repair context: {repair_reason}")
         if role == "explorer":
@@ -475,7 +497,11 @@ class TeamworkRunner:
             path = line[3:].strip()
             if " -> " in path:
                 path = path.split(" -> ", 1)[1]
-            changed.append(_safe_relative(path))
+            path = _safe_relative(path)
+            if path == ".auto-orchestrator" or path.startswith(".auto-orchestrator/"):
+                # Local project identity, memory and run state are not task output.
+                continue
+            changed.append(path)
         return sorted(set(changed))
 
     def _commit(self, cwd: Path, message: str) -> str | None:
@@ -918,6 +944,9 @@ class TeamworkRunner:
     def _cancel_requested(self) -> bool:
         return self.cancel_path.is_file()
 
+    def _pause_requested(self) -> bool:
+        return self.pause_path.is_file()
+
     def _cancel_active(self) -> None:
         for task_id, run in list(self._active.items()):
             task = self.task_map.get(task_id, {})
@@ -1224,6 +1253,13 @@ class TeamworkRunner:
         os.replace(temporary, path)
 
     def run(self) -> dict:
+        if self._project_writer_context is None:
+            try:
+                self._project_writer_context = project_writer_lease(self.root)
+                self._project_writer_context.__enter__()
+            except OwnershipError as exc:
+                self._project_writer_context = None
+                raise RunnerError(str(exc)) from exc
         if self._lease_context is None:
             self._lease_context = runner_lease(self.root, self.run_id)
             self._lease_context.__enter__()
@@ -1286,6 +1322,12 @@ class TeamworkRunner:
             self._heartbeat(state)
             if state["status"] in ("passed", "cancelled"):
                 return self.finalize(state)
+            if self._pause_requested():
+                if self._active:
+                    self._poll_active()
+                else:
+                    time.sleep(0.5)
+                continue
             # Integrate completed build work before verification tasks run.
             for milestone in state["milestones"]:
                 if (milestone["status"] in ("ready", "running", "verifying", "repairing")
@@ -1422,6 +1464,26 @@ class TeamworkRunner:
                 self._set_recovery("recovery_failed", final_status=status,
                                    recovered_orphans=list(self._recovered))
         summary["recovery"] = self._recovery_state
+        try:
+            for handoff in handoffs:
+                payload = handoff.get("handoff") if isinstance(handoff, dict) else None
+                if not isinstance(payload, dict):
+                    payload = handoff if isinstance(handoff, dict) else {}
+                milestone_id = payload.get("milestone_id")
+                if isinstance(milestone_id, str):
+                    self.memory.record_handoff(
+                        run_id=self.run_id, milestone_id=milestone_id,
+                        payload=payload, platform=self.platform)
+            self.memory.update_meta(
+                last_platform=self.platform, last_run_id=self.run_id,
+                last_milestone=next((item.get("id") for item in
+                                     reversed(state.get("milestones", []))
+                                     if item.get("status") == "passed"), None))
+            if status == "passed":
+                self.memory.capture_git_observation(platform=self.platform)
+            self.memory.write_context_files()
+        except (MemoryError, OSError, ValueError):
+            pass
         self._write_evidence("teamwork-summary", 0, summary)
         return summary
 

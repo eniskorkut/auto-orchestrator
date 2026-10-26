@@ -429,6 +429,71 @@ def lease_held(root, run_id: str) -> bool:
         return True
 
 
+def _project_writer_path(root) -> Path:
+    return teamwork_dir(root) / "project-writer.lock"
+
+
+@contextmanager
+def project_writer_lease(root, *, timeout: float = 0.0):
+    """Hold a project-level writer lease across all runs and IDEs."""
+    path = _project_writer_path(root)
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    resolved = str(path.resolve())
+    with _PROJECT_LOCKS_GUARD:
+        if resolved in _ACTIVE_LEASES:
+            raise OwnershipError("another IDE already owns the project writer lease")
+        _ACTIVE_LEASES.add(resolved)
+    thread_lock = _thread_lock(path)
+    if not thread_lock.acquire(timeout=max(0.0, float(timeout))):
+        with _PROJECT_LOCKS_GUARD:
+            _ACTIVE_LEASES.discard(resolved)
+        raise OwnershipError("another IDE already owns the project writer lease")
+    handle = None
+    acquired = False
+    try:
+        handle = open(path, "a+b")
+        handle.seek(0)
+        if handle.read(1) == b"":
+            handle.write(b"\0")
+            handle.flush()
+        deadline = time.monotonic() + max(0.0, float(timeout))
+        while True:
+            try:
+                _try_lock(handle)
+                acquired = True
+                break
+            except (OSError, ValueError):
+                if time.monotonic() >= deadline:
+                    raise OwnershipError(
+                        "another IDE already owns the project writer lease"
+                    )
+                time.sleep(0.05)
+        yield path
+    finally:
+        if handle is not None:
+            if acquired:
+                _unlock(handle)
+            handle.close()
+        thread_lock.release()
+        with _PROJECT_LOCKS_GUARD:
+            _ACTIVE_LEASES.discard(resolved)
+
+
+def project_writer_held(root) -> bool:
+    path = _project_writer_path(root)
+    resolved = str(path.resolve())
+    with _PROJECT_LOCKS_GUARD:
+        if resolved in _ACTIVE_LEASES:
+            return True
+    if not path.exists():
+        return False
+    try:
+        with project_writer_lease(root, timeout=0):
+            return False
+    except (OwnershipError, OSError, ValueError):
+        return True
+
+
 def owner_record(pid) -> dict | None:
     """Identity record for a newly started child, with short startup retries."""
     deadline = time.monotonic() + 5.0
