@@ -244,6 +244,11 @@ def resume(args) -> dict:
     if _pid_alive(active.get("pid")):
         return {"run_id": run_id, "status": "already_running",
                 "pid": active.get("pid")}
+    # A previous cancel request must not immediately cancel the resumed run.
+    try:
+        _state_path(root, f"cancel-{run_id}.json").unlink()
+    except FileNotFoundError:
+        pass
     log = _state_path(root, f"{run_id}.resume.log")
     cli = Path(__file__).with_name("teamwork_cli.py")
     command = [sys.executable, str(cli), "--root", str(root), "run",

@@ -45,6 +45,9 @@ class ChatBridgeTests(unittest.TestCase):
         path = self.root / ".auto-orchestrator" / "teamwork" / "active.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(self.active), encoding="utf-8")
+        plan_path = self.root / ".auto-orchestrator" / "plans" / "chat-test.json"
+        plan_path.parent.mkdir(parents=True, exist_ok=True)
+        plan_path.write_text(json.dumps(minimal_plan()), encoding="utf-8")
 
     def _args(self, command):
         return argparse.Namespace(root=str(self.root), run_id=None,
@@ -76,6 +79,28 @@ class ChatBridgeTests(unittest.TestCase):
                                   run_id="new", model="fake", max_seconds=10)
         with self.assertRaises(chat.ChatError):
             chat.start(args)
+
+    def test_resume_clears_a_stale_cancel_flag(self):
+        cancel = self.root / ".auto-orchestrator" / "teamwork" / "cancel-chat-test.json"
+        cancel.write_text("{}", encoding="utf-8")
+        calls = []
+        original = chat.subprocess.Popen
+
+        class FakeProcess:
+            pid = 12345
+
+        def fake_popen(command, **kwargs):
+            calls.append(command)
+            return FakeProcess()
+
+        chat.subprocess.Popen = fake_popen
+        try:
+            result = chat.resume(self._args("resume"))
+        finally:
+            chat.subprocess.Popen = original
+        self.assertEqual(result["status"], "resumed")
+        self.assertFalse(cancel.exists())
+        self.assertIn("--recover", calls[0])
 
     def test_command_file_uses_arguments_and_real_bridge(self):
         command = (Path(__file__).resolve().parents[1] / ".opencode" /
