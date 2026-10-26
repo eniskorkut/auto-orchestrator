@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "kind": "v76-memory-grill-e2e",
+  "cross_ide_grill": {
+    "codex_first_question": "auth_session",
+    "codex_second_question": "jwt_refresh",
+    "codex_ready": false,
+    "opencode_resumed_question": "jwt_refresh",
+    "opencode_ready_after_resume": true,
+    "opencode_approved": true,
+    "opencode_confirmed_decisions": 2,
+    "project_id_same": true
+  },
+  "assumption_guard": {
+    "question": "file_access",
+    "confirmed_decisions_before_answer": 0,
+    "teamwork_plan_created": false
+  },
+  "code_derived": {
+    "question": null,
+    "status": "ready",
+    "code_derived_decisions": 2
+  },
+  "normal_coding": {
+    "captured": true,
+    "observation_rows": 1,
+    "context_has_project_id": true
+  },
+  "concurrent_writer": {
+    "exit_code": 1,
+    "rejected": true,
+    "message": "UNIVERSAL TEAMWORK ERROR: another Teamwork writer is active for this project; wait for it to finish or hand off the project\n"
+  },
+  "relocation": {
+    "project_id_same": true,
+    "instance_id_changed": true,
+    "import_preview_conflicts": 0
+  }
+}

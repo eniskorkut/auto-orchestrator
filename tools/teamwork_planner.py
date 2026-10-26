@@ -574,7 +574,8 @@ def _balanced_plan(pattern, text, model):
 
 
 def plan_request(request, *, run_id, project_id=None, max_parallel=3,
-                 model=None, pattern=None, mode=None, repo_profile=None):
+                 model=None, pattern=None, mode=None, repo_profile=None,
+                 provider="opencode"):
     """Return a deterministic rich teamwork plan for ``request``."""
     try:
         run_id = identifier(run_id)
@@ -590,6 +591,8 @@ def plan_request(request, *, run_id, project_id=None, max_parallel=3,
             raise TeamworkPlannerError("model must be 1..200 characters")
         if any(ord(ch) < 32 for ch in model):
             raise TeamworkPlannerError("model must be a single-line value")
+    if provider not in ("opencode", "codex"):
+        raise TeamworkPlannerError("provider must be opencode or codex")
     if pattern is not None and pattern not in PATTERNS:
         raise TeamworkPlannerError("Unknown teamwork pattern")
     if mode is not None and mode not in WORK_MODES:
@@ -707,6 +710,13 @@ def plan_request(request, *, run_id, project_id=None, max_parallel=3,
         "milestones": milestones,
         "tasks": tasks,
     }
+    for task in tasks:
+        task["provider"] = provider
+        if provider == "codex":
+            # V7.5 verified Codex managed execution in read-only mode only.
+            # Do not imply that Codex write/approval bridging is available.
+            task.setdefault("sandbox", "read-only")
+            task.setdefault("approval_policy", "never")
     try:
         validate_teamwork_plan(plan)
     except ValueError as exc:  # Defensive: a template bug must not ship a bad plan.

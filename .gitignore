@@ -1,7 +1,8 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
-.auto-orchestrator/
+.auto-orchestrator/*
+!.auto-orchestrator/project.json
 *.bak
 node_modules/
 test-results/

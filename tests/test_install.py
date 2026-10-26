@@ -36,7 +36,10 @@ class InstallerTests(unittest.TestCase):
         p=self.dest/'.gitignore';p.write_text('.env\n')
         self.call('opencode')
         self.assertIn('.env',p.read_text())
-        self.assertIn('.auto-orchestrator/',p.read_text())
+        text = p.read_text()
+        self.assertIn('.auto-orchestrator/*', text)
+        self.assertIn('!.auto-orchestrator/project.json', text)
+        self.assertNotIn('\n.auto-orchestrator/\n', '\n' + text + '\n')
 
     def test_blocks_conflict_without_partial_install(self):
         p=self.dest/'.codex/config.toml';p.parent.mkdir();p.write_text('[myconfig]\nimportant=true\n')

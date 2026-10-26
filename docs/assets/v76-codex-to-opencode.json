@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "kind": "v76-codex-to-opencode-handoff",
+  "classification": "real Codex managed review + real OpenCode project-context load; not full authentication-feature development",
+  "codex_version": "0.164.0",
+  "model": "gpt-6.1-sol",
+  "codex_task": {
+    "role": "reviewer",
+    "sandbox": "read-only",
+    "approval_policy": "never",
+    "status": "passed",
+    "milestone": "M1",
+    "tokens": {
+      "input": 69682,
+      "output": 299,
+      "cache_read": 52608,
+      "total": 69981
+    },
+    "tool_count": null
+  },
+  "handoff": {
+    "created": true,
+    "last_platform": "codex",
+    "verified_handoff": true
+  },
+  "opencode_context": {
+    "exit_code": 0,
+    "same_project_id": true,
+    "last_platform": "codex"
+  },
+  "limitations": [
+    "The Codex task was a read-only README review, not the password-reset feature in the requested scenario.",
+    "No claim that Codex and OpenCode executed concurrently.",
+    "Native Codex cost was not reported."
+  ]
+}

@@ -2129,3 +2129,23 @@ body.inspector-open .office-stage { height: min(760px, calc(100vh - 180px)); }
 .inspector-recovery { margin-top: 8px; padding: 8px; border-left: 2px solid var(--warn); background: color-mix(in oklab, var(--warn) 6%, transparent); }
 .inspector-recovery strong { display: block; margin-bottom: 4px; font: 600 9px/1.2 var(--mono); text-transform: uppercase; letter-spacing: .06em; }
 .inspector-recovery p { margin: 0; color: var(--muted); font-size: 9px; }
+
+/* V7.6 — persistent project memory drawer */
+.project-memory { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--line); }
+.project-memory-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.project-memory-head strong { display: block; margin-top: 2px; font: 600 13px/1.2 var(--sans); }
+.memory-platform { color: var(--muted); font: 9px/1.2 var(--mono); }
+.memory-summary { max-height: 140px; overflow: auto; margin: 0 0 10px; padding: 8px; border: 1px solid var(--line); background: var(--panel-2); color: var(--muted); font: 9px/1.5 var(--mono); white-space: pre-wrap; }
+.memory-columns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.memory-columns > div { min-width: 0; }
+.memory-label { display: block; margin-bottom: 4px; color: var(--faint); font: 600 9px/1.2 var(--mono); text-transform: uppercase; letter-spacing: .06em; }
+.memory-columns ul { margin: 0; padding-left: 14px; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.memory-columns li { overflow-wrap: anywhere; }
+@media (max-width: 700px) { .memory-columns { grid-template-columns: 1fr; } }
+
+.memory-question { margin: 8px 0 10px; padding: 8px; border-left: 2px solid var(--accent); background: color-mix(in oklab, var(--accent) 6%, transparent); }
+.memory-question strong { display: block; margin: 3px 0 4px; font-size: 11px; }
+.memory-question ul { margin: 0; padding-left: 14px; color: var(--muted); font-size: 10px; line-height: 1.5; }
+
+.memory-handoff { margin: 8px 0 10px; padding: 8px; border: 1px solid var(--line); background: var(--panel-2); }
+.memory-handoff p { margin: 4px 0 0; color: var(--muted); font-size: 10px; line-height: 1.5; }

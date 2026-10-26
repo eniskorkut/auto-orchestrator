@@ -58,6 +58,7 @@
     officeSignature: '',
     officeToken: 0,
     milestones: null,
+    memory: null,
     milestoneError: null,
     milestoneToken: 0,
     lastMilestoneFetch: 0,
@@ -1604,6 +1605,12 @@
         throw new Error(t('errors.invalidResponse'));
       }
       state.milestones = response.data;
+      try {
+        const memoryResponse = await requestJSON(`/api/projects/${encodeURIComponent(projectId)}/memory`);
+        state.memory = memoryResponse.ok ? memoryResponse.data : null;
+      } catch {
+        state.memory = null;
+      }
       state.milestoneError = null;
       state.lastMilestoneFetch = Date.now() / 1000;
       if (state.milestoneFilter) {
@@ -1677,6 +1684,67 @@
         class: 'milestone-acceptance',
         text: (milestone.acceptance || []).slice(0, 2).join(' · '),
       }),
+    );
+  }
+
+  function renderProjectMemory() {
+    const memory = state.memory;
+    if (!memory?.available) return null;
+    const decisions = (memory.decisions || []).slice(0, 5);
+    const requirements = (memory.requirements || [])
+      .filter((item) => item.status.startsWith('unresolved')).slice(0, 5);
+    const interviews = (memory.interviews || []).slice(0, 3);
+    return h('div', { class: 'project-memory' },
+      h('div', { class: 'project-memory-head' },
+        h('div', {},
+          h('div', { class: 'eyebrow', text: t('memory.eyebrow') }),
+          h('strong', { text: t('memory.title') }),
+        ),
+        h('span', { class: 'memory-platform', text: t('memory.lastPlatform', {
+          platform: memory.state?.last_platform || 'unknown',
+        }) }),
+      ),
+      h('pre', { class: 'memory-summary', text: (memory.summary || '').slice(0, 1600) }),
+      memory.handoff
+        ? h('div', { class: 'memory-handoff' },
+          h('span', { class: 'memory-label', text: t('memory.handoff') }),
+          h('p', { text: memory.handoff.payload?.context_summary
+            || memory.handoff.payload?.summary || t('memory.none') }),
+        )
+        : null,
+      memory.question
+        ? h('div', { class: 'memory-question' },
+          h('span', { class: 'memory-label', text: t('memory.currentQuestion') }),
+          h('strong', { text: memory.question.question }),
+          h('ul', {}, ...(memory.question.options || []).map((option) => h('li', {
+            text: `${option.label}${option.recommended ? ' — recommended' : ''}`,
+          }))),
+        )
+        : null,
+      h('div', { class: 'memory-columns' },
+        h('div', {},
+          h('span', { class: 'memory-label', text: t('memory.decisions') }),
+          decisions.length
+            ? h('ul', {}, ...decisions.map((item) => h('li', {
+              text: `${item.topic}: ${item.decision} (${item.status})`,
+            })))
+            : h('p', { class: 'milestone-note', text: t('memory.none') }),
+        ),
+        h('div', {},
+          h('span', { class: 'memory-label', text: t('memory.openRequirements') }),
+          requirements.length
+            ? h('ul', {}, ...requirements.map((item) => h('li', { text: item.text })))
+            : h('p', { class: 'milestone-note', text: t('memory.none') }),
+        ),
+        h('div', {},
+          h('span', { class: 'memory-label', text: t('memory.interviews') }),
+          interviews.length
+            ? h('ul', {}, ...interviews.map((item) => h('li', {
+              text: `${item.status} · ${item.origin_platform || 'unknown'} · ${item.request_summary}`,
+            })))
+            : h('p', { class: 'milestone-note', text: t('memory.none') }),
+        ),
+      ),
     );
   }
 
@@ -1796,6 +1864,8 @@
           }
           boardHost.append(timeline);
         }
+        const memoryPanel = renderProjectMemory();
+        if (memoryPanel) boardHost.append(memoryPanel);
       }
     }
     if (officeHost) {

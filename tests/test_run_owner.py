@@ -17,6 +17,8 @@ from tools.run_owner import (
     lease_held,
     owner_alive,
     project_lock,
+    project_writer_held,
+    project_writer_lease,
     read_process_identity,
     read_recovery_state,
     runner_lease,
@@ -138,6 +140,19 @@ class RunnerLeaseTests(unittest.TestCase):
             with self.assertRaises(OwnershipError):
                 with runner_lease(root, "../escape"):
                     pass
+
+
+class ProjectWriterTests(unittest.TestCase):
+    def test_project_writer_lease_blocks_second_ide(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            self.assertFalse(project_writer_held(root))
+            with project_writer_lease(root):
+                self.assertTrue(project_writer_held(root))
+                with self.assertRaises(OwnershipError):
+                    with project_writer_lease(root, timeout=0):
+                        pass
+            self.assertFalse(project_writer_held(root))
 
 
 class ActiveStateTests(unittest.TestCase):
