@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import tempfile
 import unittest
 from pathlib import Path
+
+from tools.run_owner import atomic_write_json, read_process_identity
 
 from tools.office_model import build_office
 from tools.teamwork import TeamworkEngine
@@ -41,6 +44,12 @@ class ManagedOfficeTests(unittest.TestCase):
         self.engine.init(plan())
 
     def test_latest_managed_session_is_exposed_without_raw_identity(self):
+        identity = read_process_identity(os.getpid())
+        atomic_write_json(
+            self.root / ".auto-orchestrator" / "teamwork" / "active.json",
+            {"run_id": "managed-office", "owner": identity,
+             "heartbeat_at": __import__("time").time()},
+        )
         self.engine.record_managed_session(
             "managed-office", "backend", attempt=1, provider="opencode",
             session_id="ses_raw_should_not_leak", status="running",
@@ -63,6 +72,23 @@ class ManagedOfficeTests(unittest.TestCase):
         self.assertEqual(entry["managed"]["session_hash"],
                          hashlib.sha256(b"ses_raw_should_not_leak").hexdigest()[:12])
         self.assertNotIn("ses_raw_should_not_leak", str(payload))
+
+    def test_running_session_without_live_owner_is_orphaned(self):
+        self.engine.record_managed_session(
+            "managed-office", "backend", attempt=1, provider="opencode",
+            session_id="ses_orphan", status="running", model="demo-model",
+        )
+        project = {
+            "project_id": "p_" + "1" * 16, "name": "Managed Lab",
+            "root": str(self.root), "theme": "ai", "agents": [],
+        }
+        payload = build_office(project, {"runs": []}, bindings=[],
+                               detail_provider=lambda run_id: {})
+        entry = payload["managed_sessions"][0]
+        self.assertEqual(entry["status"], "orphaned")
+        self.assertTrue(entry["orphaned"])
+        self.assertFalse(entry["evidence"]["open_span"])
+        self.assertEqual(entry["managed"]["status"], "orphaned")
 
     def test_latest_attempt_only_and_completed_status(self):
         for attempt, status in ((1, "failed"), (2, "completed")):

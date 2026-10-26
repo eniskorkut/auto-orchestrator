@@ -2108,3 +2108,23 @@ body.inspector-open .office-stage { height: min(760px, calc(100vh - 180px)); }
   .milestone-timeline-row { flex-wrap: wrap; }
   .timeline-metric { margin-left: 0; }
 }
+
+/* V7.4.1 — recovery ownership and orphan state */
+.recovery-chip, .orphan-chip {
+  padding: 3px 6px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font: 600 8px/1 var(--mono);
+  letter-spacing: .04em;
+  color: var(--muted);
+  background: var(--panel-2);
+}
+.recovery-chip[data-state="active"], .recovery-chip[data-state="verifying"],
+.recovery-chip[data-state="retry_ready"] { color: var(--ok); border-color: color-mix(in oklab, var(--ok) 35%, var(--line)); }
+.recovery-chip[data-state="runner_disconnected"], .recovery-chip[data-state="recovery_failed"] { color: var(--bad); border-color: color-mix(in oklab, var(--bad) 35%, var(--line)); }
+.recovery-chip[data-state="reconciling"], .recovery-chip[data-state="orphaned"],
+.recovery-chip[data-state="resuming"] { color: var(--warn); border-color: color-mix(in oklab, var(--warn) 35%, var(--line)); }
+.orphan-chip { color: var(--bad); border-color: color-mix(in oklab, var(--bad) 35%, var(--line)); }
+.inspector-recovery { margin-top: 8px; padding: 8px; border-left: 2px solid var(--warn); background: color-mix(in oklab, var(--warn) 6%, transparent); }
+.inspector-recovery strong { display: block; margin-bottom: 4px; font: 600 9px/1.2 var(--mono); text-transform: uppercase; letter-spacing: .06em; }
+.inspector-recovery p { margin: 0; color: var(--muted); font-size: 9px; }

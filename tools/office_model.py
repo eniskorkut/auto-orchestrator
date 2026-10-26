@@ -19,6 +19,16 @@ import sqlite3
 from pathlib import Path
 
 try:
+    from tools.run_owner import owner_alive, read_json, read_recovery_state
+except ModuleNotFoundError:
+    try:
+        from run_owner import owner_alive, read_json, read_recovery_state
+    except ModuleNotFoundError:  # pragma: no cover
+        owner_alive = None
+        read_json = None
+        read_recovery_state = None
+
+try:
     from tools.event_model import EventModelError, normalize_run_event
 except ModuleNotFoundError:  # Running as ``python tools/office_model.py``.
     try:
@@ -482,7 +492,26 @@ MANAGED_STATUS = {
     "completed": "completed",
     "failed": "failed",
     "cancelled": "unknown",
+    "orphaned": "orphaned",
 }
+
+
+def _run_connection(root: str, run_id: str) -> dict:
+    """Read owner/recovery state without mutating run state."""
+    if owner_alive is None or read_json is None:
+        return {"connected": None, "recovery_state": None}
+    base = Path(root) / ".auto-orchestrator" / "teamwork"
+    active = read_json(base / "active.json", {})
+    connected = False
+    if isinstance(active, dict) and active.get("run_id") == run_id:
+        connected = bool(owner_alive(active.get("owner")))
+    recovery = (read_recovery_state(root, run_id)
+                if read_recovery_state is not None else None)
+    state = recovery.get("state") if isinstance(recovery, dict) else None
+    return {"connected": connected, "recovery_state": state,
+            "recovery": recovery if isinstance(recovery, dict) else None,
+            "heartbeat_at": active.get("heartbeat_at")
+            if isinstance(active, dict) else None}
 
 
 def _managed_sessions(project: dict) -> list[dict]:
@@ -522,10 +551,15 @@ def _managed_sessions(project: dict) -> list[dict]:
         if key not in latest:
             latest[key] = row
     result = []
+    connection_cache = {}
     for row in latest.values():
         managed_status = row["status"]
         if managed_status not in MANAGED_STATUS:
             continue
+        connection = connection_cache.get(row["run_id"])
+        if connection is None:
+            connection = _run_connection(root, row["run_id"])
+            connection_cache[row["run_id"]] = connection
         role = row["role"] if isinstance(row["role"], str) else "unknown"
         department = (row["department"] if row["department"] in ROOMS
                       else ROLE_ROOMS.get(role, "lobby"))
@@ -537,6 +571,8 @@ def _managed_sessions(project: dict) -> list[dict]:
             except ValueError:
                 tokens = None
         running = managed_status in ("starting", "running")
+        orphaned = bool(running and connection.get("connected") is False)
+        effective_status = "orphaned" if orphaned else managed_status
         result.append({
             "kind": "managed",
             "name": row["task_id"],
@@ -545,9 +581,14 @@ def _managed_sessions(project: dict) -> list[dict]:
             "platform": row["provider"],
             "provider": row["provider"],
             "model": row["model"],
-            "status": MANAGED_STATUS[managed_status],
-            "managed_status": managed_status,
-            "status_label": managed_status.replace("-", " ").title(),
+            "status": MANAGED_STATUS.get(effective_status, "unknown"),
+            "managed_status": effective_status,
+            "raw_status": managed_status,
+            "orphaned": orphaned,
+            "recovery_state": connection.get("recovery_state"),
+            "recovery": connection,
+            "status_label": ("Orphaned" if orphaned
+                             else managed_status.replace("-", " ").title()),
             "room": department,
             "room_source": "managed.task",
             "session_key": f"m:{row['run_id']}:{row['task_id']}:{row['attempt']}",
@@ -566,7 +607,7 @@ def _managed_sessions(project: dict) -> list[dict]:
             "current": {
                 "run_id": row["run_id"], "task_id": row["task_id"],
                 "task_role": role, "task_state": row["task_state"],
-                "department": department, "run_status": managed_status,
+                "department": department, "run_status": effective_status,
             },
             "evidence": {
                 "source": "managed-opencode" if row["provider"] == "opencode"
@@ -574,13 +615,16 @@ def _managed_sessions(project: dict) -> list[dict]:
                 "confidence": "observed" if running else "recorded",
                 "detail": ("Managed session event stream; native start/stop is "
                            "not claimed."),
-                "open_span": running,
+                "open_span": running and not orphaned,
                 "native_stop_observed": False,
             },
             "managed": {
                 "run_id": row["run_id"], "task_id": row["task_id"],
                 "attempt": row["attempt"], "provider": row["provider"],
-                "status": managed_status, "model": row["model"],
+                "status": effective_status, "raw_status": managed_status,
+                "orphaned": orphaned, "recovery_state": connection.get("recovery_state"),
+                "recovery": connection.get("recovery"),
+                "model": row["model"],
                 "cost": row["cost"], "tokens": tokens,
                 "tool_count": row["tool_count"] or 0,
                 "started_at": row["started_at"], "updated_at": row["updated_at"],

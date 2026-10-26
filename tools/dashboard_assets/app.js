@@ -1707,6 +1707,21 @@
               ? h('span', { class: 'mode-chip', 'data-mode': activeRun.work_mode,
                             text: t(`milestone.mode.${activeRun.work_mode}`) })
               : null,
+            activeRun.recovery_state
+              ? h('span', {
+                class: 'recovery-chip',
+                'data-state': activeRun.recovery_state,
+                text: t(`milestone.recovery.${activeRun.recovery_state}`),
+              })
+              : null,
+            activeRun.orphaned_managed_sessions > 0
+              ? h('span', {
+                class: 'orphan-chip',
+                text: t('milestone.orphaned', {
+                  count: activeRun.orphaned_managed_sessions,
+                }),
+              })
+              : null,
             activeRun.scheduler
               ? h('span', {
                 class: 'scheduler-chip',

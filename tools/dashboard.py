@@ -32,9 +32,14 @@ from urllib.parse import unquote, urlparse
 try:
     from tools.perf import analyze, diagnose, observed_overlap, path_for
     from tools.quality_gate import assess, load_policy
+    from tools.run_owner import owner_alive, read_json, read_recovery_state
 except ModuleNotFoundError:  # Running as ``python tools/dashboard.py``.
     from perf import analyze, diagnose, observed_overlap, path_for
     from quality_gate import assess, load_policy
+    try:
+        from run_owner import owner_alive, read_json, read_recovery_state
+    except ModuleNotFoundError:  # pragma: no cover - older install
+        owner_alive = read_json = read_recovery_state = None
 
 try:
     from tools import event_stream, office_model, project_registry
@@ -1488,9 +1493,54 @@ class Catalog:
             "error": row.get("error"),
             "cancel_state": row.get("cancel_state"),
             "resume_of": row.get("resume_of"),
+            "pid_verified": bool(row.get("pid") and row.get("pid_start_token")),
             "session_hash": (hashlib.sha256(session_id.encode("utf-8")).hexdigest()[:12]
                              if isinstance(session_id, str) and session_id else None),
         }
+
+    @staticmethod
+    def _attach_recovery(root: Path, run: dict) -> dict:
+        run_id = run.get("run_id")
+        if not isinstance(run_id, str):
+            return run
+        base = Path(root) / ".auto-orchestrator" / "teamwork"
+        active = read_json(base / "active.json", {}) if read_json else {}
+        if not isinstance(active, dict) or active.get("run_id") != run_id:
+            active = {}
+        connected = bool(owner_alive(active.get("owner"))) if owner_alive else False
+        stored = read_recovery_state(root, run_id) if read_recovery_state else None
+        stored = stored if isinstance(stored, dict) else {}
+        state = stored.get("state")
+        run_status = run.get("status")
+        if run_status == "passed":
+            state = state or ("recovered" if stored else None)
+        elif run_status == "failed" and state in (
+                "reconciling", "orphaned", "retry_ready", "resuming", "verifying"):
+            state = "recovery_failed"
+        elif not connected and run_status not in ("passed", "failed", "cancelled"):
+            state = "runner_disconnected"
+        if not state:
+            state = "active" if connected else "runner_disconnected"
+        sessions = run.get("managed_sessions", [])
+        orphaned = 0
+        if not connected and run_status not in ("passed", "cancelled"):
+            for session in sessions:
+                if session.get("status") in ("starting", "running"):
+                    session["effective_status"] = "orphaned"
+                    orphaned += 1
+        run["owner_connected"] = connected
+        run["recovery_state"] = state
+        run["recovery"] = {
+            "state": state,
+            "owner_connected": connected,
+            "last_transition": stored,
+            "local_signal_only": True,
+            "native_cancel_ack": False,
+        }
+        run["orphaned_managed_sessions"] = orphaned
+        if isinstance(run.get("scheduler"), dict) and not connected:
+            run["scheduler"] = {**run["scheduler"], "active_sessions": 0}
+        return run
 
     @classmethod
     def _public_milestones(cls, status: dict) -> dict:
@@ -1547,7 +1597,8 @@ class Catalog:
                     if engine is None:
                         engine = TeamworkEngine(root)
                     try:
-                        rows.append(self._public_milestones(engine.status(current_run)))
+                        rows.append(self._attach_recovery(
+                            root, self._public_milestones(engine.status(current_run))))
                     except (TeamworkError, OSError, ValueError):
                         continue
             finally:
@@ -1670,6 +1721,14 @@ def _demo_milestones(project_id: str, theme: str = "ai") -> dict:
             "managed_sessions": [], "demo": True,
             "scheduler": {"active_sessions": 1, "queued_tasks": 1,
                           "repairing": False, "max_parallel": 3},
+            "owner_connected": True,
+            "recovery_state": "active",
+            "recovery": {
+                "state": "active", "owner_connected": True,
+                "last_transition": {"state": "active", "updated_at": None},
+                "local_signal_only": True, "native_cancel_ack": False,
+            },
+            "orphaned_managed_sessions": 0,
             "usage": {"cost_total_usd": None, "cost_measured": False,
                       "tool_count_total": None,
                       "tokens": {"input": None, "output": None, "cache_read": None},

@@ -1368,6 +1368,10 @@
             }, String(runId))
             : null, { empty: t('inspector.sessionNone'), wide: true }),
           field(t('inspector.sessionStatus'), meta.label),
+          session?.managed ? field(t('inspector.recovery'),
+            session.recovery_state ? t(`milestone.recovery.${session.recovery_state}`) : null) : null,
+          session?.managed ? field(t('inspector.orphaned'),
+            session.orphaned ? t('common.yes') : t('common.no')) : null,
           field(t('inspector.sessionSpan'), session?.managed
             ? (session.open ? t('inspector.managedSpanOpen') : t('inspector.managedSpanClosed'))
             : (session?.open ? t('inspector.sessionOpen') : t('inspector.sessionClosed'))),
@@ -1381,6 +1385,18 @@
           session?.managed ? field(t('inspector.sessionHash'), session.session_hash ? h('span', { class: 'mono', text: String(session.session_hash) }) : null) : null,
         ),
         h('p', { class: 'inspector-note', text: session?.managed ? t('inspector.managedNote') : t('inspector.noEvents') }),
+        session?.managed && session.recovery?.recovery
+          ? h('div', { class: 'inspector-recovery' },
+            h('strong', { text: t('inspector.recoveryTimeline') }),
+            h('p', { class: 'inspector-note mono', text: [
+              session.recovery.recovery.state,
+              session.recovery.recovery.updated_at
+                ? fmtDateTime(session.recovery.recovery.updated_at, lang) : null,
+              session.recovery.heartbeat_at
+                ? `heartbeat ${fmtRelative(session.recovery.heartbeat_at, lang)}` : null,
+            ].filter(Boolean).join(' · ') }),
+          )
+          : null,
       ),
       section(t('inspector.evidence'), null,
         h('p', { class: 'inspector-note', text: t('inspector.noEvents') }),
