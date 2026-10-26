@@ -58,10 +58,13 @@ MAX_AGENTS = 64
 MAX_BINDINGS = 256
 
 PROJECT_ID = re.compile(r"^p_[0-9a-f]{16}$")
+PROJECT_UUID = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+    re.IGNORECASE)
 
 
-def _manifest_project_id(root: Path) -> str | None:
-    """Read a validated portable project id without mutating state."""
+def _manifest_identity(root: Path) -> dict | None:
+    """Read a validated portable identity without mutating state."""
     try:
         from tools.project_identity import ProjectIdentityError, read_project_identity
     except ModuleNotFoundError:  # installed flat next to this module
@@ -70,8 +73,14 @@ def _manifest_project_id(root: Path) -> str | None:
         identity = read_project_identity(root)
     except (ProjectIdentityError, OSError, ValueError):
         return None
-    candidate = identity.get("project_id") if identity else None
-    return candidate if isinstance(candidate, str) and PROJECT_ID.fullmatch(candidate) else None
+    if not isinstance(identity, dict):
+        return None
+    candidate = identity.get("project_id")
+    if not isinstance(candidate, str) or not PROJECT_ID.fullmatch(candidate):
+        return None
+    return {"project_id": candidate,
+            "project_uuid": identity.get("project_uuid"),
+            "id_scheme": identity.get("id_scheme", "uuid")}
 AGENT_ID = re.compile(r"^a_[0-9a-f]{12}$")
 NATIVE_HASH = re.compile(r"^[0-9a-f]{64}$")
 COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
@@ -242,7 +251,8 @@ def _validate_project(raw: dict, seen_ids: set[str],
     if any(_same_root(root, previous) for previous in seen_roots.values()):
         raise RegistryError("Duplicate canonical project root")
     seen_roots[key] = root
-    manifest_id = _manifest_project_id(root)
+    manifest = _manifest_identity(root)
+    manifest_id = manifest["project_id"] if manifest else None
     if project_id_for(root) != project_id and manifest_id != project_id:
         raise RegistryError("Project id does not match the canonical root or portable manifest")
     if root.is_symlink():
@@ -264,8 +274,14 @@ def _validate_project(raw: dict, seen_ids: set[str],
         raise RegistryError("Project agents must be a bounded array")
     agent_ids: set[str] = set()
     agents = [_validate_agent(agent, agent_ids) for agent in agents_raw]
+    project_uuid = raw.get("project_uuid")
+    if project_uuid is not None and (
+            not isinstance(project_uuid, str)
+            or not PROJECT_UUID.fullmatch(project_uuid)):
+        raise RegistryError("Invalid project UUID")
     return {
         "project_id": project_id,
+        "project_uuid": project_uuid.lower() if project_uuid else None,
         "name": _checked_text(raw.get("name"), "Project name", limit=120),
         "description": _checked_text(raw.get("description", ""), "Project description",
                                     required=False, limit=1000),
@@ -530,17 +546,22 @@ class ProjectRegistry:
                 return project, False
         if len(data["projects"]) >= MAX_PROJECTS:
             raise RegistryError("Registry has too many projects")
-        manifest_id = _manifest_project_id(canonical)
-        project_id = manifest_id or project_id_for(canonical)
+        manifest = _manifest_identity(canonical)
+        project_id = manifest["project_id"] if manifest else project_id_for(canonical)
         for existing in data["projects"]:
             if existing["project_id"] == project_id and not _same_root(
                     canonical, Path(existing["root"])):
-                # The portable manifest proves that this is the same logical
-                # project moved to a new working directory.
-                existing["root"] = str(canonical)
-                existing["updated_at"] = time.time() if now is None else _number(now, 0)
-                self.save(data)
-                return existing, False
+                # Relocation is accepted only when the portable UUID also
+                # matches. A self-asserted legacy id cannot repoint a project.
+                if (manifest and manifest["id_scheme"] == "uuid"
+                        and existing.get("project_uuid")
+                        and existing.get("project_uuid") == manifest["project_uuid"]):
+                    existing["root"] = str(canonical)
+                    existing["updated_at"] = time.time() if now is None else _number(now, 0)
+                    self.save(data)
+                    return existing, False
+                raise RegistryError(
+                    "Portable project id collision requires manual review")
         if any(project["project_id"] == project_id for project in data["projects"]):
             raise RegistryError("Project id collision for distinct roots")
         if theme not in THEMES:
@@ -548,6 +569,7 @@ class ProjectRegistry:
         stamp = time.time() if now is None else _number(now, 0)
         project = {
             "project_id": project_id,
+            "project_uuid": manifest["project_uuid"] if manifest else None,
             "name": _checked_text(name if name is not None else (canonical.name or "project"),
                                   "Project name", limit=120),
             "description": _checked_text(description, "Project description",

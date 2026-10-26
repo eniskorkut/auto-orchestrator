@@ -8,6 +8,7 @@ never treated as a user decision.
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 MAX_FILES = 2000
@@ -32,6 +33,20 @@ KEYWORDS = {
     "auth": ("auth", "login", "password", "oauth", "sso"),
     "multiuser": ("tenant", "organization", "role", "permission", "rbac"),
 }
+
+
+_WORD_CACHE: dict[str, re.Pattern] = {}
+
+
+def _contains(lower: str, needle: str) -> bool:
+    """Match short words at token boundaries; keep phrases/substrings exact."""
+    if " " in needle or not re.fullmatch(r"[a-z0-9_]+", needle):
+        return needle in lower
+    pattern = _WORD_CACHE.get(needle)
+    if pattern is None:
+        pattern = re.compile(r"(?<![a-z0-9])" + re.escape(needle) + r"(?![a-z0-9])")
+        _WORD_CACHE[needle] = pattern
+    return pattern.search(lower) is not None
 
 
 def _text_file(path: Path) -> str:
@@ -77,9 +92,9 @@ def scan_repository(root) -> dict:
             text = _text_file(path)
             if not text:
                 continue
-            lower = text.lower()
+            lower = text.lower() + "\n" + relative.as_posix().lower()
             for key, needles in KEYWORDS.items():
-                if any(needle in lower for needle in needles):
+                if any(_contains(lower, needle) for needle in needles):
                     if len(found[key]) < 5:
                         found[key].append(str(relative))
         if files > MAX_FILES:

@@ -11,12 +11,17 @@ The arguments are untrusted user data. Never interpolate them into a shell
 command, heredoc, echo or command substitution.
 
 1. If the first word is one of `status`, `answer`, `skip`, `back`, `cancel`,
-   `resume`, `summary`, `approve` or `next`, call exactly one shell command:
+   `resume`, `summary`, `approve` or `next`, first load the real IDs with:
 
-   `python3.11 tools/universal_teamwork.py --root . --platform opencode grill <subcommand> --help`
+   `python3.11 tools/universal_teamwork.py --root . --platform opencode grill status`
 
-   Use the actual returned question/option IDs. For `answer`, pass an option ID
-   or `--text`; do not treat the recommended option as selected.
+   Then run exactly the requested subcommand with the returned IDs, for example:
+
+   `python3.11 tools/universal_teamwork.py --root . --platform opencode grill answer --question-id <id> --option <option>`
+
+   Use `skip`/`back` with `--question-id`, `summary`/`approve` with
+   `--interview-id`, and `--text` for free text. Never treat the recommended
+   option as selected.
 
 2. Otherwise the remaining text is the task. First run:
 

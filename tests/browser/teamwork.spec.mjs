@@ -65,9 +65,15 @@ test('project memory panel shows decisions and cross-IDE context', async ({ page
         available: true, project_id: 'demo', summary: 'Confirmed project memory',
         state: { last_platform: 'codex', stale: false },
         decisions: [{ topic: 'auth_session', decision: 'JWT', status: 'confirmed' }],
-        requirements: [{ text: 'Use secure cookies', status: 'unresolved_blocking' }],
+        requirements: [
+          ...Array.from({ length: 6 }, (_, index) => ({
+            text: `Resolved requirement ${index}`, status: 'confirmed',
+          })),
+          { text: 'Use secure cookies', status: 'unresolved_blocking' },
+        ],
         interviews: [{ status: 'open', origin_platform: 'codex',
                        request_summary: 'login feature' }],
+        handoff: { payload: { context_summary: 'M1 passed with verified tests' } },
         question: { question: 'How should sessions be stored?',
                     options: [{ label: 'Secure cookie', recommended: true },
                               { label: 'JWT', recommended: false }] },
@@ -81,6 +87,9 @@ test('project memory panel shows decisions and cross-IDE context', async ({ page
   await expect(page.locator('.project-memory')).toContainText('last IDE: codex');
   await expect(page.locator('.project-memory')).toContainText('auth_session');
   await expect(page.locator('.project-memory')).toContainText('How should sessions be stored?');
+  await expect(page.locator('.project-memory')).toContainText('Use secure cookies');
+  await expect(page.locator('.project-memory')).not.toContainText('Resolved requirement 0');
+  await expect(page.locator('.project-memory')).toContainText('M1 passed with verified tests');
   await expect(page.locator('.project-memory')).toContainText('Secure cookie — recommended');
 });
 

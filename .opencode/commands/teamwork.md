@@ -41,7 +41,9 @@ If an active run exists and the user did not explicitly ask for a new one, use
    `python3.11 tools/universal_teamwork.py --root . --platform opencode start --mode <mode> --grill --grill-mode auto --request-file <relative_path>`
 
    The grill form returns one question and does **not** start code. Record
-   answers with `/grill-me`; after approval start with `--interview-id <id>`.
+   answers with `/grill-me`; after approval start with
+   `--interview-id <id> --request-file <relative_path>` using the original
+   request file. The engine verifies its hash and refuses a different request.
 
 5. Report the run id, platform, mode, risk assessment, current milestone,
    active/queued sessions, recovery state and verified progress. Child sessions

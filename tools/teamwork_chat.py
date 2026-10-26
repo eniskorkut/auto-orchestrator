@@ -36,7 +36,6 @@ try:
         owner_record,
         project_lock,
         project_writer_held,
-        project_writer_held,
         read_json,
         read_process_identity,
         read_recovery_state,
@@ -56,7 +55,6 @@ except ModuleNotFoundError:  # python tools/teamwork_chat.py
         owner_alive,
         owner_record,
         project_lock,
-        project_writer_held,
         project_writer_held,
         read_json,
         read_process_identity,
@@ -475,7 +473,9 @@ def status(args) -> dict:
     reported_status = state.get("status")
     cancel_path = _state_path(root, f"cancel-{run_id}.json")
     pause_path = _state_path(root, f"pause-{run_id}.json")
-    paused = pause_path.exists() and reported_status not in ("passed", "failed", "cancelled")
+    pause_requested = pause_path.exists()
+    paused = (pause_requested and connected
+              and reported_status not in ("passed", "failed", "cancelled"))
     if cancel_path.exists() and reported_status != "passed" and not connected:
         reported_status = "cancelled"
         recovery["state"] = "cancelled"
@@ -488,6 +488,7 @@ def status(args) -> dict:
         "status": "paused" if paused else reported_status,
         "engine_status": state.get("status"),
         "paused": paused,
+        "pause_requested": pause_requested,
         "verified_progress": state.get("verified_progress"),
         "estimated_progress": None,
         "current_milestone": current.get("id") if current else None,
@@ -599,15 +600,16 @@ def resume(args) -> dict:
         if not run_id:
             raise ChatError("no active teamwork run")
         run_id = _safe_run_id(run_id)
+        runner_lease_held = lease_held(root, run_id)
+        if project_writer_held(root) and not runner_lease_held:
+            return {"run_id": run_id, "status": "already_running",
+                    "owner_connected": _active_connected(active),
+                    "project_writer_held": True,
+                    "note": "another IDE holds the project writer lease; no duplicate writer"}
         try:
             _state_path(root, f"pause-{run_id}.json").unlink()
         except FileNotFoundError:
             pass
-        if project_writer_held(root):
-            return {"run_id": run_id, "status": "already_running",
-                    "owner_connected": True, "project_writer_held": True,
-                    "note": "another IDE holds the project writer lease; no duplicate writer"}
-        runner_lease_held = lease_held(root, run_id)
         if _owner_process_alive(active) or runner_lease_held:
             return {"run_id": run_id, "status": "already_running",
                     "owner_connected": _active_connected(active) or runner_lease_held,

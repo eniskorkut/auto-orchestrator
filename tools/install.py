@@ -92,9 +92,15 @@ def patch_guidance(dest: Path, dry_run: bool) -> str:
 
 def patch_ignore(dest: Path, dry_run: bool) -> str:
     old = dest.read_text(encoding='utf-8') if dest.exists() else ''
-    if '.auto-orchestrator/' in old.splitlines():
+    lines = old.splitlines()
+    if ('.auto-orchestrator/*' in lines
+            and '!.auto-orchestrator/project.json' in lines):
         return 'unchanged'
-    new = old.rstrip() + '\n.auto-orchestrator/\n'
+    # Migrate the old blanket ignore. The small portable manifest must be
+    # committable; the rest of the local state stays ignored.
+    kept = [line for line in lines if line.strip() != '.auto-orchestrator/']
+    new = ('\n'.join(kept).rstrip()
+           + '\n.auto-orchestrator/*\n!.auto-orchestrator/project.json\n')
     if not dry_run:
         dest.write_text(new, encoding='utf-8')
     return 'updated'

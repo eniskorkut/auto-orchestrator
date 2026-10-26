@@ -22,6 +22,7 @@ import hashlib
 import json
 import os
 import shlex
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -1307,8 +1308,13 @@ class TeamworkRunner:
         else:
             self._set_recovery("active")
         started = time.monotonic()
+        paused_seconds = 0.0
         repair_reason: str | None = None
-        while time.monotonic() - started < self.max_seconds:
+        while True:
+            if time.monotonic() - started - paused_seconds >= self.max_seconds:
+                state = self.engine.status(self.run_id)
+                return self.finalize(
+                    state, error="Teamwork run exceeded its wall-time budget")
             if self._cancel_requested():
                 self._cancel_active()
                 state = self.engine.status(self.run_id)
@@ -1323,10 +1329,14 @@ class TeamworkRunner:
             if state["status"] in ("passed", "cancelled"):
                 return self.finalize(state)
             if self._pause_requested():
-                if self._active:
-                    self._poll_active()
-                else:
-                    time.sleep(0.5)
+                paused_at = time.monotonic()
+                while self._pause_requested() and not self._cancel_requested():
+                    if self._active:
+                        self._poll_active()
+                    else:
+                        time.sleep(0.5)
+                    self._heartbeat(self.engine.status(self.run_id))
+                paused_seconds += time.monotonic() - paused_at
                 continue
             # Integrate completed build work before verification tasks run.
             for milestone in state["milestones"]:
@@ -1482,7 +1492,7 @@ class TeamworkRunner:
             if status == "passed":
                 self.memory.capture_git_observation(platform=self.platform)
             self.memory.write_context_files()
-        except (MemoryError, OSError, ValueError):
+        except (MemoryError, OSError, ValueError, sqlite3.Error):
             pass
         self._write_evidence("teamwork-summary", 0, summary)
         return summary

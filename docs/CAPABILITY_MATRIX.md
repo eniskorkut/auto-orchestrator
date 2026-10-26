@@ -168,5 +168,5 @@ managed execution layer. It does not make one IDE dispatch another IDE's agent.
 | Antigravity | yes; shared skill/CLI | shared skill; native `/grill-me` bridge documented | no managed adapter; native agents; explicit opt-in required for the OpenCode bridge; no local binary |
 
 Project memory is shared through the project root, not through a cross-IDE
-agent call. A project-level writer lease prevents two IDE sessions from writing
-concurrently.
+agent call. A project-level writer lease prevents two Teamwork runners from
+writing concurrently; ordinary memory writes are serialized by SQLite.

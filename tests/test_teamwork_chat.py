@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 
 from tools import teamwork_chat as chat
+from tools.run_owner import project_writer_lease
 from tools.teamwork import TeamworkEngine
 
 
@@ -53,6 +54,18 @@ class ChatBridgeTests(unittest.TestCase):
     def _args(self, command):
         return argparse.Namespace(root=str(self.root), run_id=None,
                                   command=command)
+
+    def test_stale_pause_is_not_reported_as_active_and_other_writer_keeps_it(self):
+        pause = self.root / ".auto-orchestrator" / "teamwork" / "pause-chat-test.json"
+        pause.write_text("{}", encoding="utf-8")
+        status = chat.status(self._args("status"))
+        self.assertTrue(status["pause_requested"])
+        self.assertFalse(status["paused"])
+        with project_writer_lease(self.root):
+            resumed = chat.resume(self._args("resume"))
+        self.assertTrue(resumed["project_writer_held"])
+        self.assertFalse(resumed["owner_connected"])
+        self.assertTrue(pause.exists())
 
     def test_status_agents_and_milestones_read_persisted_state(self):
         status = chat.status(self._args("status"))

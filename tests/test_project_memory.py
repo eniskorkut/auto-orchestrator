@@ -67,6 +67,23 @@ class ProjectMemoryTests(unittest.TestCase):
         self.assertEqual(first["version"], 1)
         self.assertEqual(second["version"], 2)
         self.assertEqual(self.memory.latest_handoff()["payload"]["summary"], "two")
+        repeated = self.memory.record_handoff(
+            run_id="r1", milestone_id="M1", platform="opencode",
+            payload={"summary": "two"})
+        self.assertEqual(repeated["handoff_id"], second["handoff_id"])
+        self.assertEqual(repeated["version"], 2)
+        self.assertEqual(len(self.memory.list_handoffs()), 2)
+
+    def test_repository_facts_use_token_boundaries(self):
+        from tools.repo_facts import scan_repository
+        (self.root / "README.md").write_text("Every author owns their chapter.\n")
+        facts = scan_repository(self.root)
+        self.assertFalse(facts["detected"]["auth"])
+        self.assertFalse(facts["detected"]["session"])
+        (self.root / "auth.py").write_text("import jwt\n", encoding="utf-8")
+        detected = scan_repository(self.root)
+        self.assertTrue(detected["detected"]["jwt"])
+        self.assertTrue(detected["detected"]["auth"])
 
     def test_export_import_conflict_requires_review(self):
         decision = self.memory.add_decision(topic="auth", decision="JWT",

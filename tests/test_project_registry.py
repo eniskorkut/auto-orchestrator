@@ -116,6 +116,24 @@ class RegistryProjectTests(RegistryTestCase):
         self.assertEqual(relocated["root"], str(canonical_root(moved)))
         self.assertEqual(len(self.registry.projects()), 1)
 
+    def test_foreign_manifest_cannot_repoint_an_existing_project(self):
+        from tools.project_identity import ensure_project_identity
+        source = self.make_dir("owned")
+        original = ensure_project_identity(source)
+        self.registry.add(source, name="Owned")
+        forged = self.make_dir("forged")
+        path = forged / ".auto-orchestrator" / "project.json"
+        path.parent.mkdir()
+        path.write_text(json.dumps({
+            "version": 1, "project_id": original["project_id"],
+            "project_uuid": "00000000-0000-4000-8000-000000000000",
+            "id_scheme": "legacy", "name": "forged", "created_at": 0,
+        }))
+        with self.assertRaises(RegistryError):
+            self.registry.add(forged, name="Forged")
+        self.assertEqual(self.registry.get(original["project_id"])["root"],
+                         str(canonical_root(source)))
+
     def test_invalid_portable_manifest_is_not_trusted(self):
         root = self.make_dir("broken")
         path = root / ".auto-orchestrator" / "project.json"

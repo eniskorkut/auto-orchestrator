@@ -2146,3 +2146,6 @@ body.inspector-open .office-stage { height: min(760px, calc(100vh - 180px)); }
 .memory-question { margin: 8px 0 10px; padding: 8px; border-left: 2px solid var(--accent); background: color-mix(in oklab, var(--accent) 6%, transparent); }
 .memory-question strong { display: block; margin: 3px 0 4px; font-size: 11px; }
 .memory-question ul { margin: 0; padding-left: 14px; color: var(--muted); font-size: 10px; line-height: 1.5; }
+
+.memory-handoff { margin: 8px 0 10px; padding: 8px; border: 1px solid var(--line); background: var(--panel-2); }
+.memory-handoff p { margin: 4px 0 0; color: var(--muted); font-size: 10px; line-height: 1.5; }

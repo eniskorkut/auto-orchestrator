@@ -1691,7 +1691,8 @@
     const memory = state.memory;
     if (!memory?.available) return null;
     const decisions = (memory.decisions || []).slice(0, 5);
-    const requirements = (memory.requirements || []).slice(0, 5);
+    const requirements = (memory.requirements || [])
+      .filter((item) => item.status.startsWith('unresolved')).slice(0, 5);
     const interviews = (memory.interviews || []).slice(0, 3);
     return h('div', { class: 'project-memory' },
       h('div', { class: 'project-memory-head' },
@@ -1704,6 +1705,13 @@
         }) }),
       ),
       h('pre', { class: 'memory-summary', text: (memory.summary || '').slice(0, 1600) }),
+      memory.handoff
+        ? h('div', { class: 'memory-handoff' },
+          h('span', { class: 'memory-label', text: t('memory.handoff') }),
+          h('p', { text: memory.handoff.payload?.context_summary
+            || memory.handoff.payload?.summary || t('memory.none') }),
+        )
+        : null,
       memory.question
         ? h('div', { class: 'memory-question' },
           h('span', { class: 'memory-label', text: t('memory.currentQuestion') }),
@@ -1725,8 +1733,7 @@
         h('div', {},
           h('span', { class: 'memory-label', text: t('memory.openRequirements') }),
           requirements.length
-            ? h('ul', {}, ...requirements.filter((item) => item.status.startsWith('unresolved'))
-              .slice(0, 5).map((item) => h('li', { text: item.text })))
+            ? h('ul', {}, ...requirements.map((item) => h('li', { text: item.text })))
             : h('p', { class: 'milestone-note', text: t('memory.none') }),
         ),
         h('div', {},

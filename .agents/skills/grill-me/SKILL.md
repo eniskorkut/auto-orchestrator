@@ -32,8 +32,10 @@ when the IDE changes.
 7. Support `skip`, `back`, `cancel`, `resume`, `summary` and `approve`.
    Skipped critical questions stay unresolved_blocking.
 8. Show the summary and ask for plan approval before code when risk is high.
-9. Start Teamwork only from an approved interview:
-   `... start --interview-id <id> --mode <mode>`.
+9. Start Teamwork only from an approved interview, and pass the original
+   request again so the full text is verified, not truncated:
+   `... start --interview-id <id> --request-file <relative_path> --mode <mode>`.
+   A different request is rejected.
 
 ## Platform notes
 

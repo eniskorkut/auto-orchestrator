@@ -115,6 +115,39 @@ def _ensure_local_instance(root: Path, manifest: dict) -> dict:
     return value
 
 
+def _create_manifest_exclusive(path: Path, value: dict) -> bool:
+    """Create the manifest only if absent, with complete content."""
+    text = json.dumps(value, indent=2, ensure_ascii=False) + "\n"
+    temporary = path.with_name(path.name + f".tmp-{os.getpid()}-{secrets.token_hex(4)}")
+    try:
+        temporary.write_text(text, encoding="utf-8")
+        try:
+            temporary.chmod(0o600)
+        except OSError:
+            pass
+        try:
+            os.link(temporary, path)
+            return True
+        except FileExistsError:
+            return False
+        except OSError:
+            # Filesystems without hard links: fall back to exclusive create.
+            try:
+                descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            except FileExistsError:
+                return False
+            try:
+                os.write(descriptor, text.encode("utf-8"))
+            finally:
+                os.close(descriptor)
+            return True
+    finally:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+
+
 def ensure_project_identity(root, *, legacy_project_id: str | None = None) -> dict:
     """Return stable portable and local identities, creating them if needed.
 
@@ -148,8 +181,18 @@ def ensure_project_identity(root, *, legacy_project_id: str | None = None) -> di
         if path.parent.is_symlink():
             raise ProjectIdentityError("project state directory must not be a symlink")
         path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        atomic_write_json(path, manifest)
-        migrated = True
+        if _create_manifest_exclusive(path, manifest):
+            migrated = True
+        else:
+            # Another process won the creation race. Use its identity.
+            for _ in range(20):
+                manifest = _load_manifest(root)
+                if manifest is not None:
+                    break
+                time.sleep(0.01)
+            if manifest is None:
+                raise ProjectIdentityError("project manifest could not be read")
+            migrated = False
     instance = _ensure_local_instance(root, manifest)
     return {
         "version": MANIFEST_VERSION,

@@ -65,13 +65,17 @@ class GrillMeEngine:
         request = _text(request, "request", limit=20000)
         if mode not in MODES:
             raise GrillError("mode must be off, auto, required or plan-only")
+        digest = hashlib.sha256(request.encode("utf-8")).hexdigest()
         existing = self.open_interview()
         if existing and existing["status"] not in ("approved", "cancelled"):
+            if not self.verify_request(existing["interview_id"], request):
+                raise GrillError(
+                    "a different Grill-Me interview is already open; "
+                    "resume or cancel it before starting a new one")
             return {"interview": existing, "resumed": True,
                     "question": self.next_question(existing["interview_id"])}
         facts = scan_repository(self.root)
         summary = request.splitlines()[0].strip()[:200]
-        digest = hashlib.sha256(request.encode("utf-8")).hexdigest()
         interview_id = "iv_" + secrets.token_hex(8)
         now = time.time()
         questions = self._build_questions(request, facts, mode)
@@ -97,6 +101,15 @@ class GrillMeEngine:
         return {"interview": self.get_interview(interview_id),
                 "resumed": False,
                 "question": self.next_question(interview_id)}
+
+    def verify_request(self, interview_id, request) -> bool:
+        interview = self.get_interview(interview_id)
+        request = _text(request, "request", limit=20000)
+        digest = hashlib.sha256(request.encode("utf-8")).hexdigest()
+        row = self.conn.execute(
+            "SELECT request_hash FROM interviews WHERE project_id=? AND interview_id=?",
+            (self.project_id, interview["interview_id"])).fetchone()
+        return bool(row and row["request_hash"] == digest)
 
     def open_interview(self) -> dict | None:
         row = self.conn.execute(
@@ -241,9 +254,21 @@ class GrillMeEngine:
         ordinal = int(row[0] or 0)
         for question in questions:
             exists = self.conn.execute(
-                "SELECT 1 FROM interview_questions WHERE interview_id=? "
-                "AND question_key=?", (interview_id, question["key"])).fetchone()
+                "SELECT question_id,status FROM interview_questions "
+                "WHERE interview_id=? AND question_key=?",
+                (interview_id, question["key"])).fetchone()
             if exists:
+                if exists["status"] == "invalidated":
+                    self.conn.execute("""
+                      UPDATE interview_questions SET status='open',
+                        selected_option=NULL,answer_text=NULL,answer_source=NULL,
+                        answered_at=NULL,question=?,options=?,recommended_option=?,
+                        depends_on=? WHERE interview_id=? AND question_id=?
+                    """, (question["text"],
+                          json.dumps(question["options"], ensure_ascii=False),
+                          question["recommended_option"],
+                          json.dumps(question["depends_on"], ensure_ascii=False),
+                          interview_id, exists["question_id"]))
                 continue
             ordinal += 1
             self.conn.execute("""
@@ -259,7 +284,6 @@ class GrillMeEngine:
 
     def _record_code_facts(self, facts, request):
         detected = facts.get("detected", {})
-        topic = "auth_session" if "auth" in request.lower() else None
         if detected.get("jwt"):
             self.memory.add_decision(
                 topic="auth_session", decision="JWT",
@@ -399,10 +423,31 @@ class GrillMeEngine:
             answer_text=NULL,answer_source=NULL,answered_at=NULL
           WHERE interview_id=? AND question_id=?
         """, (interview_id, row["question_id"]))
-        self.conn.execute("""
-          UPDATE interview_questions SET status='invalidated'
-          WHERE interview_id=? AND status='open' AND depends_on LIKE ?
-        """, (interview_id, f'%"{question["question_key"]}"%'))
+        questions = [self._question_dict(item) for item in self.conn.execute(
+            "SELECT * FROM interview_questions WHERE interview_id=?",
+            (interview_id,))]
+        invalidated = {question["question_key"]}
+        changed = True
+        while changed:
+            changed = False
+            for item in questions:
+                if item["question_id"] == row["question_id"]:
+                    continue
+                if item["status"] not in ("open", "answered", "skipped"):
+                    continue
+                if set(item["depends_on"]) & invalidated:
+                    self.conn.execute("""
+                      UPDATE interview_questions SET status='invalidated',
+                        selected_option=NULL,answer_text=NULL,answer_source=NULL,
+                        answered_at=NULL
+                      WHERE interview_id=? AND question_id=?
+                    """, (interview_id, item["question_id"]))
+                    self.memory.mark_decisions_superseded(
+                        source_ref=f"question:{item['question_id']}",
+                        reason="dependent answer invalidated by an earlier change")
+                    invalidated.add(item["question_key"])
+                    item["status"] = "invalidated"
+                    changed = True
         self.conn.commit()
         self.memory.mark_decisions_superseded(
             source_ref=f"question:{row['question_id']}",
@@ -450,9 +495,9 @@ class GrillMeEngine:
             (interview["interview_id"],))]
         blocking = [item for item in questions
                     if item["status"] in ("open", "skipped")]
-        decisions = [self.memory.get_decision(item["decision_id"])
-                     for item in []]  # decisions are queried by topic below
-        rows = self.memory.list_decisions(limit=100)
+        source_refs = {f"question:{item['question_id']}" for item in questions}
+        decisions = [item for item in self.memory.list_decisions(limit=500)
+                     if item.get("source_ref") in source_refs]
         summary = {
             "interview_id": interview["interview_id"],
             "status": interview["status"],
@@ -461,7 +506,7 @@ class GrillMeEngine:
             "answered_count": sum(1 for item in questions
                                   if item["status"] == "answered"),
             "blocking_questions": blocking,
-            "decisions": rows,
+            "decisions": decisions,
             "goal": interview["request_summary"],
             "milestones": self._suggest_milestones(interview["request_summary"]),
             "risks": [

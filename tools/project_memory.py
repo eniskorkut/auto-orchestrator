@@ -468,23 +468,32 @@ class ProjectMemory:
         if not isinstance(payload, dict):
             raise MemoryError("handoff payload must be an object")
         platform = _text(platform, "platform", limit=40)
-        row = self.conn.execute(
-            "SELECT MAX(version) FROM project_handoffs WHERE project_id=? "
-            "AND run_id=? AND milestone_id=?",
-            (self.project_id, run_id, milestone_id)).fetchone()
-        version = int(row[0] or 0) + 1
         canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"),
                                ensure_ascii=False)
         digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        existing = self.conn.execute(
+            "SELECT * FROM project_handoffs WHERE project_id=? AND run_id=? "
+            "AND milestone_id=? AND sha256=? ORDER BY version LIMIT 1",
+            (self.project_id, run_id, milestone_id, digest)).fetchone()
+        if existing is not None:
+            return self.get_handoff(existing["handoff_id"])
         handoff_id = handoff_id or _id("h_")
         now = time.time()
-        self.conn.execute("""
-          INSERT INTO project_handoffs(handoff_id,project_id,run_id,milestone_id,
-            version,platform,payload,sha256,created_at)
-          VALUES (?,?,?,?,?,?,?,?,?)
-        """, (handoff_id, self.project_id, run_id, milestone_id, version,
-              platform, canonical, digest, now))
-        self.conn.commit()
+
+        def op():
+            row = self.conn.execute(
+                "SELECT MAX(version) FROM project_handoffs WHERE project_id=? "
+                "AND run_id=? AND milestone_id=?",
+                (self.project_id, run_id, milestone_id)).fetchone()
+            version = int(row[0] or 0) + 1
+            self.conn.execute("""
+              INSERT INTO project_handoffs(handoff_id,project_id,run_id,
+                milestone_id,version,platform,payload,sha256,created_at)
+              VALUES (?,?,?,?,?,?,?,?,?)
+            """, (handoff_id, self.project_id, run_id, milestone_id, version,
+                  platform, canonical, digest, now))
+
+        self._transaction(op)
         return self.get_handoff(handoff_id)
 
     def get_handoff(self, handoff_id):
@@ -736,11 +745,15 @@ class ProjectMemory:
                              or existing["status"] != item.get("status")):
                 conflicts.append({"kind": "requirement",
                                   "id": item.get("requirement_id")})
+        unsupported = [name for name in ("handoffs", "observations", "interviews")
+                       if payload.get(name)]
         if conflicts or not apply:
             return {"applied": False, "conflicts": conflicts,
                     "decisions": len(payload.get("decisions", [])),
-                    "requirements": len(payload.get("requirements", []))}
+                    "requirements": len(payload.get("requirements", [])),
+                    "unsupported": unsupported}
         imported = 0
+        skipped = 0
         for item in payload.get("decisions", []):
             try:
                 self.add_decision(
@@ -756,6 +769,7 @@ class ProjectMemory:
                     decision_id=item.get("decision_id"))
                 imported += 1
             except (MemoryError, KeyError, sqlite3.Error):
+                skipped += 1
                 continue
         for item in payload.get("requirements", []):
             try:
@@ -767,7 +781,9 @@ class ProjectMemory:
                     requirement_id=item.get("requirement_id"))
                 imported += 1
             except (MemoryError, KeyError, sqlite3.Error):
+                skipped += 1
                 continue
-        self.update_meta(last_platform="import")
         self.write_context_files()
-        return {"applied": True, "imported": imported, "conflicts": []}
+        return {"applied": True, "imported": imported, "skipped": skipped,
+                "partial": skipped > 0, "conflicts": [],
+                "unsupported": unsupported}

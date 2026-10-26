@@ -58,6 +58,11 @@ It contains no prompts, source, secrets or absolute machine paths and can be
 committed. `.auto-orchestrator/instance.json` is local-only and distinguishes a
 copied working instance. The SQLite database and run evidence are not committed.
 
+Portable export/import carries identity, metadata, decisions and requirements.
+Handoffs, observations and interview rows are not imported; the import result
+reports them under `unsupported` rather than pretending a full merge. Import
+never changes `last_platform`.
+
 Migration behavior: an existing registry project can be given its old
 `p_<16 hex>` id with `ensure_project_identity(..., legacy_project_id=...)`; the
 manifest records `id_scheme: legacy` so the id survives a move. New projects use
@@ -105,11 +110,17 @@ can be detected.
   database/migration and breaking API changes;
 - never treats the recommended option as selected or confirmed;
 - supports answer, skip, back, cancel, resume, summary, approve;
-- dependent questions are invalidated when an earlier answer changes;
+- dependent questions (including already answered ones) are invalidated when an
+  earlier answer changes; re-answering reactivates only applicable dependents;
+- a skipped critical question can be resumed and answered later, and keeps its
+  `unresolved_blocking` requirement until then;
 - skipped critical questions stay `unresolved_blocking` and prevent approval;
 - `off` does not bypass a critical question, `required` adds a scope question,
   `plan-only` stops before code;
-- interview state is in project memory, so another IDE can resume it.
+- interview state is in project memory, so another IDE can resume it;
+- approval stores only a bounded summary and hash. Starting Teamwork requires
+  the original request again and verifies its SHA-256; a long/multi-line task is
+  never replaced by the summary.
 
 ## 5. IDE integration status
 
@@ -173,6 +184,8 @@ Screenshot: [`assets/v76-project-memory.png`](assets/v76-project-memory.png) (de
 - Cursor and Antigravity live IDE execution was not available; only shared skill
   and contract tests are claimed.
 - The full Codex → OpenCode authentication feature E2E was not completed.
+- Export/import does not merge handoffs, observations or interview rows; it
+  reports them as unsupported. No automatic cloud sync is implemented.
 - Automatic Git hook capture is implemented as an explicit `memory capture`
   command; no silent hook is claimed.
 - SQLite is local; cloud sync is export/import preview plus explicit apply, not

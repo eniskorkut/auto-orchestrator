@@ -67,14 +67,21 @@ def start(args) -> dict:
     identity = ensure_project_identity(root)
     chat_request = args.request
     if args.interview_id:
+        # The approved interview does not store the raw request. Require the
+        # original request again and verify its hash so a long or multi-line
+        # task is never silently truncated to the stored summary.
+        chat_request = _request_text(root, args)
         with GrillMeEngine(root, identity=identity) as engine:
             interview = engine.get_interview(args.interview_id)
             if interview["status"] != "approved":
                 raise UniversalError("interview is not approved")
+            if not engine.verify_request(args.interview_id, chat_request):
+                raise UniversalError(
+                    "request does not match the approved interview; "
+                    "use the original request text")
             summary = engine.summary(args.interview_id)
         if summary["blocking_questions"]:
             raise UniversalError("interview still has blocking questions")
-        chat_request = summary["goal"]
     elif args.grill:
         with GrillMeEngine(root, identity=identity) as engine:
             result = engine.start(
@@ -89,8 +96,8 @@ def start(args) -> dict:
         _request_text(root, args)
     result = teamwork_chat.start(_chat_args(
         root, command="start", request=chat_request,
-        request_file=args.request_file if not args.interview_id else None,
-        request_stdin=args.request_stdin if not args.interview_id else False,
+        request_file=args.request_file if args.interview_id is None else None,
+        request_stdin=False,
         mode=args.mode, run_id=args.run_id, model=args.model,
         max_seconds=args.max_seconds, origin_platform=platform,
         provider=getattr(args, "provider", None)))
@@ -170,6 +177,7 @@ def pause(args) -> dict:
     run_id = args.run_id or active.get("run_id")
     if not run_id:
         raise UniversalError("no active teamwork run")
+    run_id = teamwork_chat._safe_run_id(run_id)
     path = root / ".auto-orchestrator" / "teamwork" / f"pause-{run_id}.json"
     atomic_write_json(path, {"run_id": run_id, "requested_at": time.time(),
                              "requested_by": _platform(args)})

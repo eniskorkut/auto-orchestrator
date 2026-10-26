@@ -490,7 +490,7 @@ def project_writer_held(root) -> bool:
     try:
         with project_writer_lease(root, timeout=0):
             return False
-    except (OwnershipError, OSError, ValueError):
+    except OwnershipError:
         return True
 
 

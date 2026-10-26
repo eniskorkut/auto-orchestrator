@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -27,6 +29,23 @@ class ProjectIdentityTests(unittest.TestCase):
             self.assertEqual(a["project_id"], b["project_id"])
             self.assertNotEqual(a["instance_id"], b["instance_id"])
             self.assertEqual(read_project_identity(second)["project_uuid"], a["project_uuid"])
+
+    def test_concurrent_creation_yields_one_identity(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            code = ("from tools.project_identity import ensure_project_identity\n"
+                    "print(ensure_project_identity(%r)['project_id'])" % str(root))
+            processes = [subprocess.Popen(
+                [sys.executable, "-c", code], cwd=Path(__file__).resolve().parents[1],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                for _ in range(6)]
+            outputs = []
+            for process in processes:
+                out, err = process.communicate(timeout=60)
+                self.assertEqual(process.returncode, 0, err)
+                outputs.append(out.strip())
+            self.assertEqual(len(set(outputs)), 1)
+            self.assertEqual(read_project_identity(root)["project_id"], outputs[0])
 
     def test_legacy_id_is_preserved(self):
         with tempfile.TemporaryDirectory() as temp:

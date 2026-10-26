@@ -82,6 +82,32 @@ class GrillMeTests(unittest.TestCase):
                     status="unresolved_blocking"), [])
             self.assertTrue(engine.approve()["approved"])
 
+    def test_back_invalidates_answered_dependent_and_does_not_approve_stale_answer(self):
+        with GrillMeEngine(self.root) as engine:
+            start = engine.start("Kullanıcı giriş sistemini geliştir",
+                                 origin_platform="codex", mode="auto")
+            first = start["question"]
+            answered = engine.answer(first["question_id"], option="jwt")
+            second = answered["next"]
+            engine.back(first["question_id"])
+            engine.answer(first["question_id"], option="cookie")
+            summary = engine.summary()
+            self.assertTrue(summary["ready"])
+            self.assertEqual(summary["blocking_questions"], [])
+            with ProjectMemory(self.root) as memory:
+                stale = [item for item in memory.list_decisions(topic="jwt_refresh")]
+                self.assertTrue(all(item["status"] == "superseded" for item in stale))
+            with self.assertRaises(GrillError):
+                engine.answer(second["question_id"], option="refresh")
+
+    def test_new_request_does_not_silently_reuse_open_interview(self):
+        with GrillMeEngine(self.root) as engine:
+            engine.start("Kullanıcı giriş sistemini geliştir",
+                         origin_platform="codex", mode="auto")
+            with self.assertRaises(GrillError):
+                engine.start("Çok kullanıcılı dosya paylaşımı geliştir",
+                             origin_platform="opencode", mode="auto")
+
     def test_code_derived_facts_suppress_questions(self):
         (self.root / "backend").mkdir()
         (self.root / "backend" / "auth.py").write_text(
