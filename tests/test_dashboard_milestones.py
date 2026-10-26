@@ -8,6 +8,7 @@ import unittest
 from pathlib import Path
 
 from tools.dashboard import Catalog, DashboardServer, Store
+from tools.project_memory import ProjectMemory
 from tools.run_owner import write_recovery_state
 from tools.teamwork import TeamworkEngine
 
@@ -68,6 +69,20 @@ class MilestoneDashboardTests(unittest.TestCase):
             engine.status("team-milestone")
         finally:
             engine.close()
+
+    def test_memory_endpoint_is_read_only_until_memory_exists(self):
+        missing = self.catalog.memory(self.project_id)
+        self.assertFalse(missing["available"])
+        self.assertFalse((self.root / ".auto-orchestrator" / "project.json").exists())
+        with ProjectMemory(self.root) as memory:
+            memory.add_decision(topic="auth_session", decision="JWT",
+                                status="confirmed", confirmed_by="user",
+                                source="user")
+            memory.write_context_files()
+        payload = self.catalog.memory(self.project_id)
+        self.assertTrue(payload["available"])
+        self.assertTrue(any(item["decision"] == "JWT"
+                            for item in payload["decisions"]))
 
     def test_recovery_labels_do_not_mislabel_normal_terminal_runs(self):
         self._seed()

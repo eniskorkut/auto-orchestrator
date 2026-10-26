@@ -31,12 +31,17 @@ from urllib.parse import unquote, urlparse
 
 try:
     from tools.perf import analyze, diagnose, observed_overlap, path_for
+    from tools.project_identity import read_project_identity
     from tools.project_memory import ProjectMemory
     from tools.quality_gate import assess, load_policy
     from tools.run_owner import (lease_held, owner_alive, read_json,
                                  read_recovery_state)
 except ModuleNotFoundError:  # Running as ``python tools/dashboard.py``.
     from perf import analyze, diagnose, observed_overlap, path_for
+    try:
+        from project_identity import read_project_identity
+    except ModuleNotFoundError:  # pragma: no cover
+        read_project_identity = None
     try:
         from project_memory import ProjectMemory
     except ModuleNotFoundError:  # pragma: no cover
@@ -1586,8 +1591,14 @@ class Catalog:
                     "summary": "No project memory has been recorded yet.",
                     "decisions": [], "requirements": [], "handoff": None,
                     "state": {}}
+        identity = read_project_identity(root) if read_project_identity else None
+        if identity is None:
+            return {"available": False, "project_id": project_id,
+                    "summary": "No portable project identity was found.",
+                    "decisions": [], "requirements": [], "handoff": None,
+                    "state": {}}
         try:
-            with ProjectMemory(root) as memory:
+            with ProjectMemory(root, identity=identity) as memory:
                 interviews = []
                 for row in memory.conn.execute(
                         "SELECT interview_id,origin_platform,status,request_summary,"
