@@ -28,7 +28,8 @@ V71_MODULES = ('project_registry.py', 'event_stream.py', 'event_model.py',
 V73_MODULES = ('teamwork.py', 'teamwork_planner.py', 'managed_exec.py',
                'teamwork_runner.py', 'teamwork_benchmark.py',
                'teamwork_cli.py', 'teamwork_chat.py', 'scheduler.py', 'run_owner.py',
-               'repo_profile.py')
+               'repo_profile.py', 'project_identity.py', 'project_memory.py',
+               'repo_facts.py', 'grill_me.py', 'universal_teamwork.py')
 
 class InstallError(ValueError):
     pass
@@ -59,6 +60,10 @@ def skill_files()->dict[str,bytes]:
     root=ROOT/'.agents/skills/auto-orchestrator'
     return {p.relative_to(root).as_posix():p.read_bytes() for p in root.rglob('*') if p.is_file() and not p.is_symlink() and not p.parent.is_symlink()}
 
+def grill_skill_files()->dict[str,bytes]:
+    root=ROOT/'.agents/skills/grill-me'
+    return {p.relative_to(root).as_posix():p.read_bytes() for p in root.rglob('*') if p.is_file() and not p.is_symlink()}
+
 def dashboard_files()->dict[str,bytes]:
     """Read the read-only dashboard runtime and its static assets."""
     tools=ROOT/'tools'
@@ -80,6 +85,8 @@ def installed_map(home:Path,platforms:set[str],opencode_version:str,codex_model:
     if 'codex' in platforms:
         codex=home/'.codex'
         skills_at(codex/'skills/auto-orchestrator')
+        for path,content in grill_skill_files().items():
+            files[codex/'skills/grill-me'/path]=content
         for source in (ROOT/'.codex/agents').glob('*.toml'):
             files[codex/'agents'/source.name]=source.read_bytes()
         # Global runtime adapters. Existing hook files belong to the user and are left untouched.
@@ -112,6 +119,8 @@ def installed_map(home:Path,platforms:set[str],opencode_version:str,codex_model:
     if 'opencode' in platforms:
         oc=home/'.config/opencode'
         skills_at(oc/'skills/auto-orchestrator')
+        for path,content in grill_skill_files().items():
+            files[oc/'skills/grill-me'/path]=content
         for source in (ROOT/'.opencode/agents').glob('*.md'):
             content=source.read_text(encoding='utf-8')
             if opencode_version=='v2':
@@ -132,6 +141,8 @@ def installed_map(home:Path,platforms:set[str],opencode_version:str,codex_model:
     if 'antigravity' in platforms:
         gemini=home/'.gemini'
         skills_at(gemini/'config/skills/auto-orchestrator')
+        for path,content in grill_skill_files().items():
+            files[gemini/'config/skills/grill-me'/path]=content
         skills_at(gemini/'antigravity-cli/skills/auto-orchestrator')
         for source in (ROOT/'.agents/agents').glob('*.md'):
             files[gemini/'config/agents'/source.stem/'agent.md']=source.read_bytes()
@@ -159,6 +170,8 @@ def installed_map(home:Path,platforms:set[str],opencode_version:str,codex_model:
         # does not attest the workspace. Never enable global telemetry hooks.
         cursor=home/'.cursor'
         skills_at(cursor/'skills/auto-orchestrator')
+        for path,content in grill_skill_files().items():
+            files[cursor/'skills/grill-me'/path]=content
         for source in (ROOT/'.cursor/agents').glob('*.md'):
             files[cursor/'agents'/source.name]=source.read_bytes()
         for name in ('supervisor.py','router.py','router_eval.py','worktree.py','quality_gate.py','review_gate.py','perf.py','hook_bridge.py'):

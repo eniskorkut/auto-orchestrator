@@ -30,6 +30,11 @@ RUNTIME_MODULES = (
     "scheduler.py",
     "run_owner.py",
     "repo_profile.py",
+    "project_identity.py",
+    "project_memory.py",
+    "repo_facts.py",
+    "grill_me.py",
+    "universal_teamwork.py",
 )
 PLATFORM_TOOLS = {
     "codex": ".codex/auto-orchestrator/tools",
@@ -67,9 +72,13 @@ class ProjectDashboardInstallTests(unittest.TestCase):
         install(self.target, "opencode", "inherit", False, False)
         assert_runtime(self, self.target / "tools")
         self.assertTrue((self.target / "AGENTS.md").is_file())
-        command = self.target / ".opencode" / "commands" / "teamwork.md"
-        self.assertTrue(command.is_file())
-        self.assertIn("$ARGUMENTS", command.read_text(encoding="utf-8"))
+        for name in ("teamwork.md", "grill-me.md"):
+            command = self.target / ".opencode" / "commands" / name
+            self.assertTrue(command.is_file(), str(command))
+            self.assertIn("$ARGUMENTS", command.read_text(encoding="utf-8"))
+        skill = self.target / ".agents" / "skills" / "grill-me" / "SKILL.md"
+        self.assertTrue(skill.is_file())
+        self.assertIn("one question", skill.read_text(encoding="utf-8").lower())
 
     def test_project_dry_run_writes_nothing(self):
         results = dict(install(self.target, "opencode", "inherit", True, False))

@@ -154,3 +154,19 @@ Change `tools/capabilities.py`, its tests in `tests/test_capabilities.py`, and t
 - Cursor hooks: <https://cursor.com/docs/hooks>
 - Antigravity hooks: <https://www.antigravity.google/docs/hooks>
 - Antigravity subagents: <https://www.antigravity.google/docs/subagents/>
+
+## Universal Teamwork and Grill-Me (V7.6 branch)
+
+`tools/universal_teamwork.py` is a common command surface over the existing
+managed execution layer. It does not make one IDE dispatch another IDE's agent.
+
+| Platform | Universal CLI | Grill-Me skill | Native execution claim |
+|---|---|---|---|
+| OpenCode V2 | yes; real local command contract | `/grill-me` command + shared skill | managed OpenCode adapter; TUI click-through not automated |
+| Codex | yes; shared skill/CLI | shared `.agents/skills/grill-me` where the client discovers it | real Codex app-server managed smoke in V7.5; no IDE-native claim |
+| Cursor | yes; shared skill/CLI | shared `.agents/skills/grill-me` | contract only; no local Cursor binary |
+| Antigravity | yes; shared skill/CLI | shared skill; native `/grill-me` bridge documented | contract only; no local Antigravity binary |
+
+Project memory is shared through the project root, not through a cross-IDE
+agent call. A project-level writer lease prevents two IDE sessions from writing
+concurrently.

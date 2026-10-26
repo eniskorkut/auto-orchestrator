@@ -31,11 +31,16 @@ from urllib.parse import unquote, urlparse
 
 try:
     from tools.perf import analyze, diagnose, observed_overlap, path_for
+    from tools.project_memory import ProjectMemory
     from tools.quality_gate import assess, load_policy
     from tools.run_owner import (lease_held, owner_alive, read_json,
                                  read_recovery_state)
 except ModuleNotFoundError:  # Running as ``python tools/dashboard.py``.
     from perf import analyze, diagnose, observed_overlap, path_for
+    try:
+        from project_memory import ProjectMemory
+    except ModuleNotFoundError:  # pragma: no cover
+        ProjectMemory = None
     from quality_gate import assess, load_policy
     try:
         from run_owner import (lease_held, owner_alive, read_json,
@@ -1565,6 +1570,58 @@ class Catalog:
         runs["demo"] = False
         return runs
 
+    def memory(self, project_id: str) -> dict:
+        entry = self._entry(project_id)
+        if entry.store.demo:
+            return {
+                "available": False, "demo": True, "project_id": project_id,
+                "summary": "Demo project memory is not generated.",
+                "decisions": [], "requirements": [], "handoff": None,
+                "state": {"last_platform": "demo", "stale": False},
+            }
+        root = Path(entry.store.root)
+        if ProjectMemory is None or not (
+                root / ".auto-orchestrator" / "memory.sqlite3").is_file():
+            return {"available": False, "project_id": project_id,
+                    "summary": "No project memory has been recorded yet.",
+                    "decisions": [], "requirements": [], "handoff": None,
+                    "state": {}}
+        try:
+            with ProjectMemory(root) as memory:
+                interviews = []
+                for row in memory.conn.execute(
+                        "SELECT interview_id,origin_platform,status,request_summary,"
+                        "mode,updated_at FROM interviews WHERE project_id=? "
+                        "ORDER BY updated_at DESC LIMIT 5", (memory.project_id,)):
+                    interviews.append(dict(row))
+                question = None
+                row = memory.conn.execute(
+                    "SELECT q.* FROM interview_questions q JOIN interviews i "
+                    "ON i.interview_id=q.interview_id WHERE i.project_id=? "
+                    "AND q.status='open' ORDER BY q.ordinal LIMIT 1",
+                    (memory.project_id,)).fetchone()
+                if row is not None:
+                    question = dict(row)
+                    try:
+                        question["options"] = json.loads(question.get("options") or "[]")
+                    except ValueError:
+                        question["options"] = []
+                return {
+                    "available": True, "project_id": memory.project_id,
+                    "summary": memory.context_summary(limit=2400),
+                    "state": memory.context_state(),
+                    "decisions": memory.list_decisions(limit=50),
+                    "requirements": memory.list_requirements(limit=50),
+                    "handoff": memory.latest_handoff(),
+                    "interviews": interviews,
+                    "question": question,
+                }
+        except (OSError, ValueError, sqlite3.Error) as exc:
+            return {"available": False, "project_id": project_id,
+                    "summary": "Project memory could not be read.",
+                    "error": str(exc)[:300], "decisions": [],
+                    "requirements": [], "handoff": None, "state": {}}
+
     def milestones(self, project_id: str, run_id: str | None = None) -> dict:
         entry = self._entry(project_id)
         if entry.store.demo:
@@ -2145,6 +2202,13 @@ class DashboardHandler(BaseHTTPRequestHandler):
             except DashboardError as exc:
                 return self._project_failure(project_id, exc)
             except (OSError, ValueError) as exc:
+                return self._error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+        if len(parts) == 2 and parts[1] == "memory":
+            try:
+                return self._json(catalog.memory(project_id))
+            except DashboardError as exc:
+                return self._project_failure(project_id, exc)
+            except (OSError, ValueError, sqlite3.Error) as exc:
                 return self._error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
         if len(parts) == 2 and parts[1] == "events":
             return self._events(project_id)

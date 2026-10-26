@@ -1,4 +1,4 @@
-# Auto-Orchestrator — Native Multi-Agent Coordination (V7.5)
+# Auto-Orchestrator — Native Multi-Agent Coordination (V7.6)
 
 Portable, opt-in native-subagent coordination for **OpenCode**, **Codex**, **Cursor**, and **Google Antigravity**. Platform-native runtime capabilities and proof strength differ.
 
@@ -296,6 +296,27 @@ adds a small, conservative long-tail domain ontology and
 skill selection rates. None of this proves live IDE reliability or speedup
 until matched native runs are repeated. See
 [execution reliability](docs/V64_RELIABILITY.md).
+
+## V7.6 — Universal Teamwork, project memory and Grill-Me
+
+V7.6 adds a portable project identity, durable SQLite project memory, a
+Decision/Requirements Ledger, a persistent one-question-at-a-time Grill-Me
+engine and a common `universal_teamwork.py` command surface.
+
+- **Cross-IDE continuity:** confirmed decisions, requirements, handoffs,
+  Git observations and open interviews survive an IDE change.
+- **Portable ID:** `.auto-orchestrator/project.json` preserves the logical
+  project ID across copies; the local instance is separate.
+- **Grill-Me:** inspects code/memory first, never treats a recommendation as a
+  confirmation, and blocks implementation while critical questions are open.
+- **Safety:** a project-level writer lease prevents two IDEs from writing at
+  once; unconfirmed recommendations are rejected by the ledger API.
+- **UI:** Project Memory panel shows decisions, open requirements, interviews and
+  the last IDE without filling the Canvas office.
+- **Evidence:** real CLI cross-IDE interview resume, assumption guard,
+  code-derived facts, normal Git observation, relocation and concurrency tests.
+
+See [Universal Teamwork and Grill-Me](docs/V76_UNIVERSAL_TEAMWORK.md).
 
 ## V7.5 — Codex managed execution (branch)
 

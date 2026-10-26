@@ -106,3 +106,22 @@ another chat or run separate terminal commands.
   native ACK is explicitly present; never invent one.
 - The adaptive planner must keep FAST/ BALANCED/ RIGOROUS verification depth
   distinct and must not claim time savings from overlapping intervals alone.
+
+## V7.6 — universal Teamwork, project memory and Grill-Me
+
+Use `tools/universal_teamwork.py` from the active IDE. It keeps the same
+`.auto-orchestrator/memory.sqlite3` and context files across IDE switches. Do
+not start another IDE's managed process unless that platform is explicitly
+configured; an IDE change is a new session, and only verified project state is
+inherited.
+
+Before risky or underspecified work, use the `grill-me` skill:
+- inspect code/project memory first;
+- ask one question at a time;
+- never treat the recommended option as selected;
+- keep critical skipped questions `unresolved_blocking`;
+- do not write product code until the interview is approved.
+
+`/teamwork context`, `/teamwork handoff`, `/teamwork --grill` and
+`/grill-me` are the single-chat entry points in OpenCode. Project identity is
+portable via `.auto-orchestrator/project.json`; SQLite stays local.
