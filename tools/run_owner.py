@@ -276,6 +276,7 @@ def terminate_owned(record, *, grace: float = 5.0) -> dict:
 
 _PROJECT_LOCKS: dict[str, "threading.Lock"] = {}
 _PROJECT_LOCKS_GUARD = __import__("threading").Lock()
+_ACTIVE_LEASES: set[str] = set()
 
 
 def _thread_lock(path: Path):
@@ -374,8 +375,15 @@ def runner_lease(root, run_id: str, *, timeout: float = 0.0):
     """
     path = _runner_lock_path(root, run_id)
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    resolved = str(path.resolve())
+    with _PROJECT_LOCKS_GUARD:
+        if resolved in _ACTIVE_LEASES:
+            raise OwnershipError("runner lease is already held")
+        _ACTIVE_LEASES.add(resolved)
     thread_lock = _thread_lock(path)
     if not thread_lock.acquire(timeout=max(0.0, float(timeout))):
+        with _PROJECT_LOCKS_GUARD:
+            _ACTIVE_LEASES.discard(resolved)
         raise OwnershipError("runner lease is already held")
     handle = None
     acquired = False
@@ -402,16 +410,22 @@ def runner_lease(root, run_id: str, *, timeout: float = 0.0):
                 _unlock(handle)
             handle.close()
         thread_lock.release()
+        with _PROJECT_LOCKS_GUARD:
+            _ACTIVE_LEASES.discard(resolved)
 
 
 def lease_held(root, run_id: str) -> bool:
     path = _runner_lock_path(root, run_id)
+    resolved = str(path.resolve())
+    with _PROJECT_LOCKS_GUARD:
+        if resolved in _ACTIVE_LEASES:
+            return True
     if not path.exists():
         return False
     try:
         with runner_lease(root, run_id, timeout=0):
             return False
-    except OwnershipError:
+    except (OwnershipError, OSError, ValueError):
         return True
 
 
