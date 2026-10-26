@@ -17,6 +17,17 @@ class ProjectMemoryTests(unittest.TestCase):
         self.memory = ProjectMemory(self.root)
         self.addCleanup(self.memory.close)
 
+    def test_symlinked_memory_database_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temp:
+            outside = Path(temp) / "outside.sqlite3"
+            outside.write_bytes(b"not a database")
+            root = Path(temp) / "project"
+            state = root / ".auto-orchestrator"
+            state.mkdir(parents=True)
+            (state / "memory.sqlite3").symlink_to(outside)
+            with self.assertRaises(MemoryError):
+                ProjectMemory(root)
+
     def test_confirmed_decision_requires_user_confirmation(self):
         with self.assertRaises(MemoryError):
             self.memory.add_decision(topic="auth", decision="JWT", status="confirmed")

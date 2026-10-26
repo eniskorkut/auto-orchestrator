@@ -100,9 +100,13 @@ class ProjectMemory:
         self.identity = identity or ensure_project_identity(self.root)
         self.project_id = self.identity["project_id"]
         self.directory = self.root / ".auto-orchestrator"
+        if self.directory.is_symlink():
+            raise MemoryError("project state directory must not be a symlink")
         self.directory.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.database = self.directory / "memory.sqlite3"
         self.context_dir = self.directory / "context"
+        if self.database.is_symlink() or self.context_dir.is_symlink():
+            raise MemoryError("project memory files must not be symlinks")
         self.conn = sqlite3.connect(str(self.database), timeout=5)
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA journal_mode=WAL")

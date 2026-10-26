@@ -38,6 +38,17 @@ class ProjectIdentityTests(unittest.TestCase):
             self.assertEqual(manifest["id_scheme"], "legacy")
             self.assertEqual(ensure_project_identity(root)["project_id"], legacy)
 
+    def test_symlinked_state_directory_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "project"
+            outside = Path(temp) / "outside"
+            root.mkdir()
+            outside.mkdir()
+            (root / ".auto-orchestrator").symlink_to(outside, target_is_directory=True)
+            with self.assertRaises(ProjectIdentityError):
+                ensure_project_identity(root)
+            self.assertEqual(list(outside.iterdir()), [])
+
     def test_invalid_manifest_is_rejected(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

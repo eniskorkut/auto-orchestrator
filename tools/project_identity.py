@@ -61,6 +61,8 @@ def _root(value) -> Path:
 
 def _load_manifest(root: Path) -> dict | None:
     path = identity_path(root)
+    if path.parent.is_symlink():
+        raise ProjectIdentityError("project state directory must not be a symlink")
     if path.is_symlink():
         raise ProjectIdentityError("project manifest must not be a symlink")
     if not path.is_file():
