@@ -36,6 +36,10 @@ def fast_plan(run_id: str, model: str) -> dict:
         task["model"] = model
         task["depends_on"] = (["backend", "frontend"] if task_id == "integrate"
                               else [])
+        if task_id == "backend":
+            task["verify_commands"] = [
+                "python3.11 -m unittest discover -s tests -q"
+            ]
         tasks.append(task)
     return {
         "version": 1,

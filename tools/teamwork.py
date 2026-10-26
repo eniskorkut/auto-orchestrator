@@ -62,7 +62,7 @@ HANDOFF_DIR = Path(".auto-orchestrator") / "handoffs"
 HANDOFF_FIELDS = (
     "milestone_id", "completed_tasks", "decisions", "changed_files", "commits",
     "verified_tests", "review_findings", "open_issues", "next_milestone",
-    "context_summary", "evidence_refs",
+    "next_tasks", "context_summary", "evidence_refs",
 )
 
 
@@ -433,6 +433,9 @@ class TeamworkEngine:
           cancel_state TEXT,
           resume_of INTEGER,
           tool_count INTEGER NOT NULL DEFAULT 0,
+          pid INTEGER,
+          pid_start_token TEXT,
+          pid_uid INTEGER,
           PRIMARY KEY(run_id,task_id,attempt));
         CREATE TABLE IF NOT EXISTS teamwork_plans (
           run_id TEXT PRIMARY KEY,
@@ -445,6 +448,14 @@ class TeamworkEngine:
         if "tool_count" not in session_columns:
             self.conn.execute(
                 "ALTER TABLE managed_sessions ADD COLUMN tool_count INTEGER NOT NULL DEFAULT 0")
+        for column, kind in (
+            ("pid", "INTEGER"),
+            ("pid_start_token", "TEXT"),
+            ("pid_uid", "INTEGER"),
+        ):
+            if column not in session_columns:
+                self.conn.execute(
+                    f"ALTER TABLE managed_sessions ADD COLUMN {column} {kind}")
 
     def _transaction(self, fn):
         self.conn.execute("BEGIN IMMEDIATE")
@@ -1072,7 +1083,7 @@ class TeamworkEngine:
         }
 
     # -- repair ----------------------------------------------------------
-    def reopen(self, run_id, task_id, reason):
+    def reopen(self, run_id, task_id, reason, *, count_repair=True):
         run_id = self._require_run(run_id)
         task_id = _identifier(task_id, "task id")
         if not isinstance(reason, str) or not reason.strip() or len(reason) > 1000:
@@ -1101,12 +1112,18 @@ class TeamworkEngine:
             raise TeamworkError(str(exc)) from exc
 
         def op():
-            self.conn.execute("""
-              UPDATE milestones
-              SET status='repairing', completed_at=NULL,
-                  repair_iterations=repair_iterations+1, last_error=?
-              WHERE run_id=? AND id=?
-            """, (reason, run_id, milestone["id"]))
+            if count_repair:
+                self.conn.execute("""
+                  UPDATE milestones
+                  SET status='repairing', completed_at=NULL,
+                      repair_iterations=repair_iterations+1, last_error=?
+                  WHERE run_id=? AND id=?
+                """, (reason, run_id, milestone["id"]))
+            else:
+                self.conn.execute("""
+                  UPDATE milestones SET status='repairing', completed_at=NULL,
+                      last_error=? WHERE run_id=? AND id=?
+                """, (reason, run_id, milestone["id"]))
         self._transaction(op)
         state = self.refresh(run_id)
         milestone = next(
@@ -1196,12 +1213,24 @@ class TeamworkEngine:
         except ValueError:
             index = -1
         next_milestone = None
+        next_tasks = []
         if index >= 0:
             statuses = {row["id"]: row["status"] for row in self._load_milestones(run_id)}
             for candidate in milestone_ids[index + 1:]:
                 if statuses.get(candidate) != "passed":
                     next_milestone = candidate
                     break
+        if next_milestone:
+            snapshot = self._load_plan_snapshot(run_id) or {}
+            for task in snapshot.get("tasks", []):
+                if (isinstance(task, dict)
+                        and task.get("milestone") == next_milestone):
+                    next_tasks.append({
+                        "id": task.get("id"),
+                        "role": task.get("role"),
+                        "objective": task.get("objective"),
+                        "depends_on": task.get("depends_on", []),
+                    })
         evidence_refs.append(f"supervisor://{run_id}/milestones/{milestone['id']}")
         return {
             "milestone_id": milestone["id"],
@@ -1213,6 +1242,7 @@ class TeamworkEngine:
             "review_findings": review_findings,
             "open_issues": open_issues,
             "next_milestone": next_milestone,
+            "next_tasks": next_tasks[:32],
             "context_summary": (
                 f"{milestone['id']} passed with {len(completed)}/{len(tasks)} "
                 f"completed task(s); {len(changed_files)} changed file(s); "
@@ -1349,9 +1379,13 @@ class TeamworkEngine:
             payload = json.loads(data.decode("utf-8"))
         except (OSError, ValueError) as exc:
             raise TeamworkError("Handoff file is invalid") from exc
+        required = [field for field in HANDOFF_FIELDS if field != "next_tasks"]
         if not isinstance(payload, dict) or any(
-                field not in payload for field in HANDOFF_FIELDS):
+                field not in payload for field in required):
             raise TeamworkError("Handoff file is missing required fields")
+        # V7.4 handoffs predate next_tasks; preserve digest verification on the
+        # original bytes and add the optional field for readers.
+        payload.setdefault("next_tasks", [])
         digest = hashlib.sha256(data).hexdigest()
         if digest != row["sha256"]:
             raise TeamworkError("Handoff digest does not match the recorded content")
@@ -1373,7 +1407,8 @@ class TeamworkEngine:
                                session_id, status="running", started_at=None,
                                finished_at=None, events_path=None, model=None,
                                cost=None, tokens=None, error=None,
-                               cancel_state=None, resume_of=None, tool_count=0):
+                               cancel_state=None, resume_of=None, tool_count=0,
+                               pid=None, pid_start_token=None, pid_uid=None):
         run_id = self._require_run(run_id)
         task_id = _identifier(task_id, "task id")
         if type(attempt) is not int or not 1 <= attempt <= 1000:
@@ -1389,6 +1424,11 @@ class TeamworkEngine:
             raise TeamworkError("tool_count must be a bounded integer")
         events_path = _optional_string(events_path, "events_path", 500)
         model = _optional_string(model, "model", 200)
+        if pid is not None and (type(pid) is not int or not 1 <= pid <= 2**31 - 1):
+            raise TeamworkError("pid must be a positive bounded integer")
+        pid_start_token = _optional_string(pid_start_token, "pid_start_token", 200)
+        if pid_uid is not None and (type(pid_uid) is not int or pid_uid < 0):
+            raise TeamworkError("pid_uid must be a non-negative integer")
         cancel_state = _optional_string(cancel_state, "cancel_state", 80)
         if error is not None and (not isinstance(error, str) or len(error) > 2000):
             raise TeamworkError("error must be at most 2000 characters")
@@ -1416,6 +1456,13 @@ class TeamworkEngine:
         """, (run_id, task_id, attempt)).fetchone()
         if existing is not None and started_at is None:
             started_at = existing["started_at"]
+        if existing is not None:
+            if pid is None:
+                pid = existing["pid"]
+            if pid_start_token is None:
+                pid_start_token = existing["pid_start_token"]
+            if pid_uid is None:
+                pid_uid = existing["pid_uid"]
         if started_at is None:
             started_at = now
 
@@ -1425,21 +1472,24 @@ class TeamworkEngine:
                   INSERT INTO managed_sessions
                     (run_id,task_id,attempt,provider,session_id,status,started_at,
                      updated_at,finished_at,events_path,model,cost,tokens,error,
-                     cancel_state,resume_of,tool_count)
-                  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                     cancel_state,resume_of,tool_count,pid,pid_start_token,pid_uid)
+                  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, (run_id, task_id, attempt, provider, session_id, status,
                       started_at, now, finished_at, events_path, model, cost,
-                      tokens_value, error, cancel_state, resume_of, tool_count))
+                      tokens_value, error, cancel_state, resume_of, tool_count,
+                      pid, pid_start_token, pid_uid))
             else:
                 self.conn.execute("""
                   UPDATE managed_sessions
                   SET provider=?,session_id=?,status=?,started_at=?,updated_at=?,
                       finished_at=?,events_path=?,model=?,cost=?,tokens=?,error=?,
-                      cancel_state=?,resume_of=?,tool_count=?
+                      cancel_state=?,resume_of=?,tool_count=?,pid=?,
+                      pid_start_token=?,pid_uid=?
                   WHERE run_id=? AND task_id=? AND attempt=?
                 """, (provider, session_id, status, started_at, now, finished_at,
                       events_path, model, cost, tokens_value, error, cancel_state,
-                      resume_of, tool_count, run_id, task_id, attempt))
+                      resume_of, tool_count, pid, pid_start_token, pid_uid,
+                      run_id, task_id, attempt))
         self._transaction(op)
         row = self.conn.execute("""
           SELECT * FROM managed_sessions WHERE run_id=? AND task_id=? AND attempt=?

@@ -274,6 +274,22 @@ class TeamworkValidationTests(unittest.TestCase):
 
 
 class TeamworkEngineTests(TeamworkTestCase):
+    def test_interrupted_sqlite_transaction_rolls_back(self):
+        self.init_sample()
+        before = self.milestone("team-run", "M1")["status"]
+
+        def fail_after_update():
+            self.engine.conn.execute(
+                "UPDATE milestones SET status='failed' WHERE run_id=? AND id=?",
+                ("team-run", "M1"))
+            raise RuntimeError("simulated crash during transaction")
+
+        with self.assertRaises(RuntimeError):
+            self.engine._transaction(fail_after_update)
+        after = self.milestone("team-run", "M1")["status"]
+        self.assertEqual(after, before)
+
+
     def test_ready_dependency_order_and_progress(self):
         self.init_sample()
         state = self.engine.status("team-run")
@@ -437,6 +453,24 @@ class TeamworkEngineTests(TeamworkTestCase):
             self.engine.reopen("team-run", "verify", "Second repair")
         verify = self.milestone("team-run", "M3")["tasks"][0]
         self.assertEqual(verify["state"], "completed")
+
+    def test_group_reopen_counts_one_repair_cycle(self):
+        self.init_sample()
+        self.complete_milestone("team-run", "M1")
+        self.complete_milestone("team-run", "M2")
+        claimed = self.supervisor.claim("team-run")["claimed"]
+        verify = next(item for item in claimed if item["id"] == "verify")
+        self.supervisor.change("team-run", "verify", verify["lease"], "failed",
+                               reason="failure")
+        first = self.engine.reopen("team-run", "verify", "repair one")
+        self.assertEqual(first["repair_iterations"], 1)
+        second_claim = next(item for item in self.supervisor.claim("team-run")["claimed"]
+                            if item["id"] == "verify")
+        self.supervisor.change("team-run", "verify", second_claim["lease"], "failed",
+                               reason="failure again")
+        second = self.engine.reopen("team-run", "verify", "repair two",
+                                    count_repair=False)
+        self.assertEqual(second["repair_iterations"], 1)
 
     def test_reopen_clears_lease_result_and_keeps_attempt_history(self):
         self.init_sample()

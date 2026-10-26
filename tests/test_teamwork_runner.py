@@ -5,6 +5,8 @@ import subprocess
 import sys
 import tempfile
 import time
+
+from tools.run_owner import read_process_identity
 import unittest
 from pathlib import Path
 
@@ -200,6 +202,59 @@ def parallel_plan(run_id="parallel-test"):
     }
 
 
+class RunnerGitRecoveryTests(unittest.TestCase):
+    def test_interrupted_clean_merge_is_completed_on_recovery(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "repo"
+            make_repo(root)
+            base = git(root, "rev-parse", "--abbrev-ref", "HEAD").strip()
+            git(root, "checkout", "-b", "task-branch")
+            (root / "backend").mkdir()
+            (root / "backend" / "app.py").write_text("VALUE = 1\n", encoding="utf-8")
+            git(root, "add", ".")
+            git(root, "commit", "-m", "task work")
+            git(root, "checkout", base)
+            merge = subprocess.run(
+                ["git", "-C", str(root), "merge", "--no-commit", "--no-ff",
+                 "task-branch"], capture_output=True, text=True)
+            self.assertEqual(merge.returncode, 0, merge.stderr)
+            self.assertTrue((root / ".git" / "MERGE_HEAD").exists())
+            runner = TeamworkRunner(root, plan("merge-recovery"),
+                                    adapter=FakeAdapter(), max_seconds=10)
+            try:
+                commit = runner._reconcile_interrupted_merge()
+            finally:
+                runner.close()
+            self.assertIsNotNone(commit)
+            self.assertFalse((root / ".git" / "MERGE_HEAD").exists())
+            self.assertTrue((root / "backend" / "app.py").is_file())
+
+    def test_interrupted_conflicting_merge_fails_closed(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "repo"
+            make_repo(root)
+            base = git(root, "rev-parse", "--abbrev-ref", "HEAD").strip()
+            (root / "README.md").write_text("base\n", encoding="utf-8")
+            git(root, "commit", "-am", "base change")
+            git(root, "checkout", "-b", "task-branch")
+            (root / "README.md").write_text("task\n", encoding="utf-8")
+            git(root, "commit", "-am", "task change")
+            git(root, "checkout", base)
+            (root / "README.md").write_text("main\n", encoding="utf-8")
+            git(root, "commit", "-am", "main change")
+            merge = subprocess.run(
+                ["git", "-C", str(root), "merge", "--no-commit", "--no-ff",
+                 "task-branch"], capture_output=True, text=True)
+            self.assertNotEqual(merge.returncode, 0)
+            runner = TeamworkRunner(root, plan("merge-conflict"),
+                                    adapter=FakeAdapter(), max_seconds=10)
+            try:
+                with self.assertRaises(RunnerError):
+                    runner._reconcile_interrupted_merge()
+            finally:
+                runner.close()
+
+
 class RunnerHelpersTests(unittest.TestCase):
     def test_path_scope_and_verdict_parser(self):
         self.assertTrue(path_allowed("backend/app.py", ["backend/"]))
@@ -296,28 +351,86 @@ class RunnerExecutionTests(unittest.TestCase):
         self.assertEqual(summary["status"], "cancelled")
         self.assertFalse(summary["native_cancel_ack"])
 
-    def test_orphaned_running_task_is_reconciled_and_repaired(self):
-        plan_value = parallel_plan("orphan-test")
+    def _orphan_run(self, run_id, *, pid=None, token=None, uid=None):
+        plan_value = parallel_plan(run_id)
         plan_value["tasks"] = plan_value["tasks"][:1]
         plan_value["milestones"][0]["verification_policy"]["max_repair"] = 1
         engine = TeamworkEngine(self.root)
         self.addCleanup(engine.close)
         engine.init(plan_value)
-        claimed = engine.supervisor.claim("orphan-test")["claimed"][0]
+        claimed = engine.supervisor.claim(run_id)["claimed"][0]
         engine.record_managed_session(
-            "orphan-test", "backend", attempt=1, provider="fake",
+            run_id, "backend", attempt=1, provider="fake",
             session_id="ses_orphan", status="running", model="fake",
+            pid=pid, pid_start_token=token, pid_uid=uid,
         )
         engine.supervisor.conn.execute(
             "UPDATE tasks SET state='running', lease=?, started=?, attempts=1 "
-            "WHERE run_id='orphan-test' AND id='backend'",
-            (claimed["lease"], time.time()),
+            "WHERE run_id=? AND id='backend'",
+            (claimed["lease"], time.time(), run_id),
         )
+        return plan_value, engine
+
+    def test_orphaned_running_task_without_identity_is_blocked(self):
+        plan_value, engine = self._orphan_run("orphan-blocked")
+        runner = TeamworkRunner(self.root, plan_value, adapter=FakeAdapter(),
+                                max_seconds=30, recover_orphans=True)
+        self.addCleanup(runner.close)
+        summary = runner.run()
+        self.assertEqual(summary["status"], "failed", summary)
+        self.assertEqual(summary["recovery"], "recovery_failed")
+        self.assertTrue(summary["recovery_blocked"])
+        self.assertFalse(summary["recovered_orphans"][0]["process"]["recorded"])
+        self.assertFalse(summary["recovered_orphans"][0]["native_cancel_ack"])
+        row = engine.supervisor.conn.execute(
+            "SELECT state FROM tasks WHERE run_id='orphan-blocked' AND id='backend'"
+        ).fetchone()
+        self.assertEqual(row["state"], "failed")
+        self.assertNotEqual(row["state"], "completed")
+
+    def test_recovery_never_signals_an_unowned_live_pid(self):
+        child = subprocess.Popen([sys.executable, "-c",
+                                  "import time; time.sleep(30)"],
+                                 stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL)
+        def cleanup_child():
+            if child.poll() is None:
+                child.kill()
+            child.wait(timeout=10)
+
+        self.addCleanup(cleanup_child)
+        identity = read_process_identity(child.pid)
+        self.assertIsNotNone(identity)
+        plan_value, engine = self._orphan_run(
+            "orphan-unowned", pid=identity["pid"],
+            token="reused-pid-token", uid=identity.get("uid"))
+        runner = TeamworkRunner(self.root, plan_value, adapter=FakeAdapter(),
+                                max_seconds=30, recover_orphans=True)
+        self.addCleanup(runner.close)
+        summary = runner.run()
+        self.assertEqual(summary["status"], "failed", summary)
+        self.assertTrue(summary["recovery_blocked"])
+        self.assertIsNone(child.poll(), "unowned process must not be signaled")
+        item = summary["recovered_orphans"][0]
+        self.assertFalse(item["process"]["signaled"])
+        self.assertEqual(item["process"]["status"], "pid_reused_or_unowned_process")
+
+    def test_orphaned_running_task_with_stopped_identity_is_repaired(self):
+        child = subprocess.Popen([sys.executable, "-c", "pass"],
+                                 stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL)
+        identity = read_process_identity(child.pid)
+        child.wait(timeout=10)
+        self.assertIsNotNone(identity)
+        plan_value, engine = self._orphan_run(
+            "orphan-test", pid=identity["pid"],
+            token=identity["start_token"], uid=identity.get("uid"))
         runner = TeamworkRunner(self.root, plan_value, adapter=FakeAdapter(),
                                 max_seconds=30, recover_orphans=True)
         self.addCleanup(runner.close)
         summary = runner.run()
         self.assertEqual(summary["status"], "passed", summary)
+        self.assertEqual(summary["recovery"], "recovered")
         self.assertEqual(summary["recovered_orphans"][0]["task_id"], "backend")
         self.assertFalse(summary["recovered_orphans"][0]["native_cancel_ack"])
         sessions = engine.managed_sessions("orphan-test")
