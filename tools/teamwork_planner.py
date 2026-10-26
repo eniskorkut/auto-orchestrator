@@ -53,6 +53,14 @@ DISTRIBUTED_WORDS = (
     "cross-service", "full-stack", "full stack", "end-to-end",
 )
 BOTH_LAYER_WORDS = ("full-stack", "full stack", "end-to-end")
+WORK_MODES = ("fast", "balanced", "rigorous", "auto")
+SECURITY_WORDS = (
+    "security", "auth", "authentication", "authorization", "payment",
+    "secret", "credential", "permission", "encryption", "tenant", "billing",
+)
+MIGRATION_WORDS = ("migration", "schema", "database", "sqlite", "postgres", "mongo")
+DEPLOY_WORDS = ("deploy", "deployment", "production", "release", "rollout")
+BREAKING_WORDS = ("breaking", "public api", "contract change", "backward incompatible")
 
 
 class TeamworkPlannerError(ValueError):
@@ -83,6 +91,94 @@ def _has(text, words):
         if re.search(pattern, text):
             return True
     return False
+
+
+def _profile_number(profile, key, default=0):
+    if not isinstance(profile, dict):
+        return default
+    value = profile.get(key, default)
+    if isinstance(value, bool) or not isinstance(value, int):
+        return default
+    return max(0, value)
+
+
+def assess_complexity(request, *, repo_profile=None, requested_mode=None):
+    """Return a transparent complexity assessment, never a fake certainty.
+
+    The score is an aid for choosing a coordination budget. Keyword signals and
+    repository facts are listed separately; a missing repository profile lowers
+    confidence and falls back to BALANCED rather than pretending FAST is safe.
+    """
+    text = _request_text(request).lower()
+    if requested_mode is not None and requested_mode not in WORK_MODES:
+        raise TeamworkPlannerError("mode must be fast, balanced, rigorous or auto")
+    backend = _has(text, BACKEND_WORDS) or _has(text, BOTH_LAYER_WORDS)
+    frontend = _has(text, FRONTEND_WORDS) or _has(text, BOTH_LAYER_WORDS)
+    security = _has(text, SECURITY_WORDS)
+    migration = _has(text, MIGRATION_WORDS)
+    deploy = _has(text, DEPLOY_WORDS)
+    breaking = _has(text, BREAKING_WORDS)
+    review = _has(text, REVIEW_WORDS)
+    profile = repo_profile if isinstance(repo_profile, dict) else {}
+    files = _profile_number(profile, "files")
+    modules = _profile_number(profile, "modules")
+    tests = _profile_number(profile, "tests")
+    languages = profile.get("languages") if isinstance(profile.get("languages"), list) else []
+    profile_backend = bool(profile.get("backend"))
+    profile_frontend = bool(profile.get("frontend"))
+    if profile_backend:
+        backend = True
+    if profile_frontend:
+        frontend = True
+    layers = int(backend) + int(frontend)
+    factors = {
+        "layers": layers,
+        "security": security,
+        "migration": migration,
+        "deploy": deploy,
+        "breaking": breaking,
+        "review": review,
+        "profile_files": files,
+        "profile_modules": modules,
+        "profile_tests": tests,
+        "profile_languages": len(languages),
+        "profile_available": bool(profile),
+    }
+    score = 0
+    score += 10 if layers >= 2 else 3
+    score += 8 if security else 0
+    score += 8 if migration else 0
+    score += 5 if deploy else 0
+    score += 10 if breaking else 0
+    score += 5 if review else 0
+    score += min(20, files // 25)
+    score += min(12, modules)
+    score += 4 if tests >= 20 else 0
+    score += min(12, len(languages) * 2)
+    score = min(100, score)
+    confidence = "high" if profile and files > 0 else "low"
+    if requested_mode in ("fast", "balanced", "rigorous"):
+        mode = requested_mode
+        reason = "explicit user mode"
+    elif score >= 50:
+        mode = "rigorous"
+        reason = "high risk/complexity score"
+    elif score <= 18 and layers <= 1 and not security and not migration and not breaking:
+        mode = "fast" if confidence == "high" else "balanced"
+        reason = ("small, low-risk repository change" if mode == "fast"
+                  else "small request but repository profile is missing")
+    else:
+        mode = "balanced"
+        reason = "default safe budget"
+    return {
+        "mode": mode,
+        "requested_mode": requested_mode,
+        "score": score,
+        "confidence": confidence,
+        "reason": reason,
+        "factors": factors,
+        "fallback_policy": "BALANCED when repository facts are missing",
+    }
 
 
 def _select_pattern(text, explicit):
@@ -193,7 +289,7 @@ def _build_task(model, task_id, department, path, objective, depends_on,
             "The recorded test command passes for the affected code.",
             f"No files outside {path} are modified.",
         ],
-        "build", [TEST_COMMAND], department)
+        "build", [STATUS_COMMAND], department)
     task["model"] = model
     return task
 
@@ -210,7 +306,7 @@ def _generic_build_task(model, pattern):
             "The recorded test command passes for the affected code.",
             "No files outside src/ are modified.",
         ],
-        "build", [TEST_COMMAND], None)
+        "build", [STATUS_COMMAND], None)
     task["model"] = model
     return task
 
@@ -390,8 +486,88 @@ def _research_plan(model):
     return milestones, [_research_task(model)]
 
 
+def _fast_plan(pattern, text, model):
+    backend = _has(text, BACKEND_WORDS) or _has(text, BOTH_LAYER_WORDS)
+    frontend = _has(text, FRONTEND_WORDS) or _has(text, BOTH_LAYER_WORDS)
+    tasks = []
+    build_ids = []
+    if backend and frontend:
+        tasks.extend([
+            _build_task(model, "build-backend", "backend", "backend/",
+                        "Implement the small backend change.", [], milestone="M1"),
+            _build_task(model, "build-frontend", "frontend", "frontend/",
+                        "Implement the small frontend change.", [], milestone="M1"),
+        ])
+        build_ids = ["build-backend", "build-frontend"]
+    else:
+        task_id = "build-backend" if backend else ("build-frontend" if frontend else "build")
+        department = "backend" if backend else ("frontend" if frontend else None)
+        path = "backend/" if backend else ("frontend/" if frontend else "src/")
+        tasks.append(_build_task(
+            model, task_id, department, path,
+            "Implement the small requested change.", [], milestone="M1"))
+        build_ids = [task_id]
+    tasks.append(_verify_task(
+        model, build_ids, ["backend/", "frontend/", "src/", "tests/"],
+        milestone="M1", task_id="verify"))
+    milestone = _milestone(
+        "M1", "Implement and verify the small change.", [],
+        ["The requested change is implemented.", "Targeted tests pass."],
+        [], max_repair=2)
+    return [milestone], tasks
+
+
+def _balanced_plan(pattern, text, model):
+    backend = _has(text, BACKEND_WORDS) or _has(text, BOTH_LAYER_WORDS)
+    frontend = _has(text, FRONTEND_WORDS) or _has(text, BOTH_LAYER_WORDS)
+    tasks = []
+    build_ids = []
+    if backend and frontend:
+        tasks.extend([
+            _build_task(model, "build-backend", "backend", "backend/",
+                        "Implement the backend part of the requested change.", [],
+                        milestone="M1"),
+            _build_task(model, "build-frontend", "frontend", "frontend/",
+                        "Implement the frontend part of the requested change.", [],
+                        milestone="M1"),
+        ])
+        build_ids = ["build-backend", "build-frontend"]
+    else:
+        task_id = "build-backend" if backend else ("build-frontend" if frontend else "build")
+        department = "backend" if backend else ("frontend" if frontend else None)
+        path = "backend/" if backend else ("frontend/" if frontend else "src/")
+        tasks.append(_build_task(
+            model, task_id, department, path,
+            "Implement the requested change.", [], milestone="M1"))
+        build_ids = [task_id]
+    tasks.append(_verify_task(
+        model, build_ids, ["backend/", "frontend/", "src/", "tests/"],
+        milestone="M2", task_id="verify"))
+    review = _review_task(
+        model, "review", "reviewer",
+        "Risk-based independent review of the integrated change.",
+        ["verify"], [
+            "Reviewer records blocking and non-blocking findings.",
+            "High-risk paths are checked explicitly; lower-risk areas are sampled.",
+            "Review does not modify production files.",
+        ], milestone="M3")
+    audit = _audit_task(model, ["verify"], milestone="M3")
+    tasks.extend([review, audit])
+    milestones = [
+        _milestone("M1", "Implement the requested change.", [],
+                   ["The requested change is implemented."], []),
+        _milestone("M2", "Run targeted and regression verification.", ["M1"],
+                   ["The test command exits 0 and output is recorded."],
+                   ["tester"]),
+        _milestone("M3", "Review risks and audit evidence.", ["M2"],
+                   ["Reviewer and auditor verdicts are explicit."],
+                   ["reviewer", "auditor"]),
+    ]
+    return milestones, tasks
+
+
 def plan_request(request, *, run_id, project_id=None, max_parallel=3,
-                 model=None, pattern=None):
+                 model=None, pattern=None, mode=None, repo_profile=None):
     """Return a deterministic rich teamwork plan for ``request``."""
     try:
         run_id = identifier(run_id)
@@ -409,15 +585,34 @@ def plan_request(request, *, run_id, project_id=None, max_parallel=3,
             raise TeamworkPlannerError("model must be a single-line value")
     if pattern is not None and pattern not in PATTERNS:
         raise TeamworkPlannerError("Unknown teamwork pattern")
+    if mode is not None and mode not in WORK_MODES:
+        raise TeamworkPlannerError("mode must be fast, balanced, rigorous or auto")
     text = _request_text(request).lower()
     selected = _select_pattern(text, pattern)
     shape = _shape(text, selected)
+    assessment = None
+    chosen_mode = mode
+    if mode in WORK_MODES:
+        assessment = assess_complexity(request, repo_profile=repo_profile,
+                                       requested_mode=mode)
+        chosen_mode = assessment["mode"]
     if shape == "research":
         milestones, tasks = _research_plan(model)
-    elif shape == "three":
-        milestones, tasks = _three_plan(selected, text, model)
-    else:
+    elif chosen_mode == "fast":
+        milestones, tasks = _fast_plan(selected, text, model)
+    elif chosen_mode == "balanced":
+        milestones, tasks = _balanced_plan(selected, text, model)
+    elif chosen_mode == "rigorous":
         milestones, tasks = _full_plan(selected, text, model)
+    elif mode is None:
+        # Legacy template behavior remains stable for callers that do not use
+        # the adaptive modes.
+        if shape == "three":
+            milestones, tasks = _three_plan(selected, text, model)
+        else:
+            milestones, tasks = _full_plan(selected, text, model)
+    else:  # explicit auto must have resolved to a concrete mode
+        milestones, tasks = _balanced_plan(selected, text, model)
     used_layers = sorted({
         task["department"] for task in tasks
         if task["department"] in ("backend", "frontend")
@@ -437,6 +632,13 @@ def plan_request(request, *, run_id, project_id=None, max_parallel=3,
         "project_id": project_id,
         "max_parallel": max_parallel,
         "pattern": selected,
+        "work_mode": chosen_mode or "legacy",
+        "risk_assessment": assessment,
+        "request": _request_text(request),
+        "repo_profile": {
+            key: repo_profile.get(key) for key in
+            ("files", "modules", "tests", "languages", "backend", "frontend")
+        } if isinstance(repo_profile, dict) else None,
         "requires_repo": True,
         "repo_inputs": repo_inputs,
         "repo_dependent_fields": {

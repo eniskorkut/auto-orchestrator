@@ -326,9 +326,25 @@ def validate_teamwork_plan(plan):
             "milestone": task_milestones[task_id],
             **metadata[task_id],
         }
+    work_mode = plan.get("work_mode", "legacy")
+    if not isinstance(work_mode, str) or len(work_mode) > 40:
+        raise TeamworkError("work_mode must be a short string")
+    risk_assessment = plan.get("risk_assessment")
+    if risk_assessment is not None and not isinstance(risk_assessment, dict):
+        raise TeamworkError("risk_assessment must be an object")
+    request = plan.get("request")
+    if request is not None and (not isinstance(request, str) or len(request) > 20000):
+        raise TeamworkError("request must be a bounded string")
+    repo_profile = plan.get("repo_profile")
+    if repo_profile is not None and not isinstance(repo_profile, dict):
+        raise TeamworkError("repo_profile must be an object")
     return {
         "run_id": run_id,
         "pattern": pattern,
+        "work_mode": work_mode,
+        "risk_assessment": risk_assessment,
+        "request": request,
+        "repo_profile": repo_profile,
         "max_parallel": max_parallel,
         "milestones": [milestone_by_id[mid] for mid in milestone_order],
         "tasks": normalized_tasks,
@@ -467,6 +483,10 @@ class TeamworkEngine:
         return {
             "run_id": normalized["run_id"],
             "pattern": normalized["pattern"],
+            "work_mode": normalized.get("work_mode", "legacy"),
+            "risk_assessment": normalized.get("risk_assessment"),
+            "request": normalized.get("request"),
+            "repo_profile": normalized.get("repo_profile"),
             "max_parallel": normalized["max_parallel"],
             "milestones": [{
                 "id": milestone["id"],
@@ -783,6 +803,10 @@ class TeamworkEngine:
         milestones = self._load_milestones(run_id)
         supervisor_state = self.supervisor.status(run_id)
         tasks_by_id = {task["id"]: task for task in supervisor_state["tasks"]}
+        managed_rows = self._managed_sessions(run_id)
+        managed_by_task = {}
+        for row in managed_rows:
+            managed_by_task[row["task_id"]] = row
         snapshot = self._load_plan_snapshot(run_id)
         snapshot_tasks = {
             task["id"]: task for task in snapshot.get("tasks", [])
@@ -819,6 +843,22 @@ class TeamworkEngine:
                     "provider": meta.get("provider"),
                     "model": meta.get("model"),
                     "verify_commands": list(meta.get("verify_commands") or []),
+                    "depends_on": list(meta.get("depends_on") or []),
+                    "waiting_on": [dep for dep in (meta.get("depends_on") or [])
+                                   if tasks_by_id.get(dep, {}).get("state") != "completed"],
+                    "duration_seconds": (round(task["finished"] - task["started"], 3)
+                                         if task.get("started") is not None
+                                         and task.get("finished") is not None else None),
+                    "managed": ({
+                        "provider": managed_by_task[task_id].get("provider"),
+                        "status": managed_by_task[task_id].get("status"),
+                        "model": managed_by_task[task_id].get("model"),
+                        "cost": managed_by_task[task_id].get("cost"),
+                        "tool_count": managed_by_task[task_id].get("tool_count"),
+                        "session_hash": (hashlib.sha256(
+                            str(managed_by_task[task_id].get("session_id", "")).encode()
+                        ).hexdigest()[:12]),
+                    } if task_id in managed_by_task else None),
                 }
                 task_payloads.append(payload)
                 all_task_payloads.append(payload)
@@ -866,11 +906,42 @@ class TeamworkEngine:
             overall = "blocked"
         else:
             overall = "planned"
+        active_sessions = sum(1 for row in managed_rows
+                              if row.get("status") in ("starting", "running"))
+        queued_tasks = sum(1 for task in all_task_payloads
+                           if task.get("state") == "pending")
+        repairing = any(m.get("status") == "repairing" for m in milestone_payloads)
+        costs = [row.get("cost") for row in managed_rows
+                 if isinstance(row.get("cost"), (int, float))]
+        tool_counts = [row.get("tool_count") for row in managed_rows
+                       if isinstance(row.get("tool_count"), int)]
+        token_input = 0
+        token_output = 0
+        token_cache = 0
+        token_seen = False
+        for row in managed_rows:
+            tokens = row.get("tokens")
+            if not isinstance(tokens, dict):
+                continue
+            token_seen = True
+            for key, target in (("input", "input"), ("output", "output")):
+                value = tokens.get(key)
+                if isinstance(value, (int, float)):
+                    if target == "input":
+                        token_input += int(value)
+                    else:
+                        token_output += int(value)
+            cache = tokens.get("cache_read")
+            if isinstance(cache, (int, float)):
+                token_cache += int(cache)
         run_row = self.conn.execute(
             "SELECT max_parallel FROM runs WHERE id=?", (run_id,)).fetchone()
         return {
             "run_id": run_id,
             "pattern": snapshot.get("pattern"),
+            "work_mode": snapshot.get("work_mode", "legacy"),
+            "risk_assessment": snapshot.get("risk_assessment"),
+            "request": snapshot.get("request"),
             "max_parallel": run_row["max_parallel"] if run_row else None,
             "status": overall,
             "complete": bool(total) and passed == total,
@@ -889,7 +960,24 @@ class TeamworkEngine:
                 "verified": passed,
                 "denominator": total,
             },
-            "managed_sessions": self._managed_sessions(run_id),
+            "managed_sessions": managed_rows,
+            "scheduler": {
+                "active_sessions": active_sessions,
+                "queued_tasks": queued_tasks,
+                "repairing": repairing,
+                "max_parallel": run_row["max_parallel"] if run_row else None,
+            },
+            "usage": {
+                "cost_total_usd": round(sum(costs), 9) if costs else None,
+                "cost_measured": bool(costs),
+                "tool_count_total": sum(tool_counts) if tool_counts else None,
+                "tokens": {
+                    "input": token_input if token_seen else None,
+                    "output": token_output if token_seen else None,
+                    "cache_read": token_cache if token_seen else None,
+                },
+                "tokens_measured": token_seen,
+            },
         }
 
     def status(self, run_id):

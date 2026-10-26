@@ -21,6 +21,76 @@ def by_milestone(plan):
     return result
 
 
+class AdaptivePlannerTests(unittest.TestCase):
+    request = "Kullanıcı giriş sistemini backend ve frontend ile geliştir, testlerini yaz."
+
+    def _plan(self, mode, profile=None):
+        return plan_request(
+            self.request, run_id="adaptive", model="test-model", mode=mode,
+            repo_profile=profile,
+        )
+
+    def test_fast_has_one_milestone_and_no_separate_reviewers(self):
+        plan = self._plan("fast", {"files": 3, "modules": 1, "tests": 2,
+                                   "backend": True, "languages": ["python"]})
+        self.assertEqual(plan["work_mode"], "fast")
+        self.assertEqual(len(plan["milestones"]), 1)
+        roles = {task["role"] for task in plan["tasks"]}
+        self.assertNotIn("reviewer", roles)
+        self.assertNotIn("challenger", roles)
+        self.assertIn("tester", roles)
+
+    def test_balanced_has_three_milestones_and_risk_reviewer(self):
+        plan = self._plan("balanced", {"files": 80, "modules": 5, "tests": 20,
+                                       "backend": True, "frontend": True})
+        self.assertEqual(plan["work_mode"], "balanced")
+        self.assertEqual(len(plan["milestones"]), 3)
+        roles = {task["role"] for task in plan["tasks"]}
+        self.assertIn("reviewer", roles)
+        self.assertIn("auditor", roles)
+        self.assertNotIn("challenger", roles)
+
+    def test_rigorous_keeps_all_verification_roles(self):
+        plan = self._plan("rigorous")
+        self.assertEqual(plan["work_mode"], "rigorous")
+        self.assertEqual(len(plan["milestones"]), 5)
+        roles = {task["role"] for task in plan["tasks"]}
+        self.assertTrue({"reviewer", "challenger", "auditor",
+                         "success-auditor"}.issubset(roles))
+
+    def test_auto_uses_profile_facts_and_safe_fallback(self):
+        small = {"files": 2, "modules": 1, "tests": 2, "backend": True,
+                 "languages": ["python"]}
+        fast = plan_request(
+            "fix a small backend typo", run_id="adaptive-fast",
+            model="test-model", mode="auto", repo_profile=small,
+        )
+        self.assertEqual(fast["work_mode"], "fast")
+        self.assertIn("risk_assessment", fast)
+        self.assertEqual(fast["risk_assessment"]["confidence"], "high")
+
+        missing = self._plan("auto", None)
+        self.assertEqual(missing["work_mode"], "balanced")
+        self.assertEqual(missing["risk_assessment"]["confidence"], "low")
+        self.assertEqual(missing["risk_assessment"]["fallback_policy"],
+                         "BALANCED when repository facts are missing")
+
+    def test_high_risk_auto_goes_rigorous_and_records_factors(self):
+        plan = self._plan("auto", {
+            "files": 2000, "modules": 30, "tests": 300,
+            "languages": ["python", "javascript", "sql"],
+            "backend": True, "frontend": True,
+        })
+        self.assertEqual(plan["work_mode"], "rigorous")
+        factors = plan["risk_assessment"]["factors"]
+        self.assertTrue(factors["profile_available"])
+        self.assertGreaterEqual(plan["risk_assessment"]["score"], 50)
+
+    def test_invalid_mode_is_rejected(self):
+        with self.assertRaises(TeamworkPlannerError):
+            self._plan("turbo")
+
+
 class PlannerTests(unittest.TestCase):
     def test_full_deterministic_plan_has_m1_to_m5(self):
         plan = plan_request(

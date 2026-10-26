@@ -11,10 +11,12 @@ try:
     from tools.teamwork import TeamworkEngine, TeamworkError
     from tools.teamwork_planner import TeamworkPlannerError, plan_request
     from tools.teamwork_runner import RunnerError, TeamworkRunner
+    from tools.repo_profile import RepoProfileError, profile_repository
 except ModuleNotFoundError:  # python tools/teamwork_cli.py
     from teamwork import TeamworkEngine, TeamworkError  # type: ignore
     from teamwork_planner import TeamworkPlannerError, plan_request  # type: ignore
     from teamwork_runner import RunnerError, TeamworkRunner  # type: ignore
+    from repo_profile import RepoProfileError, profile_repository  # type: ignore
 
 
 def _read(path: Path) -> dict:
@@ -36,6 +38,10 @@ def main(argv=None) -> int:
     plan.add_argument("--model")
     plan.add_argument("--pattern")
     plan.add_argument("--max-parallel", type=int, default=3)
+    plan.add_argument("--mode", choices=["auto", "fast", "balanced", "rigorous"],
+                      default=None)
+    plan.add_argument("--repo", type=Path,
+                      help="repository root to profile for adaptive planning")
     plan.add_argument("--out", type=Path)
 
     init = sub.add_parser("init")
@@ -60,14 +66,18 @@ def main(argv=None) -> int:
     run.add_argument("--plan", type=Path, required=True)
     run.add_argument("--model")
     run.add_argument("--max-seconds", type=float, default=7200)
+    run.add_argument("--recover", action="store_true")
 
     args = parser.parse_args(argv)
     try:
         if args.command == "plan":
+            profile = (profile_repository(args.repo)
+                       if args.repo is not None else None)
             value = plan_request(args.request, run_id=args.run_id,
                                  project_id=args.project_id,
                                  max_parallel=args.max_parallel,
-                                 model=args.model, pattern=args.pattern)
+                                 model=args.model, pattern=args.pattern,
+                                 mode=args.mode, repo_profile=profile)
             text = json.dumps(value, indent=2, ensure_ascii=False) + "\n"
             if args.out:
                 args.out.parent.mkdir(parents=True, exist_ok=True)
@@ -87,7 +97,8 @@ def main(argv=None) -> int:
         if args.command == "run":
             plan_value = _read(args.plan)
             runner = TeamworkRunner(args.root, plan_value, model=args.model,
-                                    max_seconds=args.max_seconds)
+                                    max_seconds=args.max_seconds,
+                                    recover_orphans=args.recover)
             try:
                 result = runner.run()
             finally:
@@ -109,7 +120,7 @@ def main(argv=None) -> int:
         print(json.dumps(result, indent=2, ensure_ascii=False))
         return 0
     except (OSError, ValueError, TeamworkError, TeamworkPlannerError,
-            RunnerError) as exc:
+            RunnerError, RepoProfileError) as exc:
         print(f"TEAMWORK ERROR: {exc}", file=sys.stderr)
         return 1
 
