@@ -122,6 +122,7 @@ def install(target: Path, platform: str, codex_model: str, dry_run: bool, force_
                 ROOT/'tools/teamwork_planner.py', ROOT/'tools/managed_exec.py',
                 ROOT/'tools/teamwork_runner.py', ROOT/'tools/teamwork_benchmark.py', ROOT/'tools/teamwork_cli.py',
                 ROOT/'tools/teamwork_chat.py', ROOT/'tools/scheduler.py',
+                ROOT/'tools/run_owner.py',
                 ROOT/'tools/repo_profile.py']
     sources.extend(sorted(p for p in (ROOT/'tools/dashboard_assets').rglob('*') if p.is_file()))
     if 'codex' in selected:

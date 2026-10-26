@@ -27,7 +27,7 @@ V71_MODULES = ('project_registry.py', 'event_stream.py', 'event_model.py',
                'project_planner.py', 'executor.py')
 V73_MODULES = ('teamwork.py', 'teamwork_planner.py', 'managed_exec.py',
                'teamwork_runner.py', 'teamwork_benchmark.py',
-               'teamwork_cli.py', 'teamwork_chat.py', 'scheduler.py',
+               'teamwork_cli.py', 'teamwork_chat.py', 'scheduler.py', 'run_owner.py',
                'repo_profile.py')
 
 class InstallError(ValueError):

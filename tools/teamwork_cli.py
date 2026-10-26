@@ -67,6 +67,7 @@ def main(argv=None) -> int:
     run.add_argument("--model")
     run.add_argument("--max-seconds", type=float, default=7200)
     run.add_argument("--recover", action="store_true")
+    run.add_argument("--owner-token")
 
     args = parser.parse_args(argv)
     try:
@@ -98,7 +99,8 @@ def main(argv=None) -> int:
             plan_value = _read(args.plan)
             runner = TeamworkRunner(args.root, plan_value, model=args.model,
                                     max_seconds=args.max_seconds,
-                                    recover_orphans=args.recover)
+                                    recover_orphans=args.recover,
+                                    owner_token=args.owner_token)
             try:
                 result = runner.run()
             finally:

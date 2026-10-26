@@ -28,6 +28,7 @@ RUNTIME_MODULES = (
     "teamwork_cli.py",
     "teamwork_chat.py",
     "scheduler.py",
+    "run_owner.py",
     "repo_profile.py",
 )
 PLATFORM_TOOLS = {
