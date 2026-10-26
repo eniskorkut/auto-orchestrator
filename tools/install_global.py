@@ -27,7 +27,8 @@ V71_MODULES = ('project_registry.py', 'event_stream.py', 'event_model.py',
                'project_planner.py', 'executor.py')
 V73_MODULES = ('teamwork.py', 'teamwork_planner.py', 'managed_exec.py',
                'teamwork_runner.py', 'teamwork_benchmark.py',
-               'teamwork_cli.py')
+               'teamwork_cli.py', 'teamwork_chat.py', 'scheduler.py',
+               'repo_profile.py')
 
 class InstallError(ValueError):
     pass
@@ -116,6 +117,10 @@ def installed_map(home:Path,platforms:set[str],opencode_version:str,codex_model:
             if opencode_version=='v2':
                 content=content.replace('permission:\n  edit: deny','permissions:\n  - action: edit\n    resource: "*"\n    effect: deny')
             files[oc/'agents'/source.name]=content.encode()
+        commands = ROOT/'.opencode/commands'
+        if commands.is_dir():
+            for source in commands.glob('*.md'):
+                files[oc/'commands'/source.name]=source.read_bytes()
         plugin=ROOT/('adapters/opencode-v2/auto_orchestrator.js' if opencode_version=='v2' else '.opencode/plugins/auto_orchestrator.js')
         files[oc/'plugins/auto_orchestrator.js']=plugin.read_bytes()
         files[oc/'auto-orchestrator/tools/perf.py']=(ROOT/'tools/perf.py').read_bytes()
