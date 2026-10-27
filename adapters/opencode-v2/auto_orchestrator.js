@@ -4,7 +4,7 @@
  * create a telemetry run from an event without an explicit matching location.
  */
 import { createHash, randomUUID } from 'node:crypto';
-import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, lstatSync } from 'node:fs';
+import { appendFileSync, closeSync, mkdirSync, openSync, readFileSync, lstatSync, realpathSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
@@ -40,6 +40,64 @@ const normalized = (path) => {
   return process.platform === 'win32' ? result.toLowerCase() : result;
 };
 
+/**
+ * Trusted helper locations for a project or global plugin install.
+ *
+ * A plugin loaded from `<project>/.opencode/plugins` may use that project's
+ * `tools/` directory. A globally loaded plugin must never execute scripts
+ * owned by whichever project happened to emit a lifecycle callback; it only
+ * uses the helper copy installed beside it under `auto-orchestrator/tools`.
+ */
+export const helperCandidates = ({ pluginPath, projectDirectory, name }) => {
+  if (typeof pluginPath !== 'string' || typeof name !== 'string' ||
+      !name || /[\\/]/.test(name) || name === '.' || name === '..') return [];
+  const pluginDir = normalized(dirname(pluginPath));
+  if (!pluginDir) return [];
+  const candidates = [join(pluginDir, '..', 'auto-orchestrator', 'tools', name)];
+  const project = normalized(projectDirectory);
+  if (project) {
+    const expected = normalized(join(project, '.opencode', 'plugins'));
+    let same = pluginDir === expected;
+    if (!same) {
+      try {
+        same = normalized(realpathSync(pluginDir)) === normalized(realpathSync(expected));
+      } catch { same = false; }
+    }
+    if (same) candidates.push(join(project, 'tools', name));
+  }
+  return candidates;
+};
+
+const trustedFile = (candidate, roots) => {
+  try {
+    const stat = lstatSync(candidate);
+    if (!stat.isFile() || stat.isSymbolicLink()) return null;
+    const real = normalized(realpathSync(candidate));
+    if (!real) return null;
+    for (const root of roots) {
+      let base = null;
+      try { base = normalized(realpathSync(root)); }
+      catch { base = normalized(root); }
+      if (base && (real === base || real.startsWith(base + (process.platform === 'win32' ? '\\' : '/')))) {
+        return real;
+      }
+    }
+  } catch { /* Missing, unreadable or escaping helpers fail closed. */ }
+  return null;
+};
+
+/** Resolve a helper only from a trusted installer-generated location. */
+export const resolveHelperScript = ({ pluginPath, projectDirectory, name }) => {
+  const candidates = helperCandidates({ pluginPath, projectDirectory, name });
+  if (!candidates.length) return null;
+  const roots = candidates.map(candidate => dirname(candidate));
+  for (const candidate of candidates) {
+    const trusted = trustedFile(candidate, roots);
+    if (trusted) return trusted;
+  }
+  return null;
+};
+
 export default {
   id: 'auto-orchestrator',
   async setup(ctx) {
@@ -49,26 +107,26 @@ export default {
     const promptRouting = new Map();
     const approvedTools = new Set(['bash', 'shell', 'powershell']);
     const mutatingTools = new Set(['edit', 'write', 'apply_patch', 'multiedit']);
-    // Global installer places this trusted helper alongside the plugin; do
-    // not execute a project-owned script from a native lifecycle callback.
-    const supervisorScript = join(dirname(fileURLToPath(import.meta.url)),
-      '..', 'auto-orchestrator', 'tools', 'supervisor.py');
+    const pluginPath = fileURLToPath(import.meta.url);
+    // Never execute a project-owned script merely because a native lifecycle
+    // callback mentions the project. Project helpers are trusted only for a
+    // project-local plugin; a global plugin uses its adjacent installed copy.
+    const supervisorScript = () => resolveHelperScript({
+      pluginPath, projectDirectory: directory, name: 'supervisor.py' });
     const supervisorDb = directory && join(directory, '.auto-orchestrator', 'supervisor.sqlite3');
-    const routerScript = join(dirname(fileURLToPath(import.meta.url)),
-      '..', 'auto-orchestrator', 'tools', 'router.py');
+    const routerScript = () => resolveHelperScript({
+      pluginPath, projectDirectory: directory, name: 'router.py' });
     // Stdout is bounded. Raw user text is only transmitted via local stdin,
     // never argv, shell, telemetry, or a provider. No shell execution.
     const selectLocal = async (objective, catalog) => {
-      try {
-        const stat = lstatSync(routerScript);
-        if (!stat.isFile() || stat.isSymbolicLink()) return null;
-      } catch { return null; }
+      const script = routerScript();
+      if (!script) return null;
       const input = JSON.stringify({ objective, skills: catalog });
       if (Buffer.byteLength(input, 'utf8') > 100000) return null;
       return await new Promise(resolve => {
         try {
           const child = execFile(process.env.AUTO_ORCHESTRATOR_PYTHON || 'python3',
-            [routerScript, 'select'],
+            [script, 'select'],
             { timeout: 1800, maxBuffer: 16384, windowsHide: true },
             (error, stdout) => {
               if (error) return resolve(null);
@@ -83,13 +141,13 @@ export default {
       });
     };
     const observeNative = async (id, state) => {
-      if (!supervisorDb || typeof id !== 'string' || id.length < 4 ||
-          !existsSync(supervisorScript)) return;
+      const script = supervisorScript();
+      if (!script || !supervisorDb || typeof id !== 'string' || id.length < 4) return;
       try {
         const stat = lstatSync(supervisorDb);
         if (!stat.isFile() || stat.isSymbolicLink()) return;
         // Never transmit raw native IDs or project content to the subprocess.
-        const args = [supervisorScript, '--root', directory, 'observe-native',
+        const args = [script, '--root', directory, 'observe-native',
           '--platform', 'opencode', '--native-hash', nativeHash(id), '--event', state];
         await new Promise(resolve => {
           execFile(process.env.AUTO_ORCHESTRATOR_PYTHON || 'python3', args,

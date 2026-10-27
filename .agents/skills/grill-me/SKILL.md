@@ -49,9 +49,11 @@ when the IDE changes.
 - Codex: invoke this skill by name (`$grill-me` where the client supports skill
   invocation; otherwise reference `.agents/skills/grill-me/SKILL.md`).
 - Cursor: skills are discovered from `.agents/skills/` and `.cursor/skills/`.
-- Antigravity: `.agents/skills/` is the default skill location. If the native
-  `/grill-me` is used, import its resulting decisions into the same project
-  memory instead of duplicating the interview UI.
+- Antigravity: native `/teamwork-preview` and native `/grill-me` are
+  authoritative. This portable `grill-me` skill must not be installed as a
+  second `grill-me` under Antigravity's skill roots; the non-native fallback is
+  `ao-grill-me`, which imports decisions into the same project memory instead of
+  duplicating the interview UI.
 
 Do not claim native IDE delegation, execution or completion that was not
 observed. A contract/skill file is not a live execution test.

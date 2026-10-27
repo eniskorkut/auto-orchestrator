@@ -127,19 +127,82 @@ class AdaptivePlannerTests(unittest.TestCase):
     def test_auto_uses_profile_facts_and_safe_fallback(self):
         small = {"files": 2, "modules": 1, "tests": 2, "backend": True,
                  "languages": ["python"]}
-        fast = plan_request(
-            "fix a small backend typo", run_id="adaptive-fast",
+        small_plan = plan_request(
+            "fix a small backend typo", run_id="adaptive-small",
             model="test-model", mode="auto", repo_profile=small,
         )
-        self.assertEqual(fast["work_mode"], "fast")
-        self.assertIn("risk_assessment", fast)
-        self.assertEqual(fast["risk_assessment"]["confidence"], "high")
+        self.assertEqual(small_plan["work_mode"], "solo")
+        self.assertEqual(small_plan["max_parallel"], 1)
+        self.assertIn("risk_assessment", small_plan)
+        self.assertEqual(small_plan["risk_assessment"]["confidence"], "high")
 
         missing = self._plan("auto", None)
         self.assertEqual(missing["work_mode"], "balanced")
         self.assertEqual(missing["risk_assessment"]["confidence"], "low")
         self.assertEqual(missing["risk_assessment"]["fallback_policy"],
                          "BALANCED when repository facts are missing")
+
+    def test_solo_plan_has_one_m1_implementer_and_no_reviewers(self):
+        plan = plan_request(
+            "fix a small backend typo", run_id="solo-plan",
+            model="test-model", mode="solo",
+            repo_profile={"files": 2, "modules": 1, "tests": 2,
+                          "backend": True, "languages": ["python"]})
+        self.assertEqual(plan["work_mode"], "solo")
+        self.assertEqual(plan["max_parallel"], 1)
+        self.assertEqual([milestone["id"] for milestone in plan["milestones"]],
+                         ["M1"])
+        self.assertEqual(len(plan["tasks"]), 1)
+        task = plan["tasks"][0]
+        self.assertEqual(task["role"], "implementer")
+        self.assertEqual(task["milestone"], "M1")
+        self.assertIn("git status --short", task["verify_commands"])
+        self.assertTrue(any("unittest" in command
+                            for command in task["verify_commands"]))
+        roles = {item["role"] for item in plan["tasks"]}
+        self.assertTrue(roles.isdisjoint(
+            {"reviewer", "challenger", "auditor", "success-auditor"}))
+        self.assertEqual(plan["verification_budget"]["review_depth"],
+                         "self-verified")
+        validate_teamwork_plan(plan)
+
+    def test_explicit_solo_on_high_risk_is_safety_upgraded(self):
+        plan = plan_request(
+            "Add authentication to the backend", run_id="solo-risk",
+            model="test-model", mode="solo",
+            repo_profile={"files": 5, "modules": 1, "tests": 2,
+                          "backend": True, "languages": ["python"]})
+        self.assertNotEqual(plan["work_mode"], "solo")
+        self.assertTrue(plan["risk_assessment"]["safety_upgrade"])
+        self.assertGreaterEqual(plan["max_parallel"], 1)
+
+    def test_auto_risk_floors_cover_auth_payments_retention_and_database(self):
+        small = {"files": 2, "modules": 1, "tests": 2,
+                 "languages": ["python"]}
+        for request, topic in (
+                ("Add JWT authentication", "auth_session"),
+                ("Add Stripe payments", "payments"),
+                ("Add data retention deletion", "data_retention"),
+                ("Use SQLite for persistence", "database")):
+            with self.subTest(topic=topic):
+                plan = plan_request(request, run_id=f"floor-{topic}",
+                                    model="test-model", mode="auto",
+                                    repo_profile=small)
+                self.assertIn(plan["work_mode"], ("balanced", "rigorous"))
+                self.assertNotEqual(plan["work_mode"], "solo")
+                self.assertNotEqual(plan["work_mode"], "fast")
+
+    def test_auto_migration_with_approved_contract_is_rigorous(self):
+        contract = requirements_contract()
+        plan = plan_request(
+            "Add a database migration and keep the API compatible",
+            run_id="floor-migration", project_id=PROJECT_ID,
+            model="test-model", mode="auto",
+            repo_profile={"files": 5, "modules": 1, "tests": 2,
+                          "backend": True, "languages": ["python"]},
+            requirements_contract=contract)
+        self.assertEqual(plan["work_mode"], "rigorous")
+        self.assertEqual(plan["verification_budget"]["review_depth"], "full")
 
     def test_high_risk_auto_goes_rigorous_and_records_factors(self):
         plan = self._plan("auto", {

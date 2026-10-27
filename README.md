@@ -1,4 +1,4 @@
-# Auto-Orchestrator — Native Multi-Agent Coordination (V7.6.1)
+# Auto-Orchestrator — Native Multi-Agent Coordination (V7.7)
 
 Portable, opt-in native-subagent coordination for **OpenCode**, **Codex**, **Cursor**, and **Google Antigravity**. Platform-native runtime capabilities and proof strength differ.
 
@@ -300,6 +300,31 @@ adds a small, conservative long-tail domain ontology and
 skill selection rates. None of this proves live IDE reliability or speedup
 until matched native runs are repeated. See
 [execution reliability](docs/V64_RELIABILITY.md).
+
+## V7.7 — Intelligent Teamwork, verified completion and native IDE entry points
+
+V7.7 adds:
+
+- **Verified Completion 2.0:** three evidence levels (implementation, behavioral,
+  conformance), seven criterion states, real test-ID signals, commit/contract
+  binding, independent review and explicit `verified_completion`.
+- **SOLO/AUTO:** one-agent SOLO for small clear changes and risk-aware AUTO with
+  BALANCED/RIGOROUS floors for auth, payments, retention, database and API
+  compatibility work.
+- **Grill-Me 2.0:** question metadata (why, rationale, alternatives, affected
+  requirements), optional strict-JSON LLM seam, v1→v2 question migration and a
+  40-case TR/EN benchmark.
+- **Context selection:** runner prompts receive a scored, provenance-bearing
+  subset of decisions, handoffs, blockers, failed tests and recent changes.
+- **Native entry points:** OpenCode commands/skills/plugin lifecycle, Codex
+  native Teamwork skill and app-server adapter, Cursor agents, Antigravity
+  native `/teamwork-preview` + `ao-grill-me` bridge. Contract-only platforms are
+  labelled as such.
+- **Dashboard:** mode, native/managed, contract and requirements verification,
+  critical-unverified warnings, active interview age, handoff history, measured
+  tokens/cost and recovery in the Canvas office inspector.
+
+See [Intelligent Teamwork](docs/V77_INTELLIGENT_TEAMWORK.md).
 
 ## V7.6.1 — Assumption Guard, verified requirements and continuity
 

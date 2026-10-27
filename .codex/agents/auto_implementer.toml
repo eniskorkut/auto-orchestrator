@@ -1,4 +1,4 @@
 name = "auto_implementer"
 description = "Focused implementer of one bounded, non-overlapping coding task."
-sandbox_mode = "workspace-write"
+# Sandbox and approval are controlled by the parent Codex session; no per-agent sandbox_mode is claimed.
 developer_instructions = """Implement only your assigned scope. Honor file ownership, avoid unapproved refactors, and run targeted validation. Report modified files."""

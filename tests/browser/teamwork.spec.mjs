@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { DEMO, demoProjectId, trackPageErrors } from './helpers.mjs';
+import { DEMO, clickAgent, demoProjectId, openOffice, trackPageErrors, waitForSettled } from './helpers.mjs';
 
 let errors = [];
 
@@ -20,6 +20,9 @@ test('milestone panel shows verified progress and filters the task board', async
   await expect(page.locator('#board-milestones')).toContainText('1/3 verified');
   await expect(page.locator('#board-milestones')).toContainText('No estimated progress is shown');
   await expect(page.locator('#board-milestones .mode-chip', { hasText: 'BALANCED' })).toHaveCount(1);
+  await expect(page.locator('#board-milestones .execution-chip')).toContainText('demo');
+  await expect(page.locator('#board-milestones .cost-chip')).toContainText('cost unknown');
+  await expect(page.locator('#board-milestones .token-chip')).toContainText('tokens unknown');
   await expect(page.locator('#board-milestones .recovery-chip', { hasText: 'ACTIVE' })).toHaveCount(1);
   await expect(page.locator('#board-milestones .scheduler-chip')).toContainText('running');
 
@@ -31,6 +34,82 @@ test('milestone panel shows verified progress and filters the task board', async
   await page.getByRole('button', { name: 'Clear milestone filter' }).click();
   await expect(page.locator('.milestone-card.selected')).toHaveCount(0);
   await expect(page.locator('.task-card')).toHaveCount(5);
+});
+
+test('teamwork chips expose SOLO, provider, contract and measured usage honestly', async ({ page }) => {
+  await page.route('**/api/projects/*/milestones', async (route) => {
+    const response = await route.fetch();
+    const payload = await response.json();
+    const run = payload.runs[0];
+    run.work_mode = 'auto';
+    run.mode_label = 'solo';
+    run.execution = {
+      provider: 'opencode', origin_platform: 'opencode',
+      native_or_managed: 'managed', native_session_claimed: false,
+      cross_ide_spawn: false, plan_only: false,
+    };
+    run.contract_status = 'partially_verified';
+    run.contract_fully_verified = false;
+    run.contract_not_verified = 2;
+    run.contract_verification = {
+      contract_id: 'rc_aaaaaaaaaaaaaaaa', contract_version: 4,
+      status: 'partially_verified', fully_verified: false,
+      passed: 3, not_verified: 2, reasons: ['manual review remains'],
+    };
+    run.requirements = {
+      status: 'partially_verified', fully_verified: false,
+      verified_completion: false, critical_unverified: 1,
+      criteria: [], reasons: ['independent review remains'],
+    };
+    run.requirements_status = 'partially_verified';
+    run.verified_completion = false;
+    run.usage = {
+      cost_total_usd: 0.5, cost_measured: true, cost_unknown: false,
+      tokens_measured: true, tokens_unknown: false,
+      tokens: { input: 120, output: 30, cache_read: 0 }, by_provider: [],
+    };
+    await route.fulfill({ response, json: payload });
+  });
+  const projectId = await demoProjectId(page, DEMO.ai);
+  await page.goto(`/#/p/${projectId}/board`, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.milestone-card');
+  await expect(page.locator('#board-milestones .mode-chip')).toHaveText('SOLO');
+  await expect(page.locator('#board-milestones .execution-chip')).toContainText('managed · opencode');
+  await expect(page.locator('#board-milestones .contract-chip:not(.requirements-chip)')).toContainText('partial');
+  await expect(page.locator('#board-milestones .contract-chip:not(.requirements-chip)')).toContainText('2 not verified');
+  await expect(page.locator('#board-milestones .contract-chip[data-requirements-status="partially_verified"]')).toContainText('1 critical open');
+  await expect(page.locator('#board-milestones .cost-chip')).toContainText('measured $0.5000');
+  await expect(page.locator('#board-milestones .token-chip')).toContainText('120 in / 30 out');
+});
+
+test('project memory shows interview age and bounded handoff history', async ({ page }) => {
+  await page.route('**/api/projects/*/memory', async (route) => {
+    await route.fulfill({
+      json: {
+        available: true, project_id: 'demo', summary: 'History',
+        state: { last_platform: 'codex', stale: false },
+        last_ide: 'codex',
+        active_interview: {
+          interview_id: 'iv_aaaaaaaaaaaaaaaa', status: 'open',
+          age_seconds: 90, request_summary: 'login feature',
+          question: { question: 'How should sessions work?', options: [] },
+        },
+        contract_status: 'not_run', contract_not_verified: null,
+        handoffs: [
+          { milestone_id: 'M3', platform: 'opencode', created_at: 0, verified: true },
+          { milestone_id: 'M2', platform: 'codex', created_at: 0, verified: false },
+        ],
+        handoff: { verified: true, payload: { context_summary: 'M3 passed' } },
+        stale: { is_stale: false, reasons: [] },
+      },
+    });
+  });
+  const projectId = await demoProjectId(page, DEMO.ai);
+  await page.goto(`/#/p/${projectId}/board`, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.project-memory');
+  await expect(page.locator('.memory-interview-meta')).toContainText('id iv_aaaaaaa');
+  await expect(page.locator('.memory-handoff-history')).toContainText('IDE handoff history');
+  await expect(page.locator('.memory-handoff-history li')).toHaveCount(2);
 });
 
 test('disconnected runner shows recovery and orphan state without working animation', async ({ page }) => {
@@ -134,6 +213,30 @@ test('project memory shows blockers and a verified handoff only when evidence ex
   await expect(page.locator('.project-memory')).not.toContainText('Resolved legacy item');
   await expect(page.locator('.memory-handoff-state')).toHaveText('verified');
   await expect(page.locator('.memory-stale')).toHaveCount(0);
+});
+
+test('office inspector keeps task, evidence and contract in one panel', async ({ page }) => {
+  await page.route('**/api/projects/*/agents/*', async (route) => {
+    const response = await route.fetch();
+    const payload = await response.json();
+    payload.contract = {
+      contract: { contract_id: 'rc_aaaaaaaaaaaaaaaa', contract_version: 5 },
+      verification: {
+        contract_id: 'rc_aaaaaaaaaaaaaaaa', contract_version: 5,
+        status: 'partially_verified', fully_verified: false,
+        passed: 2, not_verified: 1, reasons: [],
+      },
+      status: 'partially_verified', fully_verified: false, not_verified: 1,
+    };
+    await route.fulfill({ response, json: payload });
+  });
+  await openOffice(page, { clearLayout: true });
+  await waitForSettled(page);
+  await clickAgent(page, 'Ada');
+  await expect(page.locator('.inspector-contract')).toContainText('contract v5');
+  await expect(page.locator('.inspector-contract')).toContainText('partially verified');
+  await expect(page.locator('.inspector-contract')).toContainText('1 criteria not verified');
+  await expect(page.locator('#inspector-content')).toContainText('Task');
 });
 
 test('office milestone strip opens the matching board milestone', async ({ page }) => {

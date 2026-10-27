@@ -448,6 +448,10 @@ class TeamworkEngine:
           pattern TEXT,
           plan TEXT NOT NULL,
           created_at REAL NOT NULL);
+        CREATE TABLE IF NOT EXISTS requirements_verification (
+          run_id TEXT PRIMARY KEY,
+          payload TEXT NOT NULL,
+          updated_at REAL NOT NULL);
         """)
         session_columns = {row["name"] for row in self.conn.execute(
             "PRAGMA table_info(managed_sessions)")}
@@ -494,7 +498,8 @@ class TeamworkEngine:
     def _delete_run(self, run_id):
         def op():
             for table in ("teamwork_handoffs", "teamwork_plans",
-                          "milestone_tasks", "milestones"):
+                          "requirements_verification", "milestone_tasks",
+                          "milestones"):
                 self.conn.execute(f"DELETE FROM {table} WHERE run_id=?", (run_id,))
             self.conn.execute("DELETE FROM native_bindings WHERE run_id=?", (run_id,))
             self.conn.execute("DELETE FROM tasks WHERE run_id=?", (run_id,))
@@ -993,7 +998,7 @@ class TeamworkEngine:
                 token_cache += int(cache)
         run_row = self.conn.execute(
             "SELECT max_parallel FROM runs WHERE id=?", (run_id,)).fetchone()
-        return {
+        payload = {
             **{key: snapshot[key] for key in
                ("requirements_contract", "contract_ref", "assumption_guard")
                if key in snapshot},
@@ -1039,6 +1044,32 @@ class TeamworkEngine:
                 "tokens_measured": token_seen,
             },
         }
+        # Additive V7.7 requirements projection. This never changes milestone
+        # pass/fail state or verified_progress; a full evaluation with real
+        # command output is written by the runner at finalization.
+        persisted_requirements = self._requirements_verification(run_id)
+        contract = snapshot.get("requirements_contract")
+        if persisted_requirements is not None:
+            payload["requirements"] = persisted_requirements
+        elif isinstance(contract, dict):
+            try:
+                try:
+                    from tools import completion_engine
+                except ModuleNotFoundError:
+                    import completion_engine  # type: ignore
+                payload["requirements"] = completion_engine.requirements_projection(
+                    contract, state=payload, run_id=run_id)
+            except Exception as exc:  # status must never fail on a projection
+                payload["requirements"] = {
+                    "status": "blocked", "aggregate_status": "blocked",
+                    "fully_verified": False, "verified_completion": False,
+                    "run_passed": False, "criteria": [],
+                    "reasons": [f"requirements projection unavailable: {exc}"[:500]],
+                    "projection": True,
+                }
+        else:
+            payload["requirements"] = None
+        return payload
 
     def status(self, run_id):
         return self.refresh(run_id)
@@ -1555,6 +1586,35 @@ class TeamworkEngine:
     def managed_sessions(self, run_id):
         run_id = self._require_run(run_id)
         return self._managed_sessions(run_id)
+
+    # -- requirements verification --------------------------------------
+    def record_requirements(self, run_id, payload):
+        """Persist the runner's final completion evaluation for status readers."""
+        run_id = self._require_run(run_id)
+        if not isinstance(payload, dict):
+            raise TeamworkError("requirements verification must be an object")
+        encoded = _canonical(payload)
+        if len(encoded.encode("utf-8")) > 1_048_576:
+            raise TeamworkError("requirements verification is too large")
+
+        def op():
+            self.conn.execute("""
+              INSERT INTO requirements_verification (run_id,payload,updated_at)
+              VALUES (?,?,?)
+              ON CONFLICT(run_id) DO UPDATE SET payload=excluded.payload,
+                updated_at=excluded.updated_at
+            """, (run_id, encoded, time.time()))
+        self._transaction(op)
+        return json.loads(encoded)
+
+    def _requirements_verification(self, run_id):
+        row = self.conn.execute(
+            "SELECT payload FROM requirements_verification WHERE run_id=?",
+            (run_id,)).fetchone()
+        if row is None:
+            return None
+        value = _parse_json(row["payload"], None)
+        return value if isinstance(value, dict) else None
 
     # Friendly aliases for callers that use shorter names.
     record_session = record_managed_session

@@ -1,0 +1,1560 @@
+{
+  "schema_version": 1,
+  "kind": "v77-grill-benchmark",
+  "generated_at": 1793107705.123756,
+  "fixture": {
+    "total": 40,
+    "tr": 20,
+    "en": 20,
+    "labels": [
+      "expected_topics",
+      "expected_question_keys",
+      "should_interview",
+      "forbidden_technologies",
+      "seeded_decisions",
+      "contradiction",
+      "expected_floor"
+    ]
+  },
+  "baseline": {
+    "cases": 40,
+    "tr_cases": 20,
+    "en_cases": 20,
+    "expected_topics": 37,
+    "matched_topics": 37,
+    "ambiguity_recall": 1.0,
+    "asked_questions": 37,
+    "unnecessary_questions": 0,
+    "unnecessary_question_rate": 0.0,
+    "unnecessary_rate": 0.0,
+    "duplicate_questions": 0,
+    "duplicate_question_rate": 0.0,
+    "duplicate_rate": 0.0,
+    "false_tech_inference_cases": 0,
+    "false_tech_inference": 0,
+    "false_tech_inference_rate": 0.0,
+    "contradiction_cases": 4,
+    "contradictions_found": 4,
+    "contradiction_recall": 1.0,
+    "unconfirmed_assumptions": 0,
+    "completed_cases": 40,
+    "completion": 1.0,
+    "completion_rate": 1.0
+  },
+  "provider": {
+    "status": "not_run",
+    "configured": false,
+    "ran": false,
+    "reason": "No optional LLM provider was configured; only the deterministic baseline ran."
+  },
+  "comparison": {
+    "baseline_source": "deterministic_assumption_guard",
+    "provider_authoritative": false,
+    "provider_changes_guard_questions": false
+  },
+  "cases": [
+    {
+      "id": "tr-01",
+      "lang": "tr",
+      "request": "Kullanıcı giriş sistemini geliştir",
+      "should_interview": true,
+      "expected_should_interview": true,
+      "interview_match": true,
+      "detected_topics": [
+        "auth_session"
+      ],
+      "questions": [
+        "auth_session"
+      ],
+      "expected_topics": [
+        "auth_session"
+      ],
+      "expected_question_keys": [
+        "auth_session"
+      ],
+      "expected_floor": 1,
+      "forbidden_technologies": [],
+      "seeded_decision_count": 0,
+      "matched_topics": [
+        "auth_session"
+      ],
+      "unnecessary_question_keys": [],
+      "duplicate_question_keys": [],
+      "contradiction_expected": false,
+      "contradiction_found": false,
+      "contradictions": [],
+      "false_tech_inference": [],
+      "unconfirmed_assumptions": 0,
+      "floor_met": true,
+      "completion": true,
+      "provider": {
+        "status": "not_run"
+      }
+    },
+    {
+      "id": "tr-02",
+      "lang": "tr",
+      "request": "Kredi kartı ödemesi ekle",
+      "should_interview": true,
+      "expected_should_interview": true,
+      "interview_match": true,
+      "detected_topics": [
+        "payments"
+      ],
+      "questions": [
+        "payments"
+      ],
+      "expected_topics": [
+        "payments"
+      ],
+      "expected_question_keys": [
+        "payments"
+      ],
+      "expected_floor": 1,
+      "forbidden_technologies": [],
+      "seeded_decision_count": 0,
+      "matched_topics": [
+        "payments"
+      ],
+      "unnecessary_question_keys": [],
+      "duplicate_question_keys": [],
+      "contradiction_expected": false,
+      "contradiction_found": false,
+      "contradictions": [],
+      "false_tech_inference": [],
+      "unconfirmed_assumptions": 0,
+      "floor_met": true,
+      "completion": true,
+      "provider": {
+        "status": "not_run"
+      }
+    },
+    {
+      "id": "tr-03",
+      "lang": "tr",
+      "request": "Veritabanı migrasyonu ekle",
+      "should_interview": true,
+      "expected_should_interview": true,
+      "interview_match": true,
+      "detected_topics": [
+        "database"
+      ],
+      "questions": [
+        "database"
+      ],
+      "expected_topics": [
+        "database"
+      ],
+      "expected_question_keys": [
+        "database"
+      ],
+      "expected_floor": 1,
+      "forbidden_technologies": [],
+      "seeded_decision_count": 0,
+      "matched_topics": [
+        "database"
+      ],
+      "unnecessary_question_keys": [],
+      "duplicate_question_keys": [],
+      "contradiction_expected": false,
+      "contradiction_found": false,
+      "contradictions": [],
+      "false_tech_inference": [],
+      "unconfirmed_assumptions": 0,
+      "floor_met": true,
+      "completion": true,
+      "provider": {
+        "status": "not_run"
+      }
+    },
+    {
+      "id": "tr-04",
+      "lang": "tr",
+      "request": "Dosya paylaşımı ve depolama ekle",
+      "should_interview": true,
+      "expected_should_interview": true,
+      "interview_match": true,
+      "detected_topics": [
+        "file_access",
+        "file_storage"
+      ],
+      "questions": [
+        "file_access",
+        "file_storage"
+      ],
+      "expected_topics": [
+        "file_access",
+        "file_storage"
+      ],
+      "expected_question_keys": [
+        "file_access",
+        "file_storage"
+      ],
+      "expected_floor": 2,
+      "forbidden_technologies": [],
+      "seeded_decision_count": 0,
+      "matched_topics": [
+        "file_access",
+        "file_storage"
+      ],
+      "unnecessary_question_keys": [],
+      "duplicate_question_keys": [],
+      "contradiction_expected": false,
+      "contradiction_found": false,
+      "contradictions": [],
+      "false_tech_inference": [],
+      "unconfirmed_assumptions": 0,
+      "floor_met": true,
+      "completion": true,
+      "provider": {
+        "status": "not_run"
+      }
+    },
+    {
+      "id": "tr-05",
+      "lang": "tr",
+      "request": "Kalıcı silme özelliği ekle",
+      "should_interview": true,
+      "expected_should_interview": true,
+      "interview_match": true,
+      "detected_topics": [
+        "data_retention"
+      ],
+      "questions": [
+        "data_retention"
+      ],
+      "expected_topics": [
+        "data_retention"
+      ],
+      "expected_question_keys": [
+        "data_retention"
+      ],
+      "expected_floor": 1,
+      "forbidden_technologies": [],
+      "seeded_decision_count": 0,
+      "matched_topics": [
+        "data_retention"
+      ],
+      "unnecessary_question_keys": [],
+      "duplicate_question_keys": [],
+      "contradiction_expected": false,
+      "contradiction_found": false,
+      "contradictions": [],
+      "false_tech_inference": [],
+      "unconfirmed_assumptions": 0,
+      "floor_met": true,
+      "completion": true,
+      "provider": {
+        "status": "not_run"
+      }
+    },
+    {
+      "id": "tr-06",
+      "lang": "tr",
+      "request": "Veriyi üçüncü tarafa aktar",
+      "should_interview": true,
+      "expected_should_interview": true,
+      "interview_match": true,
+      "detected_topics": [
+        "external_transfer"
+      ],
+      "questions": [
+        "external_transfer"
+      ],
+      "expected_topics": [
+        "external_transfer"
+      ],
+      "expected_question_keys": [
+        "external_transfer"
+      ],
+      "expected_floor": 1,
+      "forbidden_technologies": [],
+      "seeded_decision_count": 0,
+      "matched_topics": [
+        "external_transfer"
+      ],
+      "unnecessary_question_keys": [],
+      "duplicate_question_keys": [],
+      "contradiction_expected": false,
+      "contradiction_found": false,
+      "contradictions": [],
+      "false_tech_inference": [],
+      "unconfirmed_assumptions": 0,
+      "floor_met": true,
+      "completion": true,
+      "provider": {
+        "status": "not_run"
+      }
+    },
+    {
+      "id": "tr-07",
+      "lang": "tr",
+      "request": "Breaking API değişikliği yap",
+      "should_interview": true,
+      "expected_should_interview": true,
+      "interview_match": true,
+      "detected_topics": [
+        "api_compat"
+      ],
+      "questions": [
+        "api_compat"
+      ],
+      "expected_topics": [
+        "api_compat"
+      ],
+      "expected_question_keys": [
+        "api_compat"
+      ],
+      "expected_floor": 1,
+      "forbidden_technologies": [],
+      "seeded_decision_count": 0,
+      "matched_topics": [
+        "api_compat"
+      ],
+      "unnecessary_question_keys": [],
+      "duplicate_question_keys": [],
+      "contradiction_expected": false,
+      "contradiction_found": false,
+      "contradictions": [],
+      "false_tech_inference": [],
+      "unconfirmed_assumptions": 0,
+      "floor_met": true,
+      "completion": true,
+      "provider": {
+        "status": "not_run"
+      }
+    },
+    {
+      "id": "tr-08",
+      "lang": "tr",
+      "request": "Rol ve yetki modeli ekle",
+      "should_interview": true,
+      "expected_should_interview": true,
+      "interview_match": true,
+      "detected_topics": [
+        "roles"
+      ],
+      "questions": [
+        "roles"
+      ],
+      "expected_topics": [
+        "roles"
+      ],
+      "expected_question_keys": [
+        "roles"
+      ],
+      "expected_floor": 1,
+      "forbidden_technologies": [],
+      "seeded_decision_count": 0,
+      "matched_topics": [
+        "roles"
+      ],
+      "unnecessary_question_keys": [],
+      "duplicate_question_keys": [],
+      "contradiction_expected": false,
+      "contradiction_found": false,
+      "contradictions": [],
+      "false_tech_inference": [],
+      "unconfirmed_assumptions": 0,
+      "floor_met": true,
+      "completion": true,
+      "provider": {
+        "status": "not_run"
+      }
+    },
+    {
+      "id": "tr-09",
+      "lang": "tr",
+      "request": "Dosya yükleme depolaması ekle",
+      "should_interview": true,
+      "expected_should_interview": true,
+      "interview_match": true,
+      "detected_topics": [
+        "file_storage"
+      ],
+      "questions": [
+        "file_storage"
+      ],
+      "expected_topics": [
+        "file_storage"
+      ],
+      "expected_question_keys": [
+        "file_storage"
+      ],
+      "expected_floor": 1,
+      "forbidden_technologies": [
+        "s3"
+      ],
+      "seeded_decision_count": 0,
+      "matched_topics": [
+        "file_storage"
+      ],
+      "unnecessary_question_keys": [],
+      "duplicate_question_keys": [],
+      "contradiction_expected": false,
+      "contradiction_found": false,
+      "contradictions": [],
+      "false_tech_inference": [],
+      "unconfirmed_assumptions": 0,
+      "floor_met": true,
+      "completion": true,
+      "provider": {
+        "status": "not_run"
+      }
+    },
+    {
+      "id": "tr-10",
+      "lang": "tr",
+      "request": "README dosyasındaki yazım hatasını düzelt",
+      "should_interview": false,
+      "expected_should_interview": false,
+      "interview_match": true,
+      "detected_topics": [],
+      "questions": [],
+      "expected_topics": [],
+      "expected_question_keys": [],
+      "expected_floor": 0,
+      "forbidden_technologies": [
+        "jwt",
+        "postgres",
+        "s3"
+      ],
+      "seeded_decision_count": 0,
+      "matched_topics": [],
+      "unnecessary_question_keys": [],
+      "duplicate_question_keys": [],
+      "contradiction_expected": false,
+      "contradiction_found": false,
+      "contradictions": [],
+      "false_tech_inference": [],
+      "unconfirmed_assumptions": 0,
+      "floor_met": true,
+      "completion": true,
+      "provider": {
+        "status": "not_run"
+      }
+    },
+    {
+      "id": "tr-11",
+      "lang": "tr",
+      "request": "JSON doğrulama aracı ekle",
+      "should_interview": false,
+      "expected_should_interview": false,
+      "interview_match": true,
+      "detected_topics": [],
+      "questions": [],
+      "expected_topics": [],
+      "expected_question_keys": [],
+      "expected_floor": 0,
+      "forbidden_technologies": [
+        "sqlite",
+        "postgres",
+        "mysql",
+        "jwt"
+      ],
+      "seeded_decision_count": 0,
+      "matched_topics": [],
+      "unnecessary_question_keys": [],
+      "duplicate_question_keys": [],
+      "contradiction_expected": false,
+      "contradiction_found": false,
+      "contradictions": [],
+      "false_tech_inference": [],
+      "unconfirmed_assumptions": 0,
+      "floor_met": true,
+      "completion": true,
+      "provider": {
+        "status": "not_run"
+      }
+    },
+    {
+      "id": "tr-12",
+      "lang": "tr",
+      "request": "Kullanıcı giriş sistemini geliştir",
+      "should_interview": false,
+      "expected_should_interview": false,
+      "interview_match": true,
+      "detected_topics": [
+        "auth_session"
+      ],
+      "questions": [],
+      "expected_topics": [],
+      "expected_question_keys": [],
+      "expected_floor": 0,
+      "forbidden_technologies": [],
+      "seeded_decision_count": 1,
+      "matched_topics": [],
+      "unnecessary_question_keys": [],
+      "duplicate_question_keys": [],
+      "contradiction_expected": false,
+      "contradiction_found": false,
+      "contradictions": [],
+      "false_tech_inference": [],
+      "unconfirmed_assumptions": 0,
+      "floor_met": true,
+      "completion": true,
+      "provider": {
+        "status": "not_run"
+      }
+    },
+    {
+      "id": "tr-13",
+      "lang": "tr",
+      "request": "Veritabanı migrasyonu ekle",
+      "should_interview": false,
+      "expected_should_interview": false,
+      "interview_match": true,
+      "detected_topics": [
+        "database"
+      ],
+      "questions": [],
+      "expected_topics": [],
+      "expected_question_keys": [],
+      "expected_floor": 0,
+      "forbidden_technologies": [],
+      "seeded_decision_count": 1,
+      "matched_topics": [],
+      "unnecessary_question_keys": [],
+      "duplicate_question_keys": [],
+      "contradiction_expected": false,
+      "contradiction_found": false,
+      "contradictions": [],
+      "false_tech_inference": [],
+      "unconfirmed_assumptions": 0,
+      "floor_met": true,
+      "completion": true,
+      "provider": {
+        "status": "not_run"
+      }
+    },
+    {
+      "id": "tr-14",
+      "lang": "tr",
+      "request": "Oturum çerezi ile kimlik doğrulama yap",
+      "should_interview": true,
+      "expected_should_interview": true,
+      "interview_match": true,
+      "detected_topics": [
+        "auth_session"
+      ],
+      "questions": [
+        "auth_session"
+      ],
+      "expected_topics": [
+        "auth_session"
+      ],
+      "expected_question_keys": [
+        "auth_session"
+      ],
+      "expected_floor": 1,
+      "forbidden_technologies": [],
+      "seeded_decision_count": 0,
+      "matched_topics": [
+        "auth_session"
+      ],
+      "unnecessary_question_keys": [],
+      "duplicate_question_keys": [],
+      "contradiction_expected": true,
+      "contradiction_found": true,
+      "contradictions": [
+        "auth_session"
+      ],
+      "false_tech_inference": [],
+      "unconfirmed_assumptions": 0,
+      "floor_met": true,
+      "completion": true,
+      "provider": {
+        "status": "not_run"
+      }
+    },
+    {
+      "id": "tr-15",
+      "lang": "tr",
+      "request": "Kimlik doğrulama için JWT kullan",
+      "should_interview": true,
+      "expected_should_interview": true,
+      "interview_match": true,
+      "detected_topics": [
+        "auth_session"
+      ],
+      "questions": [
+        "auth_session"
+      ],
+      "expected_topics": [
+        "auth_session"
+      ],
+      "expected_question_keys": [
+        "auth_session"
+      ],
+      "expected_floor": 1,
+      "forbidden_technologies": [],
+      "seeded_decision_count": 1,
+      "matched_topics": [
+        "auth_session"
+      ],
+      "unnecessary_question_keys": [],
+      "duplicate_question_keys": [],
+      "contradiction_expected": true,
+      "contradiction_found": true,
+      "contradictions": [
+        "auth_session"
+      ],
+      "false_tech_inference": [],
+      "unconfirmed_assumptions": 0,
+      "floor_met": true,
+      "completion": true,
+      "provider": {
+        "status": "not_run"
+      }
+    },
+    {
+      "id": "tr-16",
+      "lang": "tr",
+      "request": "Ödeme, giriş ve veri silme ekle",
+      "should_interview": true,
+      "expected_should_interview": true,
+      "interview_match": true,
+      "detected_topics": [
+        "payments",
+        "data_retention",
+        "auth_session"
+      ],
+      "questions": [
+        "payments",
+        "data_retention",
+        "auth_session"
+      ],
+      "expected_topics": [
+        "payments",
+        "data_retention",
+        "auth_session"
+      ],
+      "expected_question_keys": [
+        "payments",
+        "data_retention",
+        "auth_session"
+      ],
+      "expected_floor": 3,
+      "forbidden_technologies": [],
+      "seeded_decision_count": 0,
+      "matched_topics": [
+        "auth_session",
+        "data_retention",
+        "payments"
+      ],
+      "unnecessary_question_keys": [],
+      "duplicate_question_keys": [],
+      "contradiction_expected": false,
+      "contradiction_found": false,
+      "contradictions": [],
+      "false_tech_inference": [],
+      "unconfirmed_assumptions": 0,
+      "floor_met": true,
+      "completion": true,
+      "provider": {
+        "status": "not_run"
+      }
+    },
+    {
+      "id": "tr-17",
+      "lang": "tr",
+      "request": "Kullanıcı verilerini sil ve dışa aktar",
+      "should_interview": true,
+      "expected_should_interview": true,
+      "interview_match": true,
+      "detected_topics": [
+        "data_retention",
+        "external_transfer"
+      ],
+      "questions": [
+        "data_retention",
+        "external_transfer"
+      ],
+      "expected_topics": [
+        "data_retention",
+        "external_transfer"
+      ],
+      "expected_question_keys": [
+        "data_retention",
+        "external_transfer"
+      ],
+      "expected_floor": 2,
+      "forbidden_technologies": [],
+      "seeded_decision_count": 0,
+      "matched_topics": [
+        "data_retention",
+        "external_transfer"
+      ],
+      "unnecessary_question_keys": [],
+      "duplicate_question_keys": [],
+      "contradiction_expected": false,
+      "contradiction_found": false,
+      "contradictions": [],
+      "false_tech_inference": [],
+      "unconfirmed_assumptions": 0,
+      "floor_met": true,
+      "completion": true,
+      "provider": {
+        "status": "not_run"
+      }
+    },
+    {
+      "id": "tr-18",
+      "lang": "tr",
+      "request": "Kullanıcı giriş sistemini geliştir",
+      "should_interview": true,
+      "expected_should_interview": true,
+      "interview_match": true,
+      "detected_topics": [
+        "auth_session"
+      ],
+      "questions": [
+        "auth_session"
+      ],
+      "expected_topics": [
+        "auth_session"
+      ],
+      "expected_question_keys": [
+        "auth_session"
+      ],
+      "expected_floor": 1,
+      "forbidden_technologies": [
+        "jwt",
+        "postgres"
+      ],
+      "seeded_decision_count": 0,
+      "matched_topics": [
+        "auth_session"
+      ],
+      "unnecessary_question_keys": [],
+      "duplicate_question_keys": [],
+      "contradiction_expected": false,
+      "contradiction_found": false,
+      "contradictions": [],
+      "false_tech_inference": [],
+      "unconfirmed_assumptions": 0,
+      "floor_met": true,
+      "completion": true,
+      "provider": {
+        "status": "not_run"
+      }
+    },
+    {
+      "id": "tr-19",
+      "lang": "tr",
+      "request": "Yazar biyografisini güncelle",
+      "should_interview": false,
+      "expected_should_interview": false,
+      "interview_match": true,
+      "detected_topics": [],
+      "questions": [],
+      "expected_topics": [],
+      "expected_question_keys": [],
+      "expected_floor": 0,
+      "forbidden_technologies": [
+        "jwt"
+      ],
+      "seeded_decision_count": 0,
+      "matched_topics": [],
+      "unnecessary_question_keys": [],
+      "duplicate_question_keys": [],
+      "contradiction_expected": false,
+      "contradiction_found": false,
+      "contradictions": [],
+      "false_tech_inference": [],
+      "unconfirmed_assumptions": 0,
+      "floor_met": true,
+      "completion": true,
+      "provider": {
+        "status": "not_run"
+      }
+    },
+    {
+      "id": "tr-20",
+      "lang": "tr",
+      "request": "Çok kullanıcılı dosya paylaşım sistemi ekle",
+      "should_interview": true,
+      "expected_should_interview": true,
+      "interview_match": true,
+      "detected_topics": [
+        "file_access"
+      ],
+      "questions": [
+        "file_access"
+      ],
+      "expected_topics": [
+        "file_access"
+      ],
+      "expected_question_keys": [
+        "file_access"
+      ],
+      "expected_floor": 1,
+      "forbidden_technologies": [],
+      "seeded_decision_count": 0,
+      "matched_topics": [
+        "file_access"
+      ],
+      "unnecessary_question_keys": [],
+      "duplicate_question_keys": [],
+      "contradiction_expected": false,
+      "contradiction_found": false,
+      "contradictions": [],
+      "false_tech_inference": [],
+      "unconfirmed_assumptions": 0,
+      "floor_met": true,
+      "completion": true,
+      "provider": {
+        "status": "not_run"
+      }
+    },
+    {
+      "id": "en-01",
+      "lang": "en",
+      "request": "Add login to the app",
+      "should_interview": true,
+      "expected_should_interview": true,
+      "interview_match": true,
+      "detected_topics": [
+        "auth_session"
+      ],
+      "questions": [
+        "auth_session"
+      ],
+      "expected_topics": [
+        "auth_session"
+      ],
+      "expected_question_keys": [
+        "auth_session"
+      ],
+      "expected_floor": 1,
+      "forbidden_technologies": [],
+      "seeded_decision_count": 0,
+      "matched_topics": [
+        "auth_session"
+      ],
+      "unnecessary_question_keys": [],
+      "duplicate_question_keys": [],
+      "contradiction_expected": false,
+      "contradiction_found": false,
+      "contradictions": [],
+      "false_tech_inference": [],
+      "unconfirmed_assumptions": 0,
+      "floor_met": true,
+      "completion": true,
+      "provider": {
+        "status": "not_run"
+      }
+    },
+    {
+      "id": "en-02",
+      "lang": "en",
+      "request": "Add Stripe checkout",
+      "should_interview": true,
+      "expected_should_interview": true,
+      "interview_match": true,
+      "detected_topics": [
+        "payments"
+      ],
+      "questions": [
+        "payments"
+      ],
+      "expected_topics": [
+        "payments"
+      ],
+      "expected_question_keys": [
+        "payments"
+      ],
+      "expected_floor": 1,
+      "forbidden_technologies": [],
+      "seeded_decision_count": 0,
+      "matched_topics": [
+        "payments"
+      ],
+      "unnecessary_question_keys": [],
+      "duplicate_question_keys": [],
+      "contradiction_expected": false,
+      "contradiction_found": false,
+      "contradictions": [],
+      "false_tech_inference": [],
+      "unconfirmed_assumptions": 0,
+      "floor_met": true,
+      "completion": true,
+      "provider": {
+        "status": "not_run"
+      }
+    },
+    {
+      "id": "en-03",
+      "lang": "en",
+      "request": "Add PostgreSQL migration",
+      "should_interview": true,
+      "expected_should_interview": true,
+      "interview_match": true,
+      "detected_topics": [
+        "database"
+      ],
+      "questions": [
+        "database"
+      ],
+      "expected_topics": [
+        "database"
+      ],
+      "expected_question_keys": [
+        "database"
+      ],
+      "expected_floor": 1,
+      "forbidden_technologies": [],
+      "seeded_decision_count": 0,
+      "matched_topics": [
+        "database"
+      ],
+      "unnecessary_question_keys": [],
+      "duplicate_question_keys": [],
+      "contradiction_expected": false,
+      "contradiction_found": false,
+      "contradictions": [],
+      "false_tech_inference": [],
+      "unconfirmed_assumptions": 0,
+      "floor_met": true,
+      "completion": true,
+      "provider": {
+        "status": "not_run"
+      }
+    },
+    {
+      "id": "en-04",
+      "lang": "en",
+      "request": "Implement multi-user file sharing and uploads",
+      "should_interview": true,
+      "expected_should_interview": true,
+      "interview_match": true,
+      "detected_topics": [
+        "file_access",
+        "file_storage"
+      ],
+      "questions": [
+        "file_access",
+        "file_storage"
+      ],
+      "expected_topics": [
+        "file_access",
+        "file_storage"
+      ],
+      "expected_question_keys": [
+        "file_access",
+        "file_storage"
+      ],
+      "expected_floor": 2,
+      "forbidden_technologies": [],
+      "seeded_decision_count": 0,
+      "matched_topics": [
+        "file_access",
+        "file_storage"
+      ],
+      "unnecessary_question_keys": [],
+      "duplicate_question_keys": [],
+      "contradiction_expected": false,
+      "contradiction_found": false,
+      "contradictions": [],
+      "false_tech_inference": [],
+      "unconfirmed_assumptions": 0,
+      "floor_met": true,
+      "completion": true,
+      "provider": {
+        "status": "not_run"
+      }
+    },
+    {
+      "id": "en-05",
+      "lang": "en",
+      "request": "Add data deletion",
+      "should_interview": true,
+      "expected_should_interview": true,
+      "interview_match": true,
+      "detected_topics": [
+        "data_retention"
+      ],
+      "questions": [
+        "data_retention"
+      ],
+      "expected_topics": [
+        "data_retention"
+      ],
+      "expected_question_keys": [
+        "data_retention"
+      ],
+      "expected_floor": 1,
+      "forbidden_technologies": [],
+      "seeded_decision_count": 0,
+      "matched_topics": [
+        "data_retention"
+      ],
+      "unnecessary_question_keys": [],
+      "duplicate_question_keys": [],
+      "contradiction_expected": false,
+      "contradiction_found": false,
+      "contradictions": [],
+      "false_tech_inference": [],
+      "unconfirmed_assumptions": 0,
+      "floor_met": true,
+      "completion": true,
+      "provider": {
+        "status": "not_run"
+      }
+    },
+    {
+      "id": "en-06",
+      "lang": "en",
+      "request": "Send user data to a third-party analytics service",
+      "should_interview": true,
+      "expected_should_interview": true,
+      "interview_match": true,
+      "detected_topics": [
+        "external_transfer"
+      ],
+      "questions": [
+        "external_transfer"
+      ],
+      "expected_topics": [
+        "external_transfer"
+      ],
+      "expected_question_keys": [
+        "external_transfer"
+      ],
+      "expected_floor": 1,
+      "forbidden_technologies": [],
+      "seeded_decision_count": 0,
+      "matched_topics": [
+        "external_transfer"
+      ],
+      "unnecessary_question_keys": [],
+      "duplicate_question_keys": [],
+      "contradiction_expected": false,
+      "contradiction_found": false,
+      "contradictions": [],
+      "false_tech_inference": [],
+      "unconfirmed_assumptions": 0,
+      "floor_met": true,
+      "completion": true,
+      "provider": {
+        "status": "not_run"
+      }
+    },
+    {
+      "id": "en-07",
+      "lang": "en",
+      "request": "Make a breaking change to the API response shape",
+      "should_interview": true,
+      "expected_should_interview": true,
+      "interview_match": true,
+      "detected_topics": [
+        "api_compat"
+      ],
+      "questions": [
+        "api_compat"
+      ],
+      "expected_topics": [
+        "api_compat"
+      ],
+      "expected_question_keys": [
+        "api_compat"
+      ],
+      "expected_floor": 1,
+      "forbidden_technologies": [],
+      "seeded_decision_count": 0,
+      "matched_topics": [
+        "api_compat"
+      ],
+      "unnecessary_question_keys": [],
+      "duplicate_question_keys": [],
+      "contradiction_expected": false,
+      "contradiction_found": false,
+      "contradictions": [],
+      "false_tech_inference": [],
+      "unconfirmed_assumptions": 0,
+      "floor_met": true,
+      "completion": true,
+      "provider": {
+        "status": "not_run"
+      }
+    },
+    {
+      "id": "en-08",
+      "lang": "en",
+      "request": "Add a role model for administrators",
+      "should_interview": true,
+      "expected_should_interview": true,
+      "interview_match": true,
+      "detected_topics": [
+        "roles"
+      ],
+      "questions": [
+        "roles"
+      ],
+      "expected_topics": [
+        "roles"
+      ],
+      "expected_question_keys": [
+        "roles"
+      ],
+      "expected_floor": 1,
+      "forbidden_technologies": [],
+      "seeded_decision_count": 0,
+      "matched_topics": [
+        "roles"
+      ],
+      "unnecessary_question_keys": [],
+      "duplicate_question_keys": [],
+      "contradiction_expected": false,
+      "contradiction_found": false,
+      "contradictions": [],
+      "false_tech_inference": [],
+      "unconfirmed_assumptions": 0,
+      "floor_met": true,
+      "completion": true,
+      "provider": {
+        "status": "not_run"
+      }
+    },
+    {
+      "id": "en-09",
+      "lang": "en",
+      "request": "Add file uploads to object storage",
+      "should_interview": true,
+      "expected_should_interview": true,
+      "interview_match": true,
+      "detected_topics": [
+        "file_storage"
+      ],
+      "questions": [
+        "file_storage"
+      ],
+      "expected_topics": [
+        "file_storage"
+      ],
+      "expected_question_keys": [
+        "file_storage"
+      ],
+      "expected_floor": 1,
+      "forbidden_technologies": [
+        "s3"
+      ],
+      "seeded_decision_count": 0,
+      "matched_topics": [
+        "file_storage"
+      ],
+      "unnecessary_question_keys": [],
+      "duplicate_question_keys": [],
+      "contradiction_expected": false,
+      "contradiction_found": false,
+      "contradictions": [],
+      "false_tech_inference": [],
+      "unconfirmed_assumptions": 0,
+      "floor_met": true,
+      "completion": true,
+      "provider": {
+        "status": "not_run"
+      }
+    },
+    {
+      "id": "en-10",
+      "lang": "en",
+      "request": "Fix a typo in the README",
+      "should_interview": false,
+      "expected_should_interview": false,
+      "interview_match": true,
+      "detected_topics": [],
+      "questions": [],
+      "expected_topics": [],
+      "expected_question_keys": [],
+      "expected_floor": 0,
+      "forbidden_technologies": [
+        "jwt",
+        "postgres",
+        "s3"
+      ],
+      "seeded_decision_count": 0,
+      "matched_topics": [],
+      "unnecessary_question_keys": [],
+      "duplicate_question_keys": [],
+      "contradiction_expected": false,
+      "contradiction_found": false,
+      "contradictions": [],
+      "false_tech_inference": [],
+      "unconfirmed_assumptions": 0,
+      "floor_met": true,
+      "completion": true,
+      "provider": {
+        "status": "not_run"
+      }
+    },
+    {
+      "id": "en-11",
+      "lang": "en",
+      "request": "Add a JSON schema validator",
+      "should_interview": false,
+      "expected_should_interview": false,
+      "interview_match": true,
+      "detected_topics": [],
+      "questions": [],
+      "expected_topics": [],
+      "expected_question_keys": [],
+      "expected_floor": 0,
+      "forbidden_technologies": [
+        "sqlite",
+        "postgres",
+        "mysql",
+        "jwt"
+      ],
+      "seeded_decision_count": 0,
+      "matched_topics": [],
+      "unnecessary_question_keys": [],
+      "duplicate_question_keys": [],
+      "contradiction_expected": false,
+      "contradiction_found": false,
+      "contradictions": [],
+      "false_tech_inference": [],
+      "unconfirmed_assumptions": 0,
+      "floor_met": true,
+      "completion": true,
+      "provider": {
+        "status": "not_run"
+      }
+    },
+    {
+      "id": "en-12",
+      "lang": "en",
+      "request": "Add login",
+      "should_interview": false,
+      "expected_should_interview": false,
+      "interview_match": true,
+      "detected_topics": [
+        "auth_session"
+      ],
+      "questions": [],
+      "expected_topics": [],
+      "expected_question_keys": [],
+      "expected_floor": 0,
+      "forbidden_technologies": [],
+      "seeded_decision_count": 1,
+      "matched_topics": [],
+      "unnecessary_question_keys": [],
+      "duplicate_question_keys": [],
+      "contradiction_expected": false,
+      "contradiction_found": false,
+      "contradictions": [],
+      "false_tech_inference": [],
+      "unconfirmed_assumptions": 0,
+      "floor_met": true,
+      "completion": true,
+      "provider": {
+        "status": "not_run"
+      }
+    },
+    {
+      "id": "en-13",
+      "lang": "en",
+      "request": "Add checkout",
+      "should_interview": false,
+      "expected_should_interview": false,
+      "interview_match": true,
+      "detected_topics": [
+        "payments"
+      ],
+      "questions": [],
+      "expected_topics": [],
+      "expected_question_keys": [],
+      "expected_floor": 0,
+      "forbidden_technologies": [],
+      "seeded_decision_count": 1,
+      "matched_topics": [],
+      "unnecessary_question_keys": [],
+      "duplicate_question_keys": [],
+      "contradiction_expected": false,
+      "contradiction_found": false,
+      "contradictions": [],
+      "false_tech_inference": [],
+      "unconfirmed_assumptions": 0,
+      "floor_met": true,
+      "completion": true,
+      "provider": {
+        "status": "not_run"
+      }
+    },
+    {
+      "id": "en-14",
+      "lang": "en",
+      "request": "Use session cookies for authentication",
+      "should_interview": true,
+      "expected_should_interview": true,
+      "interview_match": true,
+      "detected_topics": [
+        "auth_session"
+      ],
+      "questions": [
+        "auth_session"
+      ],
+      "expected_topics": [
+        "auth_session"
+      ],
+      "expected_question_keys": [
+        "auth_session"
+      ],
+      "expected_floor": 1,
+      "forbidden_technologies": [],
+      "seeded_decision_count": 0,
+      "matched_topics": [
+        "auth_session"
+      ],
+      "unnecessary_question_keys": [],
+      "duplicate_question_keys": [],
+      "contradiction_expected": true,
+      "contradiction_found": true,
+      "contradictions": [
+        "auth_session"
+      ],
+      "false_tech_inference": [],
+      "unconfirmed_assumptions": 0,
+      "floor_met": true,
+      "completion": true,
+      "provider": {
+        "status": "not_run"
+      }
+    },
+    {
+      "id": "en-15",
+      "lang": "en",
+      "request": "Use JWT for authentication",
+      "should_interview": true,
+      "expected_should_interview": true,
+      "interview_match": true,
+      "detected_topics": [
+        "auth_session"
+      ],
+      "questions": [
+        "auth_session"
+      ],
+      "expected_topics": [
+        "auth_session"
+      ],
+      "expected_question_keys": [
+        "auth_session"
+      ],
+      "expected_floor": 1,
+      "forbidden_technologies": [],
+      "seeded_decision_count": 1,
+      "matched_topics": [
+        "auth_session"
+      ],
+      "unnecessary_question_keys": [],
+      "duplicate_question_keys": [],
+      "contradiction_expected": true,
+      "contradiction_found": true,
+      "contradictions": [
+        "auth_session"
+      ],
+      "false_tech_inference": [],
+      "unconfirmed_assumptions": 0,
+      "floor_met": true,
+      "completion": true,
+      "provider": {
+        "status": "not_run"
+      }
+    },
+    {
+      "id": "en-16",
+      "lang": "en",
+      "request": "Add payments, login and user deletion",
+      "should_interview": true,
+      "expected_should_interview": true,
+      "interview_match": true,
+      "detected_topics": [
+        "payments",
+        "data_retention",
+        "auth_session"
+      ],
+      "questions": [
+        "payments",
+        "data_retention",
+        "auth_session"
+      ],
+      "expected_topics": [
+        "payments",
+        "data_retention",
+        "auth_session"
+      ],
+      "expected_question_keys": [
+        "payments",
+        "data_retention",
+        "auth_session"
+      ],
+      "expected_floor": 3,
+      "forbidden_technologies": [],
+      "seeded_decision_count": 0,
+      "matched_topics": [
+        "auth_session",
+        "data_retention",
+        "payments"
+      ],
+      "unnecessary_question_keys": [],
+      "duplicate_question_keys": [],
+      "contradiction_expected": false,
+      "contradiction_found": false,
+      "contradictions": [],
+      "false_tech_inference": [],
+      "unconfirmed_assumptions": 0,
+      "floor_met": true,
+      "completion": true,
+      "provider": {
+        "status": "not_run"
+      }
+    },
+    {
+      "id": "en-17",
+      "lang": "en",
+      "request": "Export user data to an external service",
+      "should_interview": true,
+      "expected_should_interview": true,
+      "interview_match": true,
+      "detected_topics": [
+        "external_transfer"
+      ],
+      "questions": [
+        "external_transfer"
+      ],
+      "expected_topics": [
+        "external_transfer"
+      ],
+      "expected_question_keys": [
+        "external_transfer"
+      ],
+      "expected_floor": 1,
+      "forbidden_technologies": [],
+      "seeded_decision_count": 0,
+      "matched_topics": [
+        "external_transfer"
+      ],
+      "unnecessary_question_keys": [],
+      "duplicate_question_keys": [],
+      "contradiction_expected": false,
+      "contradiction_found": false,
+      "contradictions": [],
+      "false_tech_inference": [],
+      "unconfirmed_assumptions": 0,
+      "floor_met": true,
+      "completion": true,
+      "provider": {
+        "status": "not_run"
+      }
+    },
+    {
+      "id": "en-18",
+      "lang": "en",
+      "request": "Add authentication",
+      "should_interview": true,
+      "expected_should_interview": true,
+      "interview_match": true,
+      "detected_topics": [
+        "auth_session"
+      ],
+      "questions": [
+        "auth_session"
+      ],
+      "expected_topics": [
+        "auth_session"
+      ],
+      "expected_question_keys": [
+        "auth_session"
+      ],
+      "expected_floor": 1,
+      "forbidden_technologies": [
+        "jwt",
+        "postgres"
+      ],
+      "seeded_decision_count": 0,
+      "matched_topics": [
+        "auth_session"
+      ],
+      "unnecessary_question_keys": [],
+      "duplicate_question_keys": [],
+      "contradiction_expected": false,
+      "contradiction_found": false,
+      "contradictions": [],
+      "false_tech_inference": [],
+      "unconfirmed_assumptions": 0,
+      "floor_met": true,
+      "completion": true,
+      "provider": {
+        "status": "not_run"
+      }
+    },
+    {
+      "id": "en-19",
+      "lang": "en",
+      "request": "Update the author biography",
+      "should_interview": false,
+      "expected_should_interview": false,
+      "interview_match": true,
+      "detected_topics": [],
+      "questions": [],
+      "expected_topics": [],
+      "expected_question_keys": [],
+      "expected_floor": 0,
+      "forbidden_technologies": [
+        "jwt"
+      ],
+      "seeded_decision_count": 0,
+      "matched_topics": [],
+      "unnecessary_question_keys": [],
+      "duplicate_question_keys": [],
+      "contradiction_expected": false,
+      "contradiction_found": false,
+      "contradictions": [],
+      "false_tech_inference": [],
+      "unconfirmed_assumptions": 0,
+      "floor_met": true,
+      "completion": true,
+      "provider": {
+        "status": "not_run"
+      }
+    },
+    {
+      "id": "en-20",
+      "lang": "en",
+      "request": "Add session management",
+      "should_interview": true,
+      "expected_should_interview": true,
+      "interview_match": true,
+      "detected_topics": [
+        "auth_session"
+      ],
+      "questions": [
+        "auth_session"
+      ],
+      "expected_topics": [
+        "auth_session"
+      ],
+      "expected_question_keys": [
+        "auth_session"
+      ],
+      "expected_floor": 1,
+      "forbidden_technologies": [],
+      "seeded_decision_count": 0,
+      "matched_topics": [
+        "auth_session"
+      ],
+      "unnecessary_question_keys": [],
+      "duplicate_question_keys": [],
+      "contradiction_expected": false,
+      "contradiction_found": false,
+      "contradictions": [],
+      "false_tech_inference": [],
+      "unconfirmed_assumptions": 0,
+      "floor_met": true,
+      "completion": true,
+      "provider": {
+        "status": "not_run"
+      }
+    }
+  ]
+}

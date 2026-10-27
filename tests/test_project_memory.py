@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+import sqlite3
 import subprocess
 import tempfile
 import time
@@ -468,6 +469,163 @@ class ProjectMemoryTests(unittest.TestCase):
         self.assertEqual(bundle["active_interview"]["interview_id"],
                          "iv_" + "a" * 16)
         self.assertIn("stale", bundle)
+
+
+    def test_v1_interview_question_schema_is_migrated(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            state = root / ".auto-orchestrator"
+            state.mkdir(parents=True)
+            conn = sqlite3.connect(str(state / "memory.sqlite3"))
+            conn.executescript("""
+            CREATE TABLE interviews (
+              interview_id TEXT PRIMARY KEY,
+              project_id TEXT NOT NULL,
+              origin_platform TEXT NOT NULL,
+              request_hash TEXT NOT NULL,
+              request_summary TEXT NOT NULL,
+              mode TEXT NOT NULL,
+              status TEXT NOT NULL,
+              approved_at REAL,
+              created_at REAL NOT NULL,
+              updated_at REAL NOT NULL,
+              schema_version INTEGER NOT NULL DEFAULT 1
+            );
+            CREATE TABLE interview_questions (
+              interview_id TEXT NOT NULL,
+              question_id TEXT NOT NULL,
+              ordinal INTEGER NOT NULL,
+              question_key TEXT NOT NULL,
+              question TEXT NOT NULL,
+              options TEXT NOT NULL,
+              recommended_option TEXT,
+              selected_option TEXT,
+              answer_text TEXT,
+              answer_source TEXT,
+              status TEXT NOT NULL,
+              depends_on TEXT NOT NULL,
+              created_at REAL NOT NULL,
+              answered_at REAL,
+              PRIMARY KEY(interview_id,question_id),
+              UNIQUE(interview_id,question_key)
+            );
+            """)
+            conn.commit()
+            conn.close()
+            with ProjectMemory(root) as memory:
+                columns = {row[1] for row in memory.conn.execute(
+                    "PRAGMA table_info(interview_questions)")}
+                self.assertTrue({"why", "rationale", "alternatives",
+                                 "affected_requirements", "dependency"}
+                                <= columns)
+                now = time.time()
+                memory.conn.execute(
+                    "INSERT INTO interviews(interview_id,project_id,"
+                    "origin_platform,request_hash,request_summary,mode,status,"
+                    "created_at,updated_at,schema_version) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,1)",
+                    ("iv_" + "a" * 16, memory.project_id, "codex",
+                     hashlib.sha256(b"legacy request").hexdigest(),
+                     "Legacy interview", "auto", "open", now, now))
+                memory.conn.execute(
+                    "INSERT INTO interview_questions(interview_id,question_id,"
+                    "ordinal,question_key,question,options,recommended_option,"
+                    "status,depends_on,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    ("iv_" + "a" * 16, "q_" + "b" * 16, 0, "auth_session",
+                     "Legacy question?", json.dumps([]), None, "open", "[]",
+                     now))
+                memory.conn.commit()
+                question = memory.list_questions("iv_" + "a" * 16)[0]
+                self.assertEqual(question["question"], "Legacy question?")
+                self.assertIsNone(question["why"])
+                self.assertEqual(question["alternatives"], [])
+                self.assertEqual(question["affected_requirements"], [])
+
+    def test_old_schema_one_bundle_imports_without_new_metadata(self):
+        interview_id = "iv_" + "c" * 16
+        question_id = "q_" + "d" * 16
+        now = time.time()
+        payload = {
+            "schema_version": 1,
+            "identity": {"project_uuid": self.memory.identity["project_uuid"]},
+            "decisions": [],
+            "requirements": [],
+            "interviews": [{
+                "interview_id": interview_id,
+                "origin_platform": "codex",
+                "request_hash": hashlib.sha256(b"old bundle").hexdigest(),
+                "request_summary": "Old bundle interview",
+                "mode": "auto",
+                "status": "open",
+                "approved_at": None,
+                "created_at": now,
+                "updated_at": now,
+                "schema_version": 1,
+                "questions": [{
+                    "interview_id": interview_id,
+                    "question_id": question_id,
+                    "ordinal": 0,
+                    "question_key": "auth_session",
+                    "question": "Old question?",
+                    "options": [{"id": "jwt", "label": "JWT",
+                                 "recommended": True}],
+                    "recommended_option": "jwt",
+                    "status": "open",
+                    "depends_on": [],
+                    "created_at": now,
+                }],
+            }],
+        }
+        payload["digest"] = bundle_digest(payload)
+        source = Path(self.temp.name) / "old-bundle.json"
+        source.write_text(json.dumps(payload), encoding="utf-8")
+        target_root = Path(self.temp.name) / "old-target"
+        state = target_root / ".auto-orchestrator"
+        state.mkdir(parents=True)
+        shutil.copy2(self.root / ".auto-orchestrator" / "project.json",
+                     state / "project.json")
+        with ProjectMemory(target_root) as memory:
+            result = memory.import_bundle(source, apply=True)
+            self.assertTrue(result["applied"], result)
+            self.assertEqual(result["conflicts"], [])
+            questions = memory.list_questions(interview_id)
+            self.assertEqual(len(questions), 1)
+            self.assertEqual(questions[0]["question_id"], question_id)
+            self.assertIsNone(questions[0]["why"])
+            self.assertEqual(questions[0]["alternatives"], [])
+
+    def test_question_metadata_export_import_roundtrip(self):
+        from tools.grill_me import GrillMeEngine
+        with GrillMeEngine(self.root) as engine:
+            started = engine.start("Kullanıcı giriş sistemini geliştir",
+                                   origin_platform="codex", mode="auto")
+            question = started["question"]
+            interview_id = started["interview"]["interview_id"]
+        target = Path(self.temp.name) / "metadata-bundle.json"
+        self.memory.export_bundle(target)
+        payload = json.loads(target.read_text(encoding="utf-8"))
+        exported = payload["interviews"][0]["questions"][0]
+        self.assertEqual(exported["why"], question["why"])
+        self.assertEqual(exported["alternatives"], question["alternatives"])
+        self.assertEqual(exported["affected_requirements"],
+                         question["affected_requirements"])
+        target_root = Path(self.temp.name) / "metadata-target"
+        state = target_root / ".auto-orchestrator"
+        state.mkdir(parents=True)
+        shutil.copy2(self.root / ".auto-orchestrator" / "project.json",
+                     state / "project.json")
+        with ProjectMemory(target_root) as memory:
+            result = memory.import_bundle(target, apply=True)
+            self.assertTrue(result["applied"], result)
+            restored = memory.list_questions(interview_id)[0]
+            self.assertEqual(restored["why"], question["why"])
+            self.assertEqual(restored["rationale"], question["rationale"])
+            self.assertEqual(restored["alternatives"],
+                             question["alternatives"])
+            self.assertEqual(restored["affected_requirements"],
+                             question["affected_requirements"])
+            self.assertEqual(restored["dependency"], question["dependency"])
+            self.assertEqual(memory.active_interview()["schema_version"], 2)
 
 
 if __name__ == "__main__":

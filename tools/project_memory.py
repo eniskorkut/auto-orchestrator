@@ -34,6 +34,17 @@ except ModuleNotFoundError:
     from run_owner import atomic_write_json, read_json  # type: ignore
 
 SCHEMA_VERSION = 1
+# Interviews written by V7.7+ carry question metadata columns. Older bundle
+# schema_version 1 imports remain readable and are kept at version 1.
+INTERVIEW_SCHEMA_VERSION = 2
+QUESTION_METADATA_COLUMNS = (
+    ("why", "TEXT"),
+    ("rationale", "TEXT"),
+    ("alternatives", "TEXT"),
+    ("affected_requirements", "TEXT"),
+    ("dependency", "TEXT"),
+    ("critical", "INTEGER"),
+)
 DECISION_STATUSES = {
     "confirmed", "code_derived", "unresolved", "superseded", "rejected",
 }
@@ -302,6 +313,12 @@ class ProjectMemory:
           depends_on TEXT NOT NULL,
           created_at REAL NOT NULL,
           answered_at REAL,
+          why TEXT,
+          rationale TEXT,
+          alternatives TEXT,
+          affected_requirements TEXT,
+          dependency TEXT,
+          critical INTEGER,
           PRIMARY KEY(interview_id,question_id),
           UNIQUE(interview_id,question_key)
         );
@@ -315,6 +332,23 @@ class ProjectMemory:
                 self.conn.execute(
                     "ALTER TABLE project_handoffs ADD COLUMN imported "
                     "INTEGER NOT NULL DEFAULT 0")
+        except sqlite3.Error:
+            pass
+        # V7.7 question metadata. Columns are nullable so a database created
+        # by V7.6 (or an old bundle) keeps working without a data rewrite.
+        try:
+            columns = {row[1] for row in self.conn.execute(
+                "PRAGMA table_info(interview_questions)")}
+            for name, sql_type in QUESTION_METADATA_COLUMNS:
+                if name not in columns:
+                    try:
+                        self.conn.execute(
+                            f"ALTER TABLE interview_questions ADD COLUMN "
+                            f"{name} {sql_type}")
+                    except sqlite3.Error:
+                        # Another process may have migrated concurrently; a
+                        # failed column must not stop the remaining columns.
+                        pass
         except sqlite3.Error:
             pass
         self.conn.commit()
@@ -744,6 +778,39 @@ class ProjectMemory:
         return {"contract_id": contract_id, "contract_version": version,
                 "sha256": sha, "path": name, "updated_at": updated_at}
 
+    @staticmethod
+    def question_view(row):
+        """Public, JSON-ready interview question including V7.7 metadata."""
+        value = dict(row)
+        value["options"] = _json_array(value.get("options"))
+        value["depends_on"] = _json_array(value.get("depends_on"))
+        value["alternatives"] = _json_array(value.get("alternatives"))
+        value["affected_requirements"] = _json_array(
+            value.get("affected_requirements"))
+        value["why"] = value.get("why") or None
+        value["rationale"] = value.get("rationale") or None
+        value["dependency"] = value.get("dependency") or None
+        value["critical"] = bool(
+            True if value.get("critical") is None else value.get("critical"))
+        return value
+
+    def list_questions(self, interview_id, *, status=None, limit=200) -> list[dict]:
+        """Select persisted questions (with metadata) for one interview."""
+        if not INTERVIEW_ID.fullmatch(str(interview_id)):
+            raise MemoryError("interview id is invalid")
+        values = [self.project_id, interview_id]
+        sql = ("SELECT q.* FROM interview_questions q JOIN interviews i "
+               "ON i.interview_id=q.interview_id WHERE i.project_id=? "
+               "AND q.interview_id=?")
+        if status is not None:
+            if status not in QUESTION_STATUSES:
+                raise MemoryError("unsupported question status")
+            sql += " AND q.status=?"
+            values.append(status)
+        values.append(min(max(int(limit), 1), 500))
+        return [self.question_view(row) for row in self.conn.execute(
+            sql + " ORDER BY q.ordinal LIMIT ?", values)]
+
     def active_interview(self) -> dict | None:
         """Return the newest unresolved Grill-Me interview and its open question."""
         row = self.conn.execute(
@@ -758,10 +825,7 @@ class ProjectMemory:
             "status='open' ORDER BY ordinal LIMIT 1",
             (value["interview_id"],)).fetchone()
         if question is not None:
-            item = dict(question)
-            item["options"] = _json_array(item.get("options"))
-            item["depends_on"] = _json_array(item.get("depends_on"))
-            value["question"] = item
+            value["question"] = self.question_view(question)
         else:
             value["question"] = None
         counts = {row["status"]: row["count"] for row in self.conn.execute(
@@ -778,10 +842,7 @@ class ProjectMemory:
                 "SELECT * FROM interview_questions WHERE interview_id=? AND "
                 "status IN ('open','skipped','invalidated') "
                 "ORDER BY ordinal LIMIT 20", (value["interview_id"],)):
-            item = dict(row)
-            item["options"] = _json_array(item.get("options"))
-            item["depends_on"] = _json_array(item.get("depends_on"))
-            value["blocking_questions"].append(item)
+            value["blocking_questions"].append(self.question_view(row))
         value["goal"] = value["request_summary"]
         value["summary"] = (
             f"{value['status']}: {value['request_summary']} "
@@ -1034,10 +1095,7 @@ class ProjectMemory:
                     "SELECT * FROM interview_questions WHERE interview_id=? "
                     "ORDER BY ordinal LIMIT ?",
                     (value["interview_id"], EXPORT_LIMITS["questions"])):
-                item = dict(question)
-                item["options"] = _json_array(item.get("options"))
-                item["depends_on"] = _json_array(item.get("depends_on"))
-                questions.append(item)
+                questions.append(self.question_view(question))
             value["questions"] = questions
             result.append(value)
         return result
@@ -1294,7 +1352,8 @@ class ProjectMemory:
                 or not re.fullmatch(r"[0-9a-f]{64}", request_hash)):
             raise MemoryError("interview request hash is invalid")
         schema_version = item.get("schema_version", 1)
-        if type(schema_version) is not int or schema_version != 1:
+        if type(schema_version) is not int or schema_version not in (
+                SCHEMA_VERSION, INTERVIEW_SCHEMA_VERSION):
             raise MemoryError("unsupported interview schema version")
         return {
             "interview_id": interview_id,
@@ -1348,6 +1407,15 @@ class ProjectMemory:
                                     required=False, limit=40) or None),
             "status": status,
             "depends_on": _list(item.get("depends_on"), "depends_on"),
+            "why": (_text(item.get("why"), "why", required=False, limit=2000)
+                    or None),
+            "rationale": (_text(item.get("rationale"), "rationale",
+                                required=False, limit=2000) or None),
+            "alternatives": _list(item.get("alternatives"), "alternatives"),
+            "affected_requirements": _list(
+                item.get("affected_requirements"), "affected_requirements"),
+            "dependency": (_text(item.get("dependency"), "dependency",
+                                 required=False, limit=200) or None),
             "created_at": (_timestamp(item.get("created_at"), "created_at")
                            or time.time()),
             "answered_at": _timestamp(item.get("answered_at"), "answered_at"),
@@ -1819,14 +1887,14 @@ class ProjectMemory:
             action = "add"
             match = None
             if row is not None:
-                existing = dict(row)
-                existing["options"] = _json_array(existing.get("options"))
-                existing["depends_on"] = _json_array(existing.get("depends_on"))
+                existing = self.question_view(row)
                 reasons.extend(self._field_reasons(
                     existing, value,
                     ("ordinal", "question_key", "question", "options",
                      "recommended_option", "selected_option", "answer_text",
-                     "answer_source", "status", "depends_on")))
+                     "answer_source", "status", "depends_on", "why",
+                     "rationale", "alternatives", "affected_requirements",
+                     "dependency")))
                 if reasons:
                     reasons.insert(0, _reason(
                         "question_id", "id_conflict",
@@ -1839,16 +1907,14 @@ class ProjectMemory:
                     "AND question_key=?",
                     (value["interview_id"], value["question_key"])).fetchone()
                 if row is not None:
-                    existing = dict(row)
-                    existing["options"] = _json_array(existing.get("options"))
-                    existing["depends_on"] = _json_array(
-                        existing.get("depends_on"))
+                    existing = self.question_view(row)
                     reasons.extend(self._field_reasons(
                         existing, value,
                         ("ordinal", "question", "options",
                          "recommended_option", "selected_option",
                          "answer_text", "answer_source", "status",
-                         "depends_on")))
+                         "depends_on", "why", "rationale", "alternatives",
+                         "affected_requirements", "dependency")))
                     if reasons:
                         reasons.insert(0, _reason(
                             "question_key", "natural_key_conflict",
@@ -1974,8 +2040,9 @@ class ProjectMemory:
               INSERT INTO interview_questions(interview_id,question_id,ordinal,
                 question_key,question,options,recommended_option,
                 selected_option,answer_text,answer_source,status,depends_on,
-                created_at,answered_at)
-              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                created_at,answered_at,why,rationale,alternatives,
+                affected_requirements,dependency)
+              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (value["interview_id"], value["question_id"],
                   value["ordinal"], value["question_key"], value["question"],
                   json.dumps(value["options"], ensure_ascii=False),
@@ -1983,7 +2050,11 @@ class ProjectMemory:
                   value["answer_text"], value["answer_source"],
                   value["status"],
                   json.dumps(value["depends_on"], ensure_ascii=False),
-                  value["created_at"], value["answered_at"]))
+                  value["created_at"], value["answered_at"],
+                  value["why"], value["rationale"],
+                  json.dumps(value["alternatives"], ensure_ascii=False),
+                  json.dumps(value["affected_requirements"], ensure_ascii=False),
+                  value["dependency"]))
         else:  # pragma: no cover - classification only emits known kinds
             raise MemoryError("unsupported import item")
 

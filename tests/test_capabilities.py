@@ -5,6 +5,7 @@ import io
 import json
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
+from pathlib import Path
 
 from tools import capabilities
 
@@ -149,6 +150,77 @@ class CapabilityMatrixTests(unittest.TestCase):
         filtered = capabilities.matrix("opencode")["managed_execution"]["platforms"]
         self.assertEqual(list(filtered), ["opencode"])
 
+    def test_teamwork_entry_files_are_real_and_do_not_shadow_native_surfaces(self):
+        root = Path(__file__).resolve().parents[1]
+        expected = {
+            "codex": [".codex/skills/teamwork/SKILL.md"],
+            "opencode": [".opencode/commands/teamwork.md",
+                         ".opencode/commands/grill-me.md",
+                         ".opencode/skills/teamwork/SKILL.md"],
+            "antigravity": [".agents/skills/ao-grill-me/SKILL.md"],
+            "cursor": [".cursor/agents/auto_planner.md",
+                       ".cursor/agents/auto_implementer.md",
+                       ".cursor/agents/auto_tester.md",
+                       ".cursor/agents/auto_reviewer.md"],
+        }
+        for platform, files in expected.items():
+            with self.subTest(platform=platform):
+                for relative in files:
+                    self.assertTrue((root / relative).is_file(), relative)
+        # Codex has a skill file but no claimed slash command file.
+        self.assertFalse((root / ".codex/commands/teamwork.md").exists())
+        # Antigravity's portable interview must not reuse the native name.
+        self.assertFalse((root / ".gemini/antigravity-cli/skills/grill-me").exists())
+        self.assertFalse((root / ".gemini/config/skills/grill-me").exists())
+
+    def test_teamwork_entry_statuses_and_binding_limits_are_conservative(self):
+        document = capabilities.matrix()
+        self.assertEqual(
+            document["teamwork_entry_statuses"],
+            ["native-skill", "native-slash", "plugin-command", "contract-only"],
+        )
+        self.assertEqual(set(document["teamwork_entry_descriptions"]),
+                         set(document["teamwork_entry_statuses"]))
+        expected = {
+            "codex": "native-skill",
+            "opencode": "plugin-command",
+            "antigravity": "native-slash",
+            "cursor": "contract-only",
+        }
+        for record in document["platforms"]:
+            platform = record["platform"]
+            with self.subTest(platform=platform):
+                entry = record["teamwork_entry"]
+                self.assertEqual(entry["status"], expected[platform])
+                self.assertIn(entry["status"], capabilities.TEAMWORK_ENTRY_STATUSES)
+                self.assertTrue(entry["entry_points"])
+                self.assertTrue(entry["native_or_managed"])
+                limits = entry["binding_limits"]
+                self.assertFalse(limits["external_spawn"])
+                self.assertFalse(limits["native_cancel_ack"])
+                self.assertFalse(limits["native_session_resume"])
+                self.assertFalse(limits["native_session_claimed"])
+                self.assertFalse(limits["background_authoritative"])
+                self.assertIn("note", limits)
+        # Codex must not claim a slash command merely because a skill exists.
+        codex = capabilities.get_platform("codex")["teamwork_entry"]
+        self.assertEqual(codex["slash_commands"], [])
+        self.assertIn("No /teamwork slash command", codex["authoritative_source"])
+        self.assertIn("parent", codex["parent_session_boundary"].lower())
+        # Antigravity's native /grill-me stays authoritative and our own
+        # interview must be named differently.
+        antigravity = capabilities.get_platform("antigravity")["teamwork_entry"]
+        self.assertIn("/teamwork-preview", antigravity["slash_commands"])
+        self.assertIn("/grill-me", antigravity["slash_commands"])
+        self.assertTrue(any("ao-grill-me" in item for item in antigravity["entry_points"]))
+        self.assertNotIn("grill-me", [item for item in antigravity["entry_points"]
+                                      if item.endswith("/grill-me")])
+        # Cursor ships no invented command format.
+        cursor = capabilities.get_platform("cursor")["teamwork_entry"]
+        self.assertEqual(cursor["slash_commands"], [])
+        for role in ("planner", "implementer", "tester", "reviewer"):
+            self.assertTrue(any(role in item for item in cursor["entry_points"]), role)
+
     def test_platform_filter_and_unknown_platform(self):
         document = capabilities.matrix("CODEX")
         self.assertEqual(len(document["platforms"]), 1)
@@ -194,6 +266,9 @@ class CapabilityMatrixTests(unittest.TestCase):
         self.assertIn("No live IDE smoke test is claimed", text)
         self.assertIn("native_start_stop_proof: foreground-only", text)
         self.assertIn("native_spawn_exposed_to_external_orchestrator: false", text)
+        self.assertIn("Teamwork entry points", text)
+        self.assertIn("codex: native-skill", text)
+        self.assertIn("antigravity: native-slash", text)
 
     def test_cli_rejects_unknown_platform(self):
         stderr = io.StringIO()

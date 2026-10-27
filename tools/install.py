@@ -28,6 +28,45 @@ MANIFEST_RELATIVE = Path('.auto-orchestrator/install-manifest.json')
 MANIFEST_VERSION = 1
 V761_MODULES = ('requirements_contract.py', 'assumption_guard.py',
                 'git_memory_hook.py')
+V77_MODULES = ('completion_engine.py', 'context_selector.py',
+               'grill_llm.py', 'grill_benchmark.py')
+# Installer-generated runtime and integration files may be upgraded in place
+# only while the manifest still proves the file is ours. Everything else keeps
+# the conservative opt-in rule.
+MANAGED_PREFIXES = (
+    'tools/',
+    '.agents/skills/',
+    '.agents/agents/',
+    '.codex/agents/',
+    '.codex/skills/',
+    '.cursor/agents/',
+    '.opencode/agents/',
+    '.opencode/commands/',
+    '.opencode/skills/',
+    '.gemini/',
+)
+
+
+def _managed_relative(relative: str) -> bool:
+    return any(relative == prefix.rstrip('/') or relative.startswith(prefix)
+               for prefix in MANAGED_PREFIXES)
+
+
+def _prunable_for_selection(relative: str, selected: set[str]) -> bool:
+    """Do not remove another platform's integration on a scoped install."""
+    owners = (
+        ('.codex/', 'codex'),
+        ('.opencode/', 'opencode'),
+        ('.cursor/', 'cursor'),
+        ('.gemini/', 'antigravity'),
+    )
+    for prefix, platform in owners:
+        if relative.startswith(prefix):
+            return platform in selected
+    # Shared .agents files remain for other platforms; only the selected
+    # platform's integration files and common tools may be pruned.
+    return relative.startswith('tools/')
+
 
 class Conflict(Exception):
     pass
@@ -59,7 +98,7 @@ def rendered(source:Path, target:Path)->str:
 
 
 def write_file(dest: Path, text: str, dry_run: bool, force: bool = False,
-               managed: bool = False) -> str:
+               managed: bool = False, backup: bool = False) -> str:
     existed = dest.is_file()
     if existed:
         old_bytes = dest.read_bytes()
@@ -72,7 +111,7 @@ def write_file(dest: Path, text: str, dry_run: bool, force: bool = False,
         if not force and not managed:
             raise Conflict(f'Existing file differs: {dest}. No overwrite (use --force-generated for generated profiles).')
         if not dry_run:
-            if force:
+            if force or backup:
                 shutil.copy2(dest, dest.with_name(dest.name + '.bak'))
             dest.write_bytes(text.encode('utf-8'))
     elif dest.exists():
@@ -232,7 +271,7 @@ def _runtime_sources() -> list[Path]:
                ROOT/'tools/grill_me.py', ROOT/'tools/universal_teamwork.py']
     # V7.6.1 modules ship when present. A partial source tree must not make a
     # previously working installer unusable.
-    sources.extend(ROOT/'tools'/name for name in V761_MODULES
+    sources.extend(ROOT/'tools'/name for name in V761_MODULES + V77_MODULES
                    if (ROOT/'tools'/name).is_file())
     return sources
 
@@ -248,19 +287,26 @@ def install(target: Path, platform: str, codex_model: str, dry_run: bool, force_
         if source == ROOT/'adapters/opencode-v2/auto_orchestrator.js':
             return target/'.opencode/plugins/auto_orchestrator.js'
         return target/source.relative_to(ROOT)
-    sources = [ROOT/'.agents/skills/auto-orchestrator/SKILL.md',
-               ROOT/'.agents/skills/grill-me/SKILL.md']
+    sources = [ROOT/'.agents/skills/auto-orchestrator/SKILL.md']
     sources.extend(sorted((ROOT/'.agents/skills/auto-orchestrator/references').glob('*.md')))
+    if selected & {'codex', 'opencode', 'cursor'}:
+        sources.append(ROOT/'.agents/skills/grill-me/SKILL.md')
+    if 'antigravity' in selected:
+        sources.append(ROOT/'.agents/skills/ao-grill-me/SKILL.md')
     sources.extend(_runtime_sources())
     sources.extend(sorted(p for p in (ROOT/'tools/dashboard_assets').rglob('*') if p.is_file()))
     if 'codex' in selected:
         sources.extend(sorted((ROOT/'.codex/agents').glob('*.toml')))
+        sources.extend(sorted(p for p in (ROOT/'.codex/skills').rglob('*') if p.is_file()))
         sources.append(ROOT/'.codex/hooks.json')
     if 'opencode' in selected:
         sources.extend(sorted((ROOT/'.opencode/agents').glob('*.md')))
         commands = ROOT/'.opencode/commands'
         if commands.is_dir():
             sources.extend(sorted(commands.glob('*.md')))
+        skills = ROOT/'.opencode/skills'
+        if skills.is_dir():
+            sources.extend(sorted(p for p in skills.rglob('*') if p.is_file()))
         sources.append(ROOT/('adapters/opencode-v2/auto_orchestrator.js' if opencode_version == 'v2' else '.opencode/plugins/auto_orchestrator.js'))
     if 'antigravity' in selected:
         sources.extend(sorted((ROOT/'.agents/agents').glob('*.md')))
@@ -272,10 +318,10 @@ def install(target: Path, platform: str, codex_model: str, dry_run: bool, force_
     outputs: list[tuple[Path, str]] = [
         (destination(source), rendered(source, target)) for source in sources]
     if 'antigravity' in selected:
-        grill = ROOT/'.agents/skills/grill-me/SKILL.md'
+        grill = ROOT/'.agents/skills/ao-grill-me/SKILL.md'
         if grill.is_file():
             outputs.append((
-                target/'.gemini/antigravity-cli/skills/grill-me/SKILL.md',
+                target/'.gemini/antigravity-cli/skills/ao-grill-me/SKILL.md',
                 grill.read_bytes().decode('utf-8')))
 
     manifest_path = _manifest_path(target)
@@ -302,10 +348,11 @@ def install(target: Path, platform: str, codex_model: str, dry_run: bool, force_
             # Line-ending differences are not user content changes.
             old_normalized = old.replace('\r\n', '\n')
             text_normalized = text.replace('\r\n', '\n')
-            # Runtime modules and dashboard assets may upgrade in place only
-            # when the manifest proves the file is still installer-generated.
-            # Profiles, plugins and skill files keep the stricter opt-in rule.
-            managed_update = relative.startswith('tools/') and managed(relative, dest)
+            # Runtime modules, dashboard assets, skills, commands and agent
+            # profiles may upgrade in place only when the manifest proves the
+            # file is still installer-generated. User-modified files (or files
+            # without a manifest entry) keep the stricter opt-in rule.
+            managed_update = _managed_relative(relative) and managed(relative, dest)
             if old_normalized != text_normalized and not managed_update:
                 raise Conflict(f'Existing file differs: {dest}; nothing changed.')
     conf = target/'.codex/config.toml'
@@ -326,12 +373,28 @@ def install(target: Path, platform: str, codex_model: str, dry_run: bool, force_
 
     results=[]
     records: dict[str, dict] = {}
+    new_relatives = {dest.relative_to(target).as_posix() for dest, _ in outputs}
+    if 'codex' in selected:
+        new_relatives.add('.codex/config.toml')
+    # Obsolete managed integration files can be pruned only when they are
+    # still byte-identical to the manifest. Modified files stay on disk and in
+    # the manifest so an uninstall can preserve or report them.
+    obsolete: list[str] = []
+    for relative, checksum in old_files.items():
+        if relative in new_relatives or not _managed_relative(relative):
+            continue
+        if not _prunable_for_selection(relative, selected):
+            continue
+        dest = target / relative
+        guard_dest(target, dest)
+        if dest.is_file() and _sha256_file(dest) == checksum:
+            obsolete.append(relative)
     for dest, text in outputs:
         relative = dest.relative_to(target).as_posix()
         existed = dest.is_file()
-        managed_update = relative.startswith('tools/') and managed(relative, dest)
+        managed_update = _managed_relative(relative) and managed(relative, dest)
         state = write_file(dest, text, dry_run, force_generated,
-                           managed_update)
+                           managed_update, backup=managed_update)
         results.append((relative, state))
         records[relative] = {
             'sha256': _sha256_bytes(text.encode('utf-8')),
@@ -346,6 +409,11 @@ def install(target: Path, platform: str, codex_model: str, dry_run: bool, force_
             'sha256': _sha256_bytes(MODEL_SETTING[codex_model].encode('utf-8')),
             'created': bool(not existed or '.codex/config.toml' in old_created),
         }
+    for relative in obsolete:
+        if not dry_run:
+            (target / relative).unlink()
+        results.append((relative,
+                        'would-remove-obsolete' if dry_run else 'removed-obsolete'))
     g_existed = g.is_file()
     ignore_path = target/'.gitignore'
     ignore_existed = ignore_path.is_file()
@@ -358,6 +426,8 @@ def install(target: Path, platform: str, codex_model: str, dry_run: bool, force_
     results.append(('.gitignore', patch_ignore(ignore_path, dry_run)))
 
     new_files = dict(old_files)
+    for relative in obsolete:
+        new_files.pop(relative, None)
     new_created = set(old_created)
     for relative, record in records.items():
         new_files[relative] = record['sha256']
@@ -365,6 +435,7 @@ def install(target: Path, platform: str, codex_model: str, dry_run: bool, force_
             new_created.add(relative)
         else:
             new_created.discard(relative)
+    new_created.difference_update(obsolete)
     new_guidance = set(manifest['guidance'])
     if g.is_file() or not dry_run:
         new_guidance.add('AGENTS.md')

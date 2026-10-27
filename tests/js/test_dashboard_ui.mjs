@@ -55,6 +55,30 @@ test('every data-i18n key in index.html exists in both dictionaries', () => {
   }
 });
 
+test('teamwork 2.0 mode, execution and contract labels are translated', () => {
+  const modes = ['solo', 'fast', 'balanced', 'rigorous', 'auto'];
+  for (const mode of modes) {
+    assert.ok(I18n.dictionary.en[`milestone.mode.${mode}`]);
+    assert.ok(I18n.dictionary.tr[`milestone.mode.${mode}`]);
+  }
+  for (const kind of ['managed', 'native', 'native-planned', 'plan-only', 'unknown']) {
+    assert.ok(I18n.dictionary.en[`milestone.execution.${kind}`]);
+    assert.ok(I18n.dictionary.tr[`milestone.execution.${kind}`]);
+  }
+  for (const status of ['verified', 'partially_verified', 'not_verified', 'failed', 'not_run']) {
+    assert.ok(I18n.dictionary.en[`memory.contractStatus.${status}`]);
+    assert.ok(I18n.dictionary.tr[`memory.contractStatus.${status}`]);
+  }
+  assert.equal(I18n.t('milestone.mode.auto'), 'AUTO');
+  assert.equal(I18n.t('milestone.costUnknown'), 'cost unknown');
+  assert.equal(I18n.t('milestone.tokensUnknown'), 'tokens unknown');
+  assert.equal(I18n.t('memory.contractNotVerified', { count: 2 }), '2 criteria not verified');
+  I18n.setLanguage('tr', { persist: false, announce: false });
+  assert.equal(I18n.t('milestone.mode.auto'), 'OTOMATİK');
+  assert.equal(I18n.t('memory.contractNotVerified', { count: 2 }), '2 ölçüt doğrulanmadı');
+  I18n.setLanguage('en', { persist: false, announce: false });
+});
+
 test('status vocabulary covers every required evidence status and alias', () => {
   const required = [
     'idle',

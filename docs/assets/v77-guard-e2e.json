@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "kind": "v761-guard-contract-e2e",
+  "assumption_guard": {
+    "exit_code": 0,
+    "status": "interview_required",
+    "question": "file_access",
+    "reasons": [
+      "Critical ambiguity in file_access: no confirmed decision or code/config evidence resolves it."
+    ],
+    "plan_created": false,
+    "active_created": false
+  },
+  "contract_verification": {
+    "approved": true,
+    "contract_id": "rc_1b981df612a04023",
+    "version": 1,
+    "cookie_code": {
+      "status": "failed",
+      "ok": false,
+      "failed_checks": [
+        "ac_02_auth_session"
+      ]
+    },
+    "jwt_code": {
+      "status": "partially_verified",
+      "ok": true,
+      "passed_checks": [
+        "ac_02_auth_session"
+      ],
+      "not_verified": 1
+    }
+  },
+  "cross_ide_resume": {
+    "origin_platform": "codex",
+    "resumed_question": "jwt_refresh",
+    "approved": true,
+    "confirmed_topics": [
+      "jwt_refresh",
+      "auth_session"
+    ]
+  }
+}

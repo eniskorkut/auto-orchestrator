@@ -1,0 +1,149 @@
+{
+  "schema_version": 1,
+  "kind": "v77-completion-e2e",
+  "contract": {
+    "id": "rc_cb962145369788fe",
+    "version": 1,
+    "schema_version": 2,
+    "critical_test_ids": [
+      "test_jwt_access_issuance",
+      "test_jwt_refresh_issuance",
+      "test_invalid_refresh_rejected",
+      "test_jwt_expiry_enforced"
+    ]
+  },
+  "wrong_implementation": {
+    "exit_code": 0,
+    "signals": [
+      "test_jwt_access_issuance",
+      "test_auth_jwt.AuthTests.test_jwt_access_issuance",
+      "AuthTests.test_jwt_access_issuance"
+    ],
+    "status": "partially_verified",
+    "verified_completion": false,
+    "critical_failures": 0,
+    "missing_test_ids": [
+      "test_invalid_refresh_rejected",
+      "test_jwt_expiry_enforced",
+      "test_jwt_refresh_issuance"
+    ]
+  },
+  "repair": {
+    "exit_code": 0,
+    "signals": [
+      "test_invalid_refresh_rejected",
+      "test_auth_jwt.AuthTests.test_invalid_refresh_rejected",
+      "AuthTests.test_invalid_refresh_rejected",
+      "test_jwt_access_issuance",
+      "test_auth_jwt.AuthTests.test_jwt_access_issuance",
+      "AuthTests.test_jwt_access_issuance",
+      "test_jwt_expiry_enforced",
+      "test_auth_jwt.AuthTests.test_jwt_expiry_enforced",
+      "AuthTests.test_jwt_expiry_enforced",
+      "test_jwt_refresh_issuance",
+      "test_auth_jwt.AuthTests.test_jwt_refresh_issuance",
+      "AuthTests.test_jwt_refresh_issuance"
+    ],
+    "review": {
+      "role": "reviewer",
+      "verdict": "pass",
+      "independent": true,
+      "summary": "Both decisions implemented: signed access/refresh JWTs, 15-minute access tokens, 7-day refresh tokens, and refresh-to-access exchange with token-type validation. All 4 tests pass. Files unchanged.",
+      "findings": [],
+      "status": "completed",
+      "tokens": {
+        "input": 160300,
+        "output": 654,
+        "reasoning": 20,
+        "cache_read": 133248,
+        "cache_write": 0,
+        "total": 160954,
+        "cache": {
+          "read": 133248,
+          "write": 0
+        }
+      },
+      "parsed": true
+    },
+    "status": "verified",
+    "verified_completion": true,
+    "fully_verified": true,
+    "criteria": [
+      {
+        "id": "ac_01_jwt_refresh",
+        "state": "verified",
+        "behavioral": "pass",
+        "conformance": "pass",
+        "missing": []
+      },
+      {
+        "id": "ac_02_auth_session",
+        "state": "verified",
+        "behavioral": "pass",
+        "conformance": "pass",
+        "missing": []
+      }
+    ],
+    "levels": {
+      "implementation": {
+        "status": "verified",
+        "checks": [
+          {
+            "criterion_id": "ac_01_jwt_refresh",
+            "state": "verified",
+            "detail": "changed files are present"
+          },
+          {
+            "criterion_id": "ac_02_auth_session",
+            "state": "verified",
+            "detail": "changed files are present"
+          }
+        ]
+      },
+      "behavioral": {
+        "status": "verified",
+        "checks": [
+          {
+            "criterion_id": "ac_01_jwt_refresh",
+            "state": "verified",
+            "detail": "all required test signals observed",
+            "test_ids": [
+              "test_jwt_access_issuance",
+              "test_jwt_refresh_issuance",
+              "test_invalid_refresh_rejected",
+              "test_jwt_expiry_enforced"
+            ],
+            "missing": []
+          },
+          {
+            "criterion_id": "ac_02_auth_session",
+            "state": "verified",
+            "detail": "all required test signals observed",
+            "test_ids": [
+              "test_jwt_access_issuance",
+              "test_jwt_refresh_issuance",
+              "test_invalid_refresh_rejected",
+              "test_jwt_expiry_enforced"
+            ],
+            "missing": []
+          }
+        ]
+      },
+      "conformance": {
+        "status": "verified",
+        "checks": [
+          {
+            "criterion_id": "ac_01_jwt_refresh",
+            "state": "verified",
+            "detail": "independent review passed"
+          },
+          {
+            "criterion_id": "ac_02_auth_session",
+            "state": "verified",
+            "detail": "code evidence: jwt=True"
+          }
+        ]
+      }
+    }
+  }
+}

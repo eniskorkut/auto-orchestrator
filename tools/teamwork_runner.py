@@ -21,6 +21,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shlex
 import sqlite3
 import subprocess
@@ -32,6 +33,12 @@ from pathlib import Path
 from typing import Any, Callable
 
 try:
+    from tools.completion_engine import (
+        evaluate_completion,
+        parse_passed_test_signals,
+        parse_test_signals,
+    )
+    from tools.context_selector import runner_context
     from tools.executor import Executor, ExecutorError, validate_acceptance
     from tools.managed_exec import ManagedError, adapter_for
     from tools.project_memory import MemoryError, ProjectMemory
@@ -65,6 +72,12 @@ try:
     from tools.telemetry import record_event, span
     from tools.worktree import WorktreeError, create as create_worktree, read_manifest
 except ModuleNotFoundError:  # python tools/teamwork_runner.py
+    from completion_engine import (  # type: ignore
+        evaluate_completion,
+        parse_passed_test_signals,
+        parse_test_signals,
+    )
+    from context_selector import runner_context  # type: ignore
     from executor import Executor, ExecutorError, validate_acceptance  # type: ignore
     from managed_exec import ManagedError, adapter_for  # type: ignore
     from project_memory import MemoryError, ProjectMemory  # type: ignore
@@ -175,6 +188,33 @@ def parse_verdict(text: str) -> dict | None:
         if isinstance(value, dict) and value.get("verdict") in ("pass", "fail"):
             found = value
     return found
+
+
+_SECRET_LINE = (
+    re.compile(r"(?i)\b(password|passwd|secret|token|api[_-]?key|"
+               r"authorization|bearer)\b(\s*[:=]\s*)(\S+)"),
+)
+_SECRET_AUTH_LINE = re.compile(
+    r"(?im)^(\s*(?:authorization|proxy-authorization)\s*[:=]\s*).+$")
+_ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
+
+
+def safe_command_output(output: str) -> tuple[str, bool]:
+    """Return a bounded command tail and whether it is safe to persist.
+
+    Real command output is useful repair evidence, but it may contain a
+    credential. Obvious secret assignments are redacted; binary/NUL output is
+    omitted instead of partially persisted.
+    """
+    if not isinstance(output, str) or not output:
+        return "", True
+    if "\x00" in output:
+        return "", False
+    text = _ANSI.sub("", output)
+    for pattern in _SECRET_LINE:
+        text = pattern.sub(r"\1\2<redacted>", text)
+    text = _SECRET_AUTH_LINE.sub(r"\1<redacted>", text)
+    return text[-MAX_COMMAND_OUTPUT:], True
 
 
 def command_argv(command: str) -> list[str]:
@@ -324,6 +364,10 @@ class TeamworkRunner:
         )
         self._integrated: set[str] = set()
         self._context_cache: dict[str, str] = {}
+        # Latest real command observations, including safe output tails. This
+        # stays in process memory for final completion evaluation; agent prose
+        # and raw output are never added to task results.
+        self._latest_test_evidence: dict[str, list[dict]] = {}
 
     def close(self) -> None:
         for adapter in list(self.adapters.values()):
@@ -470,12 +514,15 @@ class TeamworkRunner:
         if prior:
             lines.append("Prior milestone handoff (bounded context):\n" + prior)
         try:
-            project_context = self.memory.context_summary(limit=1600)
+            request = self.plan.get("request") or self.plan.get("goal") or ""
+            project_context = runner_context(
+                self.memory, request, budget_tokens=600, max_chars=3200)
         except (MemoryError, OSError, ValueError):
             project_context = ""
         if project_context:
-            lines.append("Persistent project memory (verified; do not treat "
-                         "code-derived facts as user decisions):\n" + project_context)
+            lines.append("Persistent project memory (selected, provenance-bearing; "
+                         "do not treat code-derived facts as user decisions):\n"
+                         + project_context)
         if repair_reason:
             lines.append(f"Repair context: {repair_reason}")
         if role == "explorer":
@@ -539,6 +586,28 @@ class TeamworkRunner:
                 f"Requirements contract could not be loaded: {self.contract_error}")
         if self.contract is None:
             return
+        mode = str(self.plan.get("work_mode") or "").lower()
+        if mode in ("solo", "fast"):
+            topics = {str(item.get("topic") or "").lower()
+                      for item in (self.contract or {}).get("confirmed_decisions", [])
+                      if isinstance(item, dict)}
+            request_text = self.plan.get("request")
+            if isinstance(request_text, str) and request_text.strip():
+                try:
+                    try:
+                        from tools import assumption_guard
+                    except ModuleNotFoundError:
+                        import assumption_guard  # type: ignore
+                    topics.update(assumption_guard.detect_topics(request_text))
+                except Exception:
+                    pass
+            high = topics & {"auth_session", "jwt_refresh", "payments",
+                             "data_retention", "database", "api_compat",
+                             "file_access", "file_storage"}
+            if high:
+                raise RunnerError(
+                    f"{mode.upper()} is not allowed for high-risk contract topics: "
+                    + ", ".join(sorted(high)))
         try:
             validate_contract_state(self.root, self.contract)
             current = load_current(self.root)
@@ -646,25 +715,35 @@ class TeamworkRunner:
                     timeout=min(float(task.get("timeout_seconds", 900)), 1800),
                     env=env,
                 )
-                output = ((result.stdout or "") + (result.stderr or ""))[-MAX_COMMAND_OUTPUT:]
+                stdout = result.stdout or ""
+                combined = stdout + (result.stderr or "")
+                output, output_safe = safe_command_output(combined)
+                signals = parse_passed_test_signals(combined)
                 status = "passed" if result.returncode == 0 else "failed"
                 tests.append({
                     "name": command[:200],
+                    "command": command[:500],
                     "status": status,
                     "exit_code": result.returncode,
                     "duration_ms": round((time.monotonic() - started) * 1000, 1),
+                    "signals": signals,
                     "evidence": output,
+                    "output_omitted": not output_safe,
                 })
             except subprocess.TimeoutExpired:
                 tests.append({
-                    "name": command[:200], "status": "failed", "exit_code": None,
+                    "name": command[:200], "command": command[:500],
+                    "status": "failed", "exit_code": None,
                     "duration_ms": round((time.monotonic() - started) * 1000, 1),
+                    "signals": [],
                     "evidence": "verification command timed out",
                 })
             except (OSError, RunnerError) as exc:
                 tests.append({
-                    "name": command[:200], "status": "failed", "exit_code": None,
+                    "name": command[:200], "command": command[:500],
+                    "status": "failed", "exit_code": None,
                     "duration_ms": round((time.monotonic() - started) * 1000, 1),
+                    "signals": [],
                     "evidence": str(exc)[:1000],
                 })
             if tests[-1]["status"] == "failed":
@@ -786,6 +865,9 @@ class TeamworkRunner:
             self._scope_check(task, worktree_changed)
             if status == "completed":
                 commands = self._run_commands(task, run)
+                self._latest_test_evidence[task["id"]] = [
+                    dict(item, task_id=task["id"], attempt=run.attempt,
+                         source="runner") for item in commands]
                 if any(item["status"] == "failed" for item in commands):
                     failure = "A verification command failed"
                 if task["role"] in ("critic", "reviewer", "tester", "challenger",
@@ -845,9 +927,12 @@ class TeamworkRunner:
 
         tests = [{
             "name": item["name"],
+            "command": item.get("command") or item["name"],
             "status": item["status"],
             "exit_code": item.get("exit_code"),
             "duration_ms": item.get("duration_ms"),
+            "signals": list(item.get("signals") or [])[:500],
+            "source": "runner",
         } for item in commands]
         if task["role"] in ("implementer", "tester") and not tests:
             self.executor.fail(self.run_id, task["id"], claimed["lease"],
@@ -872,6 +957,8 @@ class TeamworkRunner:
             "changed_files": changed,
             "tests": tests,
             "findings": findings,
+            "commit_sha": (self._git(self.root, "rev-parse", "HEAD",
+                                     check=False).stdout.strip() or None),
             "verdict": (verdict.get("verdict") if isinstance(verdict, dict)
                         else ("pass" if task["role"] not in (
                             "critic", "reviewer", "tester", "challenger",
@@ -1438,6 +1525,15 @@ class TeamworkRunner:
                 return summary
             state = self.engine.status(self.run_id)
             self._heartbeat(state)
+            # A SOLO milestone can pass immediately after its single build
+            # task. Integrate its worktree before terminal finalize writes a
+            # handoff or exposes passed state.
+            for milestone in state["milestones"]:
+                if (milestone["status"] in (
+                        "ready", "running", "verifying", "repairing", "passed")
+                        and milestone["id"] not in self._integrated):
+                    if self._integrate(milestone):
+                        state = self.engine.status(self.run_id)
             if state["status"] in ("passed", "cancelled"):
                 return self.finalize(state)
             if self._pause_requested():
@@ -1547,6 +1643,47 @@ class TeamworkRunner:
             (self.run_id, task_id)).fetchone()
         return row["lease"] if row else ""
 
+    def _merged_tree_test(self) -> dict | None:
+        """Run one approved test command on the integrated root checkout."""
+        candidates = []
+        if isinstance(self.plan.get("verification_command"), str):
+            candidates.append(self.plan["verification_command"])
+        if isinstance(self.plan.get("test_command"), str):
+            candidates.append(self.plan["test_command"])
+        for task in self.plan.get("tasks") or []:
+            if not isinstance(task, dict):
+                continue
+            for command in task.get("verify_commands") or []:
+                if isinstance(command, str):
+                    candidates.append(command)
+        command = next((item for item in candidates
+                        if any(token in item for token in
+                               ("unittest", "pytest", "npm test", "go test",
+                                "cargo test", "make test", "make check"))), None)
+        if not command:
+            return None
+        argv = command_argv(command)
+        started = time.monotonic()
+        try:
+            result = subprocess.run(
+                argv, cwd=self.root, capture_output=True, text=True,
+                encoding="utf-8", errors="replace",
+                timeout=min(float(self.max_seconds), 1800),
+                env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+        except (OSError, subprocess.SubprocessError):
+            return None
+        output = safe_command_output(
+            (result.stdout or "") + (result.stderr or ""))[0]
+        return {
+            "name": command[:200], "command": command[:500],
+            "status": "passed" if result.returncode == 0 else "failed",
+            "exit_code": result.returncode,
+            "duration_ms": round((time.monotonic() - started) * 1000, 1),
+            "signals": parse_passed_test_signals(
+                (result.stdout or "") + (result.stderr or "")),
+            "source": "merged-tree", "task_id": None,
+        }
+
     def finalize(self, state: dict, error: str | None = None,
                  forced_status: str | None = None) -> dict:
         state = self.engine.status(self.run_id)
@@ -1554,18 +1691,79 @@ class TeamworkRunner:
         if error and status not in ("passed", "failed", "cancelled"):
             status = "failed"
         contract_result = None
+        completion_result = None
         if self.contract is not None:
             tests = []
+            changed_files = []
+            commits = []
+            reviews = []
             for milestone in state["milestones"]:
                 for task in milestone.get("tasks", []):
                     result = task.get("result") if isinstance(task, dict) else None
-                    for item in (result or {}).get("tests", []) if isinstance(result, dict) else []:
-                        if isinstance(item, dict):
-                            tests.append({
-                                "command": str(item.get("name") or ""),
-                                "exit_code": item.get("exit_code"),
-                                "status": item.get("status"),
-                            })
+                    if not isinstance(result, dict):
+                        continue
+                    task_id = task.get("id")
+                    for item in result.get("tests", []) or []:
+                        if not isinstance(item, dict):
+                            continue
+                        latest = self._latest_test_evidence.get(task_id)
+                        if latest:
+                            continue
+                        tests.append({
+                            "command": str(item.get("command")
+                                           or item.get("name") or ""),
+                            "exit_code": item.get("exit_code"),
+                            "status": item.get("status"),
+                            "signals": list(item.get("signals") or []),
+                            "source": "runner",
+                            "task_id": task_id,
+                        })
+                    for path in result.get("changed_files", []) or []:
+                        if isinstance(path, str) and path not in changed_files:
+                            changed_files.append(path)
+                    for commit in result.get("commits", []) or []:
+                        if isinstance(commit, str) and commit not in commits:
+                            commits.append(commit)
+                    if (task.get("role") in ("reviewer", "auditor",
+                                             "challenger", "success-auditor")
+                            and result.get("verdict") in ("pass", "fail")):
+                        reviews.append({
+                            "task_id": task_id,
+                            "role": task.get("role"),
+                            "verdict": result.get("verdict"),
+                            "commit": result.get("commit_sha"),
+                            "independent": True,
+                        })
+            for task_id, items in self._latest_test_evidence.items():
+                if any(task.get("id") == task_id and task.get("state") == "completed"
+                       for milestone in state["milestones"]
+                       for task in milestone.get("tasks", [])):
+                    tests.extend(items)
+            head = self._git(self.root, "rev-parse", "HEAD",
+                             check=False).stdout.strip() or None
+            merged_test = self._merged_tree_test()
+            if merged_test is not None:
+                tests.append(merged_test)
+            try:
+                completion_result = evaluate_completion(
+                    self.root, self.contract, plan=self.plan,
+                    run_id=self.run_id, state=state, changed_files=changed_files,
+                    commits=commits, test_results=tests, reviews=reviews,
+                    commit_sha=head,
+                    verification_command=self.plan.get("verification_command"),
+                )
+            except (ContractError, MemoryError, OSError, ValueError,
+                    TypeError, KeyError) as exc:
+                completion_result = {
+                    "status": "blocked", "aggregate_status": "blocked",
+                    "fully_verified": False, "verified_completion": False,
+                    "run_passed": False, "criteria": [],
+                    "critical_failures": [{"reason": str(exc)[:500]}],
+                    "blocking": [{"reason": str(exc)[:500]}],
+                    "reasons": [str(exc)[:500]],
+                    "contract_id": self.contract.get("contract_id"),
+                    "contract_version": self.contract.get("contract_version"),
+                }
             try:
                 contract_result = verify_contract(
                     self.root, self.contract, test_results=tests)
@@ -1576,12 +1774,38 @@ class TeamworkRunner:
                     "contract_id": self.contract["contract_id"],
                     "contract_version": self.contract["contract_version"],
                 }
-            if not contract_result.get("ok") and status == "passed":
-                status = "failed"
-                error = ((error + "; ") if error else "") + (
-                    "Verified requirements contract failed: "
-                    + "; ".join(str(item) for item in contract_result.get("reasons", []))[:1500]
-                )
+            schema_version = self.contract.get("schema_version", 1)
+            if schema_version == 1:
+                # Legacy contracts keep their exact V7.6 semantics.
+                if not contract_result.get("ok") and status == "passed":
+                    status = "failed"
+                    error = ((error + "; ") if error else "") + (
+                        "Verified requirements contract failed: "
+                        + "; ".join(str(item) for item in
+                                    contract_result.get("reasons", []))[:1500])
+            else:
+                critical = completion_result.get("critical_failures") or []
+                blocked = (completion_result.get("stale")
+                           or completion_result.get("status") == "blocked")
+                if (critical or blocked) and status == "passed":
+                    status = "failed"
+                    detail = [
+                        str(item.get("reason") or item.get("criterion_id"))
+                        for item in critical][:8]
+                    if not detail:
+                        detail = [str(completion_result.get("stale_reason")
+                                      or "completion is blocked")]
+                    error = ((error + "; ") if error else "") + (
+                        "Verified completion failed: "
+                        + "; ".join(detail)[:1500])
+            try:
+                self.engine.record_requirements(self.run_id, completion_result)
+            except (TeamworkError, OSError, ValueError):
+                # Completion evidence is already written; status projection
+                # remains available if persistence is unavailable.
+                pass
+            self._write_evidence("completion-verification", 0,
+                                 completion_result)
             self._write_evidence("contract-verification", 0, contract_result)
         # Record handoffs only when the contract gate did not reject the run.
         handoffs = []
@@ -1606,8 +1830,11 @@ class TeamworkRunner:
             "timings": self.timings,
             "handoffs": handoffs,
             "requirements_contract": contract_result,
-            "quality_gate": ({"contract": contract_result}
-                             if contract_result is not None else None),
+            "requirements": completion_result,
+            "quality_gate": ({
+                "contract": contract_result,
+                "completion": completion_result,
+            } if contract_result is not None else None),
             "error": error,
         }
         summary["recovered_orphans"] = list(self._recovered)

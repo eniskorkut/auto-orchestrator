@@ -211,5 +211,45 @@ class AssumptionGuardTests(unittest.TestCase):
         self.assertEqual(first["receipt"], second["receipt"])
 
 
+    def test_deterministic_questions_carry_decision_metadata(self):
+        questions = assumption_guard.critical_questions(
+            "Ödeme, giriş ve veri silme ekle", [], {}, mode="auto")
+        self.assertEqual([item["key"] for item in questions],
+                         ["payments", "data_retention", "auth_session"])
+        for question in questions:
+            self.assertTrue(question["why"])
+            self.assertTrue(question["rationale"])
+            self.assertTrue(question["alternatives"])
+            self.assertTrue(question["affected_requirements"])
+            self.assertTrue(question["critical"])
+            self.assertIsNone(question["dependency"])
+            for option in question["options"]:
+                self.assertEqual(set(option), {"id", "label", "recommended"})
+            self.assertEqual(
+                question["recommended_option"],
+                next(option["id"] for option in question["options"]
+                     if option["recommended"]))
+
+    def test_followup_and_scope_metadata_are_deterministic(self):
+        followup = assumption_guard.followup_questions("auth_session", "jwt")[0]
+        self.assertEqual(followup["key"], "jwt_refresh")
+        self.assertEqual(followup["dependency"], "auth_session")
+        self.assertTrue(followup["why"])
+        self.assertTrue(followup["rationale"])
+        scope = assumption_guard.critical_questions(
+            "Fix a typo in README", [], {}, mode="required")[0]
+        self.assertEqual(scope["key"], "scope")
+        self.assertTrue(scope["why"])
+        self.assertTrue(scope["affected_requirements"])
+
+    def test_receipt_digest_is_unaffected_by_question_metadata(self):
+        first = assumption_guard.evaluate(
+            self.root, "Fix a typo in README", platform="codex")
+        second = assumption_guard.evaluate(
+            self.root, "Fix a typo in README", platform="codex")
+        self.assertEqual(first["context_digest"], second["context_digest"])
+        self.assertEqual(first["guard_receipt"], second["guard_receipt"])
+
+
 if __name__ == "__main__":
     unittest.main()

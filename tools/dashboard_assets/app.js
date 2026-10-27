@@ -215,9 +215,9 @@
     return state.language === 'tr' ? `%${rounded}` : `${rounded}%`;
   }
 
-  function shortId(value) {
+  function shortId(value, length = 8) {
     if (!value) return '—';
-    return String(value).slice(0, 8);
+    return String(value).slice(0, length);
   }
 
   function sum(values) {
@@ -1723,6 +1723,12 @@
       ?? memory.contract_version
       ?? contract?.contract_version
       ?? contract?.version;
+    const contractVerification = memory.contract_verification || null;
+    const contractStatus = contractVerification?.status
+      || memory.contract_status || 'not_run';
+    const contractNotVerified = contractVerification?.not_verified
+      ?? memory.contract_not_verified;
+    const handoffHistory = Array.isArray(memory.handoffs) ? memory.handoffs : [];
     const lastMilestone = memory.last_milestone
       || memory.context?.last_milestone
       || memory.state?.last_milestone;
@@ -1744,9 +1750,22 @@
             }) })
             : null,
           contractVersion != null
-            ? h('span', { class: 'memory-contract', text: t('memory.contract', {
-              version: contractVersion,
-            }) })
+            ? h('span', {
+              class: `memory-contract${contractStatus === 'partially_verified' ? ' warning' : ''}`,
+              'data-status': contractStatus,
+              text: t('memory.contract', {
+                version: contractVersion,
+                status: t(`memory.contractStatus.${contractStatus}`),
+              }),
+            })
+            : null,
+          contractVersion != null
+            ? h('span', {
+              class: 'memory-contract-detail',
+              text: contractNotVerified == null
+                ? t('memory.contractNotVerifiedUnknown')
+                : t('memory.contractNotVerified', { count: contractNotVerified }),
+            })
             : null,
         ),
       ),
@@ -1772,11 +1791,41 @@
             || handoff.payload?.summary || t('memory.none') }),
         )
         : null,
+      handoffHistory.length
+        ? h('div', { class: 'memory-handoff-history' },
+          h('span', { class: 'memory-label', text: t('memory.handoffHistory') }),
+          h('ul', {}, ...handoffHistory.map((item) => h('li', {
+            class: item.verified ? 'verified' : 'unverified',
+            text: t('memory.handoffHistoryItem', {
+              milestone: item.milestone_id || '?',
+              platform: item.platform || 'unknown',
+              age: item.created_at == null
+                ? t('milestone.unknown')
+                : fmtDuration(Math.max(0, Date.now() / 1000 - Number(item.created_at))),
+              state: item.verified
+                ? t('memory.handoffVerified')
+                : t('memory.handoffUnverified'),
+            }),
+          }))),
+        )
+        : null,
       question
         ? h('div', { class: 'memory-question' },
           h('span', { class: 'memory-label', text: t('memory.currentQuestion') }),
           active?.request_summary
             ? h('span', { class: 'memory-interview-summary', text: active.request_summary })
+            : null,
+          active?.interview_id
+            ? h('span', {
+              class: 'memory-interview-meta',
+              text: t('memory.interviewMeta', {
+                id: shortId(active.interview_id, 12),
+                status: active.status || 'unknown',
+                age: active.age_seconds == null
+                  ? t('milestone.unknown')
+                  : fmtDuration(active.age_seconds),
+              }),
+            })
             : null,
           h('strong', { text: question.question }),
           h('ul', {}, ...(question.options || []).map((option) => h('li', {
@@ -1818,6 +1867,126 @@
     );
   }
 
+  function modeChip(run) {
+    const mode = run?.mode_label || run?.work_mode || 'auto';
+    return h('span', {
+      class: 'mode-chip', 'data-mode': mode,
+      text: t(`milestone.mode.${mode}`),
+    });
+  }
+
+  function executionChip(run) {
+    const execution = run?.execution || {};
+    const kind = execution.native_or_managed || 'unknown';
+    const provider = execution.provider || 'unknown';
+    return h('span', {
+      class: 'execution-chip', 'data-kind': kind, 'data-provider': provider,
+      title: t('milestone.executionTitle', {
+        origin: execution.origin_platform || 'unknown',
+        provider,
+      }),
+      text: t(`milestone.execution.${kind}`, { provider }),
+    });
+  }
+
+  function usageChips(run) {
+    const usage = run?.usage || {};
+    const measuredCost = usage.cost_measured === true
+      && typeof usage.cost_total_usd === 'number';
+    const measuredTokens = usage.tokens_measured === true
+      && usage.tokens && typeof usage.tokens === 'object';
+    const nodes = [];
+    nodes.push(h('span', {
+      class: 'cost-chip', 'data-measured': String(measuredCost),
+      text: measuredCost
+        ? t('milestone.cost', { cost: Number(usage.cost_total_usd).toFixed(4) })
+        : t('milestone.costUnknown'),
+    }));
+    if (measuredTokens) {
+      const input = usage.tokens.input;
+      const output = usage.tokens.output;
+      nodes.push(h('span', {
+        class: 'token-chip', 'data-measured': 'true',
+        text: t('milestone.tokens', {
+          input: input == null ? t('milestone.unknown') : fmtNumber(input),
+          output: output == null ? t('milestone.unknown') : fmtNumber(output),
+        }),
+      }));
+    } else {
+      nodes.push(h('span', {
+        class: 'token-chip', 'data-measured': 'false',
+        text: t('milestone.tokensUnknown'),
+      }));
+    }
+    const providers = Array.isArray(usage.by_provider) ? usage.by_provider : [];
+    if (providers.length) {
+      const summary = providers.map((provider) => {
+        const cost = provider.cost_measured && typeof provider.cost_total_usd === 'number'
+          ? `$${Number(provider.cost_total_usd).toFixed(4)}` : t('milestone.unknown');
+        const tokens = provider.tokens_measured === true && provider.tokens
+          ? t('milestone.providerTokens', {
+            input: provider.tokens.input == null
+              ? t('milestone.unknown') : fmtNumber(provider.tokens.input),
+            output: provider.tokens.output == null
+              ? t('milestone.unknown') : fmtNumber(provider.tokens.output),
+          })
+          : t('milestone.unknown');
+        return `${provider.provider}: ${cost} · ${tokens}`;
+      }).join(' · ');
+      nodes.push(h('span', {
+        class: 'provider-cost-chip', 'data-providers': providers.length,
+        text: t('milestone.providerCost', { summary }),
+      }));
+    }
+    return nodes;
+  }
+
+  function contractChip(run) {
+    const contract = run?.contract_verification || null;
+    const version = contract?.contract_version
+      ?? run?.contract_version
+      ?? run?.contract_ref?.contract_version
+      ?? run?.requirements_contract?.contract_version;
+    const status = contract?.status || run?.contract_status || 'not_run';
+    if (status === 'not_run' || !contract) {
+      if (version == null) return null;
+      return h('span', {
+        class: 'contract-chip', 'data-status': 'not_run',
+        text: t('milestone.contractUnknown', { version }),
+      });
+    }
+    const partial = status === 'partially_verified';
+    const count = contract.not_verified;
+    return h('span', {
+      class: `contract-chip${partial ? ' warning' : ''}`,
+      'data-status': status,
+      title: contract.reasons?.length ? contract.reasons.join(' · ') : '',
+      text: partial
+        ? t('milestone.contractPartial', {
+          version: version ?? '?',
+          count: count == null ? t('milestone.unknown') : count,
+        })
+        : t(`milestone.contract.${status}`, { version: version ?? '?' }),
+    });
+  }
+
+  function requirementsChip(run) {
+    const value = run?.requirements || null;
+    if (!value) return null;
+    const status = value.status || 'not_started';
+    const warning = ['partially_verified', 'needs_review',
+      'implemented_unverified', 'failed', 'blocked'].includes(status);
+    return h('span', {
+      class: `contract-chip requirements-chip${warning ? ' warning' : ''}`,
+      'data-status': status,
+      'data-requirements-status': status,
+      title: (value.reasons || []).join(' · '),
+      text: t(`milestone.requirements.${status}`, {
+        count: value.critical_unverified ?? 0,
+      }),
+    });
+  }
+
   function renderMilestones() {
     const boardHost = $('#board-milestones');
     const officeHost = $('#office-milestones');
@@ -1841,10 +2010,11 @@
           ),
           h('div', { class: 'milestone-progress' },
             demo ? h('span', { class: 'demo-chip', text: 'DEMO DATA' }) : null,
-            activeRun.work_mode
-              ? h('span', { class: 'mode-chip', 'data-mode': activeRun.work_mode,
-                            text: t(`milestone.mode.${activeRun.work_mode}`) })
-              : null,
+            modeChip(activeRun),
+            executionChip(activeRun),
+            ...usageChips(activeRun),
+            contractChip(activeRun),
+            requirementsChip(activeRun),
             activeRun.recovery_state
               ? h('span', {
                 class: 'recovery-chip',
@@ -1871,11 +2041,6 @@
               : null,
             activeRun.scheduler?.repairing
               ? h('span', { class: 'repair-chip', text: t('milestone.repairing') })
-              : null,
-            activeRun.usage?.cost_measured
-              ? h('span', { class: 'cost-chip', text: t('milestone.cost', {
-                cost: Number(activeRun.usage.cost_total_usd).toFixed(4),
-              }) })
               : null,
             h('span', {
               text: t('milestone.verifiedProgress', {
@@ -1949,10 +2114,10 @@
       officeHost.append(
         h('div', { class: 'office-milestone-strip' },
           h('span', { class: 'office-milestone-label', text: t('milestone.current') }),
-          activeRun.work_mode
-            ? h('span', { class: 'mode-chip', 'data-mode': activeRun.work_mode,
-                          text: t(`milestone.mode.${activeRun.work_mode}`) })
-            : null,
+          modeChip(activeRun),
+          executionChip(activeRun),
+          contractChip(activeRun),
+          requirementsChip(activeRun),
           h('button', {
             class: 'office-milestone-open', type: 'button',
             onclick: () => selectMilestone(activeRun, current),
@@ -3352,6 +3517,37 @@
     document.body.classList.add('inspector-open');
   }
 
+  function inspectorContractBlock(value) {
+    if (!value || typeof value !== 'object') return null;
+    const contract = value.contract || {};
+    const verification = value.verification || null;
+    const status = value.status || verification?.status || 'not_run';
+    const version = verification?.contract_version ?? contract.contract_version;
+    const count = value.not_verified ?? verification?.not_verified;
+    return h('section', { class: 'inspector-contract', 'data-status': status },
+      h('span', { class: 'memory-label', text: t('inspector.contract') }),
+      h('strong', {
+        text: version == null
+          ? t('inspector.contractNone')
+          : t('inspector.contractVersion', { version }),
+      }),
+      h('span', {
+        class: `contract-state ${status}`,
+        text: t(`memory.contractStatus.${status}`),
+      }),
+      count == null
+        ? h('span', { class: 'milestone-note', text: t('memory.contractNotVerifiedUnknown') })
+        : h('span', {
+          class: 'milestone-note',
+          text: t('memory.contractNotVerified', { count }),
+        }),
+      verification?.reasons?.length
+        ? h('ul', {}, ...verification.reasons.slice(0, 5).map((reason) =>
+          h('li', { text: reason })))
+        : null,
+    );
+  }
+
   function renderInspector(options = {}) {
     const pinned = $('#inspector-pinned');
     const content = $('#inspector-content');
@@ -3387,6 +3583,10 @@
         },
       },
     });
+    const contractBlock = inspectorContractBlock(inspector.payload?.contract);
+    if (contractBlock && content && inspector.mode === 'agent') {
+      content.append(contractBlock);
+    }
     const dialog = $('#agent-inspector');
     if (state.inspector.open && dialog && !dialog.contains(document.activeElement)) {
       const close = $('#inspector-close');
