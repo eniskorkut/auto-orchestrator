@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "kind": "v77-solo-e2e",
+  "start": {
+    "run_id": "team-1793113627-21585",
+    "mode": "solo",
+    "provider": "opencode",
+    "plan_only": false
+  },
+  "status": "passed",
+  "mode": "solo",
+  "requirements": null,
+  "changed_src": true,
+  "tests_passed": true,
+  "tasks": 1,
+  "milestones": [
+    "passed"
+  ],
+  "managed_sessions": 1,
+  "tokens": {
+    "cache": {
+      "read": 59776,
+      "write": 0
+    },
+    "cache_read": 59776,
+    "cache_write": 0,
+    "input": 11772,
+    "output": 1036,
+    "reasoning": 127
+  },
+  "handoff": true,
+  "last_platform": "opencode",
+  "wall_time_seconds": 22.032
+}

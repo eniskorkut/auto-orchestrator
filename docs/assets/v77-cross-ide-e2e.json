@@ -1,0 +1,1538 @@
+{
+  "schema_version": 1,
+  "kind": "v761-cross-ide-e2e",
+  "codex_model": "gpt-6.1-sol",
+  "opencode_model": "opencode-go/deepseek-v4.1-flash",
+  "contract": {
+    "contract_id": "rc_95895e3bfdbf9698",
+    "version": 1,
+    "schema_version": 2,
+    "decisions": [
+      "jwt_refresh",
+      "auth_session"
+    ],
+    "required_tests": [
+      "test_jwt_access_issuance",
+      "test_jwt_refresh_issuance",
+      "test_invalid_refresh_rejected",
+      "test_jwt_expiry_enforced",
+      "test_jwt_access_issuance",
+      "test_jwt_refresh_issuance",
+      "test_invalid_refresh_rejected",
+      "test_jwt_expiry_enforced"
+    ]
+  },
+  "codex": {
+    "status": "passed",
+    "milestones": {
+      "M1": {
+        "status": "passed",
+        "tasks": [
+          {
+            "id": "build",
+            "state": "completed",
+            "changed_files": [
+              "auth_jwt.py",
+              "test_auth_jwt.py"
+            ],
+            "tests": [
+              {
+                "name": "python3 -m unittest discover -v",
+                "status": "passed",
+                "exit_code": 0
+              }
+            ]
+          },
+          {
+            "id": "verify",
+            "state": "completed",
+            "changed_files": [],
+            "tests": [
+              {
+                "name": "python3 -m unittest discover -v",
+                "status": "passed",
+                "exit_code": 0
+              }
+            ]
+          },
+          {
+            "id": "review",
+            "state": "completed",
+            "changed_files": [],
+            "tests": [
+              {
+                "name": "python3 -m unittest discover -v",
+                "status": "passed",
+                "exit_code": 0
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "tokens": {
+      "cache": {
+        "read": 152832,
+        "write": 0
+      },
+      "cache_read": 152832,
+      "cache_write": 0,
+      "input": 174565,
+      "output": 3080,
+      "reasoning": 177,
+      "total": 177645
+    },
+    "requirements_contract": {
+      "ok": true,
+      "fully_verified": false,
+      "status": "partially_verified",
+      "contract_id": "rc_95895e3bfdbf9698",
+      "contract_version": 1,
+      "sha256": "2c73a0166259916b343612f45a73db5512ac11d8f4aedb1939af2a99dd490a00",
+      "checks": [
+        {
+          "criterion_id": "ac_01_jwt_refresh",
+          "kind": "not_automated",
+          "status": "not_verified",
+          "evidence": "no automated verification available"
+        },
+        {
+          "criterion_id": "ac_02_auth_session",
+          "kind": "code_evidence",
+          "status": "passed",
+          "evidence": "code evidence: jwt=True"
+        }
+      ],
+      "passed": 1,
+      "not_verified": 1,
+      "reasons": []
+    },
+    "requirements": {
+      "schema_version": 2,
+      "legacy": false,
+      "status": "verified",
+      "aggregate_status": "verified",
+      "requirements_status": "verified",
+      "fully_verified": true,
+      "verified": true,
+      "verified_completion": true,
+      "run_passed": true,
+      "criterion_states": {
+        "ac_01_jwt_refresh": "verified",
+        "ac_02_auth_session": "verified"
+      },
+      "contract_id": "rc_95895e3bfdbf9698",
+      "contract_version": 1,
+      "sha256": "2c73a0166259916b343612f45a73db5512ac11d8f4aedb1939af2a99dd490a00",
+      "commit_sha": "c556f6055b2f14b84df3210c9f90ea7518e41565",
+      "run_id": "v761-codex-auth",
+      "task_id": null,
+      "attempt": null,
+      "criteria": [
+        {
+          "criterion_id": "ac_01_jwt_refresh",
+          "requirement_id": "req_01_jwt_refresh",
+          "text": "Decision 'jwt_refresh' is implemented as 'Kısa access token + refresh token / Short access token + refresh token'",
+          "critical": true,
+          "review_required": true,
+          "decision_ref": "d_6472a5dfedf9fccd",
+          "implementation_files": [],
+          "state": "verified",
+          "level": "implementation",
+          "test_ids": [
+            "test_jwt_access_issuance",
+            "test_jwt_refresh_issuance",
+            "test_invalid_refresh_rejected",
+            "test_jwt_expiry_enforced"
+          ],
+          "required_test_ids": [
+            "test_jwt_access_issuance",
+            "test_jwt_refresh_issuance",
+            "test_invalid_refresh_rejected",
+            "test_jwt_expiry_enforced"
+          ],
+          "missing_test_ids": [],
+          "behavioral_status": "pass",
+          "conformance_status": "pass",
+          "implementation_detail": "changed files are present",
+          "behavioral_detail": "all required test signals observed",
+          "conformance_detail": "independent review passed",
+          "reasons": [],
+          "evidence": {
+            "code": null,
+            "review": "pass",
+            "command_passed": true,
+            "signals": [
+              "test_jwt_access_issuance",
+              "test_jwt_refresh_issuance",
+              "test_invalid_refresh_rejected",
+              "test_jwt_expiry_enforced"
+            ]
+          }
+        },
+        {
+          "criterion_id": "ac_02_auth_session",
+          "requirement_id": "req_02_auth_session",
+          "text": "Decision 'auth_session' is implemented as 'Access/refresh JWT'",
+          "critical": true,
+          "review_required": true,
+          "decision_ref": "d_27e5bf0751443e50",
+          "implementation_files": [],
+          "state": "verified",
+          "level": "implementation",
+          "test_ids": [
+            "test_jwt_access_issuance",
+            "test_jwt_refresh_issuance",
+            "test_invalid_refresh_rejected",
+            "test_jwt_expiry_enforced"
+          ],
+          "required_test_ids": [
+            "test_jwt_access_issuance",
+            "test_jwt_refresh_issuance",
+            "test_invalid_refresh_rejected",
+            "test_jwt_expiry_enforced"
+          ],
+          "missing_test_ids": [],
+          "behavioral_status": "pass",
+          "conformance_status": "pass",
+          "implementation_detail": "changed files are present",
+          "behavioral_detail": "all required test signals observed",
+          "conformance_detail": "code evidence: jwt=True",
+          "reasons": [],
+          "evidence": {
+            "code": "jwt",
+            "review": "pass",
+            "command_passed": true,
+            "signals": [
+              "test_jwt_access_issuance",
+              "test_jwt_refresh_issuance",
+              "test_invalid_refresh_rejected",
+              "test_jwt_expiry_enforced"
+            ]
+          }
+        }
+      ],
+      "levels": {
+        "implementation": {
+          "status": "verified",
+          "checks": [
+            {
+              "criterion_id": "ac_01_jwt_refresh",
+              "state": "verified",
+              "detail": "changed files are present"
+            },
+            {
+              "criterion_id": "ac_02_auth_session",
+              "state": "verified",
+              "detail": "changed files are present"
+            }
+          ]
+        },
+        "behavioral": {
+          "status": "verified",
+          "checks": [
+            {
+              "criterion_id": "ac_01_jwt_refresh",
+              "state": "verified",
+              "detail": "all required test signals observed",
+              "test_ids": [
+                "test_jwt_access_issuance",
+                "test_jwt_refresh_issuance",
+                "test_invalid_refresh_rejected",
+                "test_jwt_expiry_enforced"
+              ],
+              "missing": []
+            },
+            {
+              "criterion_id": "ac_02_auth_session",
+              "state": "verified",
+              "detail": "all required test signals observed",
+              "test_ids": [
+                "test_jwt_access_issuance",
+                "test_jwt_refresh_issuance",
+                "test_invalid_refresh_rejected",
+                "test_jwt_expiry_enforced"
+              ],
+              "missing": []
+            }
+          ]
+        },
+        "conformance": {
+          "status": "verified",
+          "checks": [
+            {
+              "criterion_id": "ac_01_jwt_refresh",
+              "state": "verified",
+              "detail": "independent review passed"
+            },
+            {
+              "criterion_id": "ac_02_auth_session",
+              "state": "verified",
+              "detail": "code evidence: jwt=True"
+            }
+          ]
+        }
+      },
+      "critical_failures": [],
+      "critical_unverified": [],
+      "blocking": [],
+      "stale": false,
+      "stale_reason": null,
+      "scope_violation": false,
+      "scopes": {
+        "violations": [],
+        "checked": true
+      },
+      "test_results": {
+        "accepted": 4,
+        "rejected": [],
+        "matching": 4,
+        "failed": 0,
+        "evidence": [
+          {
+            "command": "python3 -m unittest discover -v",
+            "exit_code": 0,
+            "signals": [
+              "test_invalid_refresh_rejected",
+              "test_auth_jwt.AuthJWTTests.test_invalid_refresh_rejected",
+              "AuthJWTTests.test_invalid_refresh_rejected",
+              "test_jwt_access_issuance",
+              "test_auth_jwt.AuthJWTTests.test_jwt_access_issuance",
+              "AuthJWTTests.test_jwt_access_issuance",
+              "test_jwt_expiry_enforced",
+              "test_auth_jwt.AuthJWTTests.test_jwt_expiry_enforced",
+              "AuthJWTTests.test_jwt_expiry_enforced",
+              "test_jwt_refresh_issuance",
+              "test_auth_jwt.AuthJWTTests.test_jwt_refresh_issuance",
+              "AuthJWTTests.test_jwt_refresh_issuance"
+            ]
+          },
+          {
+            "command": "python3 -m unittest discover -v",
+            "exit_code": 0,
+            "signals": [
+              "test_invalid_refresh_rejected",
+              "test_auth_jwt.AuthJWTTests.test_invalid_refresh_rejected",
+              "AuthJWTTests.test_invalid_refresh_rejected",
+              "test_jwt_access_issuance",
+              "test_auth_jwt.AuthJWTTests.test_jwt_access_issuance",
+              "AuthJWTTests.test_jwt_access_issuance",
+              "test_jwt_expiry_enforced",
+              "test_auth_jwt.AuthJWTTests.test_jwt_expiry_enforced",
+              "AuthJWTTests.test_jwt_expiry_enforced",
+              "test_jwt_refresh_issuance",
+              "test_auth_jwt.AuthJWTTests.test_jwt_refresh_issuance",
+              "AuthJWTTests.test_jwt_refresh_issuance"
+            ]
+          },
+          {
+            "command": "python3 -m unittest discover -v",
+            "exit_code": 0,
+            "signals": [
+              "test_invalid_refresh_rejected",
+              "test_auth_jwt.AuthJWTTests.test_invalid_refresh_rejected",
+              "AuthJWTTests.test_invalid_refresh_rejected",
+              "test_jwt_access_issuance",
+              "test_auth_jwt.AuthJWTTests.test_jwt_access_issuance",
+              "AuthJWTTests.test_jwt_access_issuance",
+              "test_jwt_expiry_enforced",
+              "test_auth_jwt.AuthJWTTests.test_jwt_expiry_enforced",
+              "AuthJWTTests.test_jwt_expiry_enforced",
+              "test_jwt_refresh_issuance",
+              "test_auth_jwt.AuthJWTTests.test_jwt_refresh_issuance",
+              "AuthJWTTests.test_jwt_refresh_issuance"
+            ]
+          },
+          {
+            "command": "python3 -m unittest discover -v",
+            "exit_code": 0,
+            "signals": [
+              "test_invalid_refresh_rejected",
+              "test_auth_jwt.AuthJWTTests.test_invalid_refresh_rejected",
+              "AuthJWTTests.test_invalid_refresh_rejected",
+              "test_jwt_access_issuance",
+              "test_auth_jwt.AuthJWTTests.test_jwt_access_issuance",
+              "AuthJWTTests.test_jwt_access_issuance",
+              "test_jwt_expiry_enforced",
+              "test_auth_jwt.AuthJWTTests.test_jwt_expiry_enforced",
+              "AuthJWTTests.test_jwt_expiry_enforced",
+              "test_jwt_refresh_issuance",
+              "test_auth_jwt.AuthJWTTests.test_jwt_refresh_issuance",
+              "AuthJWTTests.test_jwt_refresh_issuance"
+            ]
+          }
+        ]
+      },
+      "rejected_test_results": [],
+      "reviews": [
+        {
+          "task_id": "review",
+          "role": "reviewer",
+          "verdict": "pass",
+          "independent": true,
+          "attempt": null,
+          "commit": "c556f6055b2f14b84df3210c9f90ea7518e41565"
+        }
+      ],
+      "reasons": [],
+      "binding": {
+        "contract_id": "rc_95895e3bfdbf9698",
+        "contract_version": 1,
+        "contract_schema_version": 2,
+        "contract_sha256": "2c73a0166259916b343612f45a73db5512ac11d8f4aedb1939af2a99dd490a00",
+        "contract_digest": "2c73a0166259916b343612f45a73db5512ac11d8f4aedb1939af2a99dd490a00",
+        "commit_sha": "c556f6055b2f14b84df3210c9f90ea7518e41565",
+        "run_id": "v761-codex-auth",
+        "task_id": null,
+        "attempt": null,
+        "test_ids": [
+          "test_invalid_refresh_rejected",
+          "test_auth_jwt.AuthJWTTests.test_invalid_refresh_rejected",
+          "AuthJWTTests.test_invalid_refresh_rejected",
+          "test_jwt_access_issuance",
+          "test_auth_jwt.AuthJWTTests.test_jwt_access_issuance",
+          "AuthJWTTests.test_jwt_access_issuance",
+          "test_jwt_expiry_enforced",
+          "test_auth_jwt.AuthJWTTests.test_jwt_expiry_enforced",
+          "AuthJWTTests.test_jwt_expiry_enforced",
+          "test_jwt_refresh_issuance",
+          "test_auth_jwt.AuthJWTTests.test_jwt_refresh_issuance",
+          "AuthJWTTests.test_jwt_refresh_issuance"
+        ],
+        "evaluated_at": 1793113420.184146
+      }
+    },
+    "completion": {
+      "schema_version": 2,
+      "legacy": false,
+      "status": "verified",
+      "aggregate_status": "verified",
+      "requirements_status": "verified",
+      "fully_verified": true,
+      "verified": true,
+      "verified_completion": true,
+      "run_passed": true,
+      "criterion_states": {
+        "ac_01_jwt_refresh": "verified",
+        "ac_02_auth_session": "verified"
+      },
+      "contract_id": "rc_95895e3bfdbf9698",
+      "contract_version": 1,
+      "sha256": "2c73a0166259916b343612f45a73db5512ac11d8f4aedb1939af2a99dd490a00",
+      "commit_sha": "c556f6055b2f14b84df3210c9f90ea7518e41565",
+      "run_id": "v761-codex-auth",
+      "task_id": null,
+      "attempt": null,
+      "criteria": [
+        {
+          "criterion_id": "ac_01_jwt_refresh",
+          "requirement_id": "req_01_jwt_refresh",
+          "text": "Decision 'jwt_refresh' is implemented as 'Kısa access token + refresh token / Short access token + refresh token'",
+          "critical": true,
+          "review_required": true,
+          "decision_ref": "d_6472a5dfedf9fccd",
+          "implementation_files": [],
+          "state": "verified",
+          "level": "implementation",
+          "test_ids": [
+            "test_jwt_access_issuance",
+            "test_jwt_refresh_issuance",
+            "test_invalid_refresh_rejected",
+            "test_jwt_expiry_enforced"
+          ],
+          "required_test_ids": [
+            "test_jwt_access_issuance",
+            "test_jwt_refresh_issuance",
+            "test_invalid_refresh_rejected",
+            "test_jwt_expiry_enforced"
+          ],
+          "missing_test_ids": [],
+          "behavioral_status": "pass",
+          "conformance_status": "pass",
+          "implementation_detail": "changed files are present",
+          "behavioral_detail": "all required test signals observed",
+          "conformance_detail": "independent review passed",
+          "reasons": [],
+          "evidence": {
+            "code": null,
+            "review": "pass",
+            "command_passed": true,
+            "signals": [
+              "test_jwt_access_issuance",
+              "test_jwt_refresh_issuance",
+              "test_invalid_refresh_rejected",
+              "test_jwt_expiry_enforced"
+            ]
+          }
+        },
+        {
+          "criterion_id": "ac_02_auth_session",
+          "requirement_id": "req_02_auth_session",
+          "text": "Decision 'auth_session' is implemented as 'Access/refresh JWT'",
+          "critical": true,
+          "review_required": true,
+          "decision_ref": "d_27e5bf0751443e50",
+          "implementation_files": [],
+          "state": "verified",
+          "level": "implementation",
+          "test_ids": [
+            "test_jwt_access_issuance",
+            "test_jwt_refresh_issuance",
+            "test_invalid_refresh_rejected",
+            "test_jwt_expiry_enforced"
+          ],
+          "required_test_ids": [
+            "test_jwt_access_issuance",
+            "test_jwt_refresh_issuance",
+            "test_invalid_refresh_rejected",
+            "test_jwt_expiry_enforced"
+          ],
+          "missing_test_ids": [],
+          "behavioral_status": "pass",
+          "conformance_status": "pass",
+          "implementation_detail": "changed files are present",
+          "behavioral_detail": "all required test signals observed",
+          "conformance_detail": "code evidence: jwt=True",
+          "reasons": [],
+          "evidence": {
+            "code": "jwt",
+            "review": "pass",
+            "command_passed": true,
+            "signals": [
+              "test_jwt_access_issuance",
+              "test_jwt_refresh_issuance",
+              "test_invalid_refresh_rejected",
+              "test_jwt_expiry_enforced"
+            ]
+          }
+        }
+      ],
+      "levels": {
+        "implementation": {
+          "status": "verified",
+          "checks": [
+            {
+              "criterion_id": "ac_01_jwt_refresh",
+              "state": "verified",
+              "detail": "changed files are present"
+            },
+            {
+              "criterion_id": "ac_02_auth_session",
+              "state": "verified",
+              "detail": "changed files are present"
+            }
+          ]
+        },
+        "behavioral": {
+          "status": "verified",
+          "checks": [
+            {
+              "criterion_id": "ac_01_jwt_refresh",
+              "state": "verified",
+              "detail": "all required test signals observed",
+              "test_ids": [
+                "test_jwt_access_issuance",
+                "test_jwt_refresh_issuance",
+                "test_invalid_refresh_rejected",
+                "test_jwt_expiry_enforced"
+              ],
+              "missing": []
+            },
+            {
+              "criterion_id": "ac_02_auth_session",
+              "state": "verified",
+              "detail": "all required test signals observed",
+              "test_ids": [
+                "test_jwt_access_issuance",
+                "test_jwt_refresh_issuance",
+                "test_invalid_refresh_rejected",
+                "test_jwt_expiry_enforced"
+              ],
+              "missing": []
+            }
+          ]
+        },
+        "conformance": {
+          "status": "verified",
+          "checks": [
+            {
+              "criterion_id": "ac_01_jwt_refresh",
+              "state": "verified",
+              "detail": "independent review passed"
+            },
+            {
+              "criterion_id": "ac_02_auth_session",
+              "state": "verified",
+              "detail": "code evidence: jwt=True"
+            }
+          ]
+        }
+      },
+      "critical_failures": [],
+      "critical_unverified": [],
+      "blocking": [],
+      "stale": false,
+      "stale_reason": null,
+      "scope_violation": false,
+      "scopes": {
+        "violations": [],
+        "checked": true
+      },
+      "test_results": {
+        "accepted": 4,
+        "rejected": [],
+        "matching": 4,
+        "failed": 0,
+        "evidence": [
+          {
+            "command": "python3 -m unittest discover -v",
+            "exit_code": 0,
+            "signals": [
+              "test_invalid_refresh_rejected",
+              "test_auth_jwt.AuthJWTTests.test_invalid_refresh_rejected",
+              "AuthJWTTests.test_invalid_refresh_rejected",
+              "test_jwt_access_issuance",
+              "test_auth_jwt.AuthJWTTests.test_jwt_access_issuance",
+              "AuthJWTTests.test_jwt_access_issuance",
+              "test_jwt_expiry_enforced",
+              "test_auth_jwt.AuthJWTTests.test_jwt_expiry_enforced",
+              "AuthJWTTests.test_jwt_expiry_enforced",
+              "test_jwt_refresh_issuance",
+              "test_auth_jwt.AuthJWTTests.test_jwt_refresh_issuance",
+              "AuthJWTTests.test_jwt_refresh_issuance"
+            ]
+          },
+          {
+            "command": "python3 -m unittest discover -v",
+            "exit_code": 0,
+            "signals": [
+              "test_invalid_refresh_rejected",
+              "test_auth_jwt.AuthJWTTests.test_invalid_refresh_rejected",
+              "AuthJWTTests.test_invalid_refresh_rejected",
+              "test_jwt_access_issuance",
+              "test_auth_jwt.AuthJWTTests.test_jwt_access_issuance",
+              "AuthJWTTests.test_jwt_access_issuance",
+              "test_jwt_expiry_enforced",
+              "test_auth_jwt.AuthJWTTests.test_jwt_expiry_enforced",
+              "AuthJWTTests.test_jwt_expiry_enforced",
+              "test_jwt_refresh_issuance",
+              "test_auth_jwt.AuthJWTTests.test_jwt_refresh_issuance",
+              "AuthJWTTests.test_jwt_refresh_issuance"
+            ]
+          },
+          {
+            "command": "python3 -m unittest discover -v",
+            "exit_code": 0,
+            "signals": [
+              "test_invalid_refresh_rejected",
+              "test_auth_jwt.AuthJWTTests.test_invalid_refresh_rejected",
+              "AuthJWTTests.test_invalid_refresh_rejected",
+              "test_jwt_access_issuance",
+              "test_auth_jwt.AuthJWTTests.test_jwt_access_issuance",
+              "AuthJWTTests.test_jwt_access_issuance",
+              "test_jwt_expiry_enforced",
+              "test_auth_jwt.AuthJWTTests.test_jwt_expiry_enforced",
+              "AuthJWTTests.test_jwt_expiry_enforced",
+              "test_jwt_refresh_issuance",
+              "test_auth_jwt.AuthJWTTests.test_jwt_refresh_issuance",
+              "AuthJWTTests.test_jwt_refresh_issuance"
+            ]
+          },
+          {
+            "command": "python3 -m unittest discover -v",
+            "exit_code": 0,
+            "signals": [
+              "test_invalid_refresh_rejected",
+              "test_auth_jwt.AuthJWTTests.test_invalid_refresh_rejected",
+              "AuthJWTTests.test_invalid_refresh_rejected",
+              "test_jwt_access_issuance",
+              "test_auth_jwt.AuthJWTTests.test_jwt_access_issuance",
+              "AuthJWTTests.test_jwt_access_issuance",
+              "test_jwt_expiry_enforced",
+              "test_auth_jwt.AuthJWTTests.test_jwt_expiry_enforced",
+              "AuthJWTTests.test_jwt_expiry_enforced",
+              "test_jwt_refresh_issuance",
+              "test_auth_jwt.AuthJWTTests.test_jwt_refresh_issuance",
+              "AuthJWTTests.test_jwt_refresh_issuance"
+            ]
+          }
+        ]
+      },
+      "rejected_test_results": [],
+      "reviews": [
+        {
+          "task_id": "review",
+          "role": "reviewer",
+          "verdict": "pass",
+          "independent": true,
+          "attempt": null,
+          "commit": "c556f6055b2f14b84df3210c9f90ea7518e41565"
+        }
+      ],
+      "reasons": [],
+      "binding": {
+        "contract_id": "rc_95895e3bfdbf9698",
+        "contract_version": 1,
+        "contract_schema_version": 2,
+        "contract_sha256": "2c73a0166259916b343612f45a73db5512ac11d8f4aedb1939af2a99dd490a00",
+        "contract_digest": "2c73a0166259916b343612f45a73db5512ac11d8f4aedb1939af2a99dd490a00",
+        "commit_sha": "c556f6055b2f14b84df3210c9f90ea7518e41565",
+        "run_id": "v761-codex-auth",
+        "task_id": null,
+        "attempt": null,
+        "test_ids": [
+          "test_invalid_refresh_rejected",
+          "test_auth_jwt.AuthJWTTests.test_invalid_refresh_rejected",
+          "AuthJWTTests.test_invalid_refresh_rejected",
+          "test_jwt_access_issuance",
+          "test_auth_jwt.AuthJWTTests.test_jwt_access_issuance",
+          "AuthJWTTests.test_jwt_access_issuance",
+          "test_jwt_expiry_enforced",
+          "test_auth_jwt.AuthJWTTests.test_jwt_expiry_enforced",
+          "AuthJWTTests.test_jwt_expiry_enforced",
+          "test_jwt_refresh_issuance",
+          "test_auth_jwt.AuthJWTTests.test_jwt_refresh_issuance",
+          "AuthJWTTests.test_jwt_refresh_issuance"
+        ],
+        "evaluated_at": 1793113420.184146
+      }
+    },
+    "error": null,
+    "auth_file": true,
+    "handoff": true
+  },
+  "opencode_context": {
+    "project_id": "p_d10766cd7823ab46",
+    "same_project": true,
+    "last_platform": "codex",
+    "confirmed_topics": [
+      "jwt_refresh",
+      "auth_session"
+    ],
+    "blocking": 0,
+    "handoff": true
+  },
+  "opencode": {
+    "status": "passed",
+    "milestones": {
+      "M1": {
+        "status": "passed",
+        "tasks": [
+          {
+            "id": "build",
+            "state": "completed",
+            "changed_files": [
+              "password_reset.py",
+              "test_password_reset.py"
+            ],
+            "tests": [
+              {
+                "name": "python3 -m unittest discover -v",
+                "status": "passed",
+                "exit_code": 0
+              }
+            ]
+          },
+          {
+            "id": "verify",
+            "state": "completed",
+            "changed_files": [],
+            "tests": [
+              {
+                "name": "python3 -m unittest discover -v",
+                "status": "passed",
+                "exit_code": 0
+              }
+            ]
+          },
+          {
+            "id": "review",
+            "state": "completed",
+            "changed_files": [],
+            "tests": [
+              {
+                "name": "python3 -m unittest discover -v",
+                "status": "passed",
+                "exit_code": 0
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "tokens": {
+      "cache": {
+        "read": 138624,
+        "write": 0
+      },
+      "cache_read": 138624,
+      "cache_write": 0,
+      "input": 41964,
+      "output": 2432,
+      "reasoning": 3765
+    },
+    "requirements_contract": {
+      "ok": true,
+      "fully_verified": false,
+      "status": "partially_verified",
+      "contract_id": "rc_95895e3bfdbf9698",
+      "contract_version": 1,
+      "sha256": "2c73a0166259916b343612f45a73db5512ac11d8f4aedb1939af2a99dd490a00",
+      "checks": [
+        {
+          "criterion_id": "ac_01_jwt_refresh",
+          "kind": "not_automated",
+          "status": "not_verified",
+          "evidence": "no automated verification available"
+        },
+        {
+          "criterion_id": "ac_02_auth_session",
+          "kind": "code_evidence",
+          "status": "passed",
+          "evidence": "code evidence: jwt=True"
+        }
+      ],
+      "passed": 1,
+      "not_verified": 1,
+      "reasons": []
+    },
+    "requirements": {
+      "schema_version": 2,
+      "legacy": false,
+      "status": "verified",
+      "aggregate_status": "verified",
+      "requirements_status": "verified",
+      "fully_verified": true,
+      "verified": true,
+      "verified_completion": true,
+      "run_passed": true,
+      "criterion_states": {
+        "ac_01_jwt_refresh": "verified",
+        "ac_02_auth_session": "verified"
+      },
+      "contract_id": "rc_95895e3bfdbf9698",
+      "contract_version": 1,
+      "sha256": "2c73a0166259916b343612f45a73db5512ac11d8f4aedb1939af2a99dd490a00",
+      "commit_sha": "20024f97adc5b995d7978b044106dbcf0284653a",
+      "run_id": "v761-opencode-reset",
+      "task_id": null,
+      "attempt": null,
+      "criteria": [
+        {
+          "criterion_id": "ac_01_jwt_refresh",
+          "requirement_id": "req_01_jwt_refresh",
+          "text": "Decision 'jwt_refresh' is implemented as 'Kısa access token + refresh token / Short access token + refresh token'",
+          "critical": true,
+          "review_required": true,
+          "decision_ref": "d_6472a5dfedf9fccd",
+          "implementation_files": [],
+          "state": "verified",
+          "level": "implementation",
+          "test_ids": [
+            "test_jwt_access_issuance",
+            "test_jwt_refresh_issuance",
+            "test_invalid_refresh_rejected",
+            "test_jwt_expiry_enforced"
+          ],
+          "required_test_ids": [
+            "test_jwt_access_issuance",
+            "test_jwt_refresh_issuance",
+            "test_invalid_refresh_rejected",
+            "test_jwt_expiry_enforced"
+          ],
+          "missing_test_ids": [],
+          "behavioral_status": "pass",
+          "conformance_status": "pass",
+          "implementation_detail": "changed files are present",
+          "behavioral_detail": "all required test signals observed",
+          "conformance_detail": "independent review passed",
+          "reasons": [],
+          "evidence": {
+            "code": null,
+            "review": "pass",
+            "command_passed": true,
+            "signals": [
+              "test_jwt_access_issuance",
+              "test_jwt_refresh_issuance",
+              "test_invalid_refresh_rejected",
+              "test_jwt_expiry_enforced"
+            ]
+          }
+        },
+        {
+          "criterion_id": "ac_02_auth_session",
+          "requirement_id": "req_02_auth_session",
+          "text": "Decision 'auth_session' is implemented as 'Access/refresh JWT'",
+          "critical": true,
+          "review_required": true,
+          "decision_ref": "d_27e5bf0751443e50",
+          "implementation_files": [],
+          "state": "verified",
+          "level": "implementation",
+          "test_ids": [
+            "test_jwt_access_issuance",
+            "test_jwt_refresh_issuance",
+            "test_invalid_refresh_rejected",
+            "test_jwt_expiry_enforced"
+          ],
+          "required_test_ids": [
+            "test_jwt_access_issuance",
+            "test_jwt_refresh_issuance",
+            "test_invalid_refresh_rejected",
+            "test_jwt_expiry_enforced"
+          ],
+          "missing_test_ids": [],
+          "behavioral_status": "pass",
+          "conformance_status": "pass",
+          "implementation_detail": "changed files are present",
+          "behavioral_detail": "all required test signals observed",
+          "conformance_detail": "code evidence: jwt=True",
+          "reasons": [],
+          "evidence": {
+            "code": "jwt",
+            "review": "pass",
+            "command_passed": true,
+            "signals": [
+              "test_jwt_access_issuance",
+              "test_jwt_refresh_issuance",
+              "test_invalid_refresh_rejected",
+              "test_jwt_expiry_enforced"
+            ]
+          }
+        }
+      ],
+      "levels": {
+        "implementation": {
+          "status": "verified",
+          "checks": [
+            {
+              "criterion_id": "ac_01_jwt_refresh",
+              "state": "verified",
+              "detail": "changed files are present"
+            },
+            {
+              "criterion_id": "ac_02_auth_session",
+              "state": "verified",
+              "detail": "changed files are present"
+            }
+          ]
+        },
+        "behavioral": {
+          "status": "verified",
+          "checks": [
+            {
+              "criterion_id": "ac_01_jwt_refresh",
+              "state": "verified",
+              "detail": "all required test signals observed",
+              "test_ids": [
+                "test_jwt_access_issuance",
+                "test_jwt_refresh_issuance",
+                "test_invalid_refresh_rejected",
+                "test_jwt_expiry_enforced"
+              ],
+              "missing": []
+            },
+            {
+              "criterion_id": "ac_02_auth_session",
+              "state": "verified",
+              "detail": "all required test signals observed",
+              "test_ids": [
+                "test_jwt_access_issuance",
+                "test_jwt_refresh_issuance",
+                "test_invalid_refresh_rejected",
+                "test_jwt_expiry_enforced"
+              ],
+              "missing": []
+            }
+          ]
+        },
+        "conformance": {
+          "status": "verified",
+          "checks": [
+            {
+              "criterion_id": "ac_01_jwt_refresh",
+              "state": "verified",
+              "detail": "independent review passed"
+            },
+            {
+              "criterion_id": "ac_02_auth_session",
+              "state": "verified",
+              "detail": "code evidence: jwt=True"
+            }
+          ]
+        }
+      },
+      "critical_failures": [],
+      "critical_unverified": [],
+      "blocking": [],
+      "stale": false,
+      "stale_reason": null,
+      "scope_violation": false,
+      "scopes": {
+        "violations": [],
+        "checked": true
+      },
+      "test_results": {
+        "accepted": 4,
+        "rejected": [],
+        "matching": 4,
+        "failed": 0,
+        "evidence": [
+          {
+            "command": "python3 -m unittest discover -v",
+            "exit_code": 0,
+            "signals": [
+              "test_invalid_refresh_rejected",
+              "test_auth_jwt.AuthJWTTests.test_invalid_refresh_rejected",
+              "AuthJWTTests.test_invalid_refresh_rejected",
+              "test_jwt_access_issuance",
+              "test_auth_jwt.AuthJWTTests.test_jwt_access_issuance",
+              "AuthJWTTests.test_jwt_access_issuance",
+              "test_jwt_expiry_enforced",
+              "test_auth_jwt.AuthJWTTests.test_jwt_expiry_enforced",
+              "AuthJWTTests.test_jwt_expiry_enforced",
+              "test_jwt_refresh_issuance",
+              "test_auth_jwt.AuthJWTTests.test_jwt_refresh_issuance",
+              "AuthJWTTests.test_jwt_refresh_issuance",
+              "test_emoji_and_email_subjects_round_trip",
+              "test_password_reset.PasswordResetTests.test_emoji_and_email_subjects_round_trip",
+              "PasswordResetTests.test_emoji_and_email_subjects_round_trip",
+              "test_expiry_enforced",
+              "test_password_reset.PasswordResetTests.test_expiry_enforced",
+              "PasswordResetTests.test_expiry_enforced",
+              "test_invalid_subjects_rejected",
+              "test_password_reset.PasswordResetTests.test_invalid_subjects_rejected"
+            ]
+          },
+          {
+            "command": "python3 -m unittest discover -v",
+            "exit_code": 0,
+            "signals": [
+              "test_invalid_refresh_rejected",
+              "test_auth_jwt.AuthJWTTests.test_invalid_refresh_rejected",
+              "AuthJWTTests.test_invalid_refresh_rejected",
+              "test_jwt_access_issuance",
+              "test_auth_jwt.AuthJWTTests.test_jwt_access_issuance",
+              "AuthJWTTests.test_jwt_access_issuance",
+              "test_jwt_expiry_enforced",
+              "test_auth_jwt.AuthJWTTests.test_jwt_expiry_enforced",
+              "AuthJWTTests.test_jwt_expiry_enforced",
+              "test_jwt_refresh_issuance",
+              "test_auth_jwt.AuthJWTTests.test_jwt_refresh_issuance",
+              "AuthJWTTests.test_jwt_refresh_issuance",
+              "test_emoji_and_email_subjects_round_trip",
+              "test_password_reset.PasswordResetTests.test_emoji_and_email_subjects_round_trip",
+              "PasswordResetTests.test_emoji_and_email_subjects_round_trip",
+              "test_expiry_enforced",
+              "test_password_reset.PasswordResetTests.test_expiry_enforced",
+              "PasswordResetTests.test_expiry_enforced",
+              "test_invalid_subjects_rejected",
+              "test_password_reset.PasswordResetTests.test_invalid_subjects_rejected"
+            ]
+          },
+          {
+            "command": "python3 -m unittest discover -v",
+            "exit_code": 0,
+            "signals": [
+              "test_invalid_refresh_rejected",
+              "test_auth_jwt.AuthJWTTests.test_invalid_refresh_rejected",
+              "AuthJWTTests.test_invalid_refresh_rejected",
+              "test_jwt_access_issuance",
+              "test_auth_jwt.AuthJWTTests.test_jwt_access_issuance",
+              "AuthJWTTests.test_jwt_access_issuance",
+              "test_jwt_expiry_enforced",
+              "test_auth_jwt.AuthJWTTests.test_jwt_expiry_enforced",
+              "AuthJWTTests.test_jwt_expiry_enforced",
+              "test_jwt_refresh_issuance",
+              "test_auth_jwt.AuthJWTTests.test_jwt_refresh_issuance",
+              "AuthJWTTests.test_jwt_refresh_issuance",
+              "test_emoji_and_email_subjects_round_trip",
+              "test_password_reset.PasswordResetTests.test_emoji_and_email_subjects_round_trip",
+              "PasswordResetTests.test_emoji_and_email_subjects_round_trip",
+              "test_expiry_enforced",
+              "test_password_reset.PasswordResetTests.test_expiry_enforced",
+              "PasswordResetTests.test_expiry_enforced",
+              "test_invalid_subjects_rejected",
+              "test_password_reset.PasswordResetTests.test_invalid_subjects_rejected"
+            ]
+          },
+          {
+            "command": "python3 -m unittest discover -v",
+            "exit_code": 0,
+            "signals": [
+              "test_invalid_refresh_rejected",
+              "test_auth_jwt.AuthJWTTests.test_invalid_refresh_rejected",
+              "AuthJWTTests.test_invalid_refresh_rejected",
+              "test_jwt_access_issuance",
+              "test_auth_jwt.AuthJWTTests.test_jwt_access_issuance",
+              "AuthJWTTests.test_jwt_access_issuance",
+              "test_jwt_expiry_enforced",
+              "test_auth_jwt.AuthJWTTests.test_jwt_expiry_enforced",
+              "AuthJWTTests.test_jwt_expiry_enforced",
+              "test_jwt_refresh_issuance",
+              "test_auth_jwt.AuthJWTTests.test_jwt_refresh_issuance",
+              "AuthJWTTests.test_jwt_refresh_issuance",
+              "test_emoji_and_email_subjects_round_trip",
+              "test_password_reset.PasswordResetTests.test_emoji_and_email_subjects_round_trip",
+              "PasswordResetTests.test_emoji_and_email_subjects_round_trip",
+              "test_expiry_enforced",
+              "test_password_reset.PasswordResetTests.test_expiry_enforced",
+              "PasswordResetTests.test_expiry_enforced",
+              "test_invalid_subjects_rejected",
+              "test_password_reset.PasswordResetTests.test_invalid_subjects_rejected"
+            ]
+          }
+        ]
+      },
+      "rejected_test_results": [],
+      "reviews": [
+        {
+          "task_id": "review",
+          "role": "reviewer",
+          "verdict": "pass",
+          "independent": true,
+          "attempt": null,
+          "commit": "20024f97adc5b995d7978b044106dbcf0284653a"
+        }
+      ],
+      "reasons": [],
+      "binding": {
+        "contract_id": "rc_95895e3bfdbf9698",
+        "contract_version": 1,
+        "contract_schema_version": 2,
+        "contract_sha256": "2c73a0166259916b343612f45a73db5512ac11d8f4aedb1939af2a99dd490a00",
+        "contract_digest": "2c73a0166259916b343612f45a73db5512ac11d8f4aedb1939af2a99dd490a00",
+        "commit_sha": "20024f97adc5b995d7978b044106dbcf0284653a",
+        "run_id": "v761-opencode-reset",
+        "task_id": null,
+        "attempt": null,
+        "test_ids": [
+          "test_invalid_refresh_rejected",
+          "test_auth_jwt.AuthJWTTests.test_invalid_refresh_rejected",
+          "AuthJWTTests.test_invalid_refresh_rejected",
+          "test_jwt_access_issuance",
+          "test_auth_jwt.AuthJWTTests.test_jwt_access_issuance",
+          "AuthJWTTests.test_jwt_access_issuance",
+          "test_jwt_expiry_enforced",
+          "test_auth_jwt.AuthJWTTests.test_jwt_expiry_enforced",
+          "AuthJWTTests.test_jwt_expiry_enforced",
+          "test_jwt_refresh_issuance",
+          "test_auth_jwt.AuthJWTTests.test_jwt_refresh_issuance",
+          "AuthJWTTests.test_jwt_refresh_issuance",
+          "test_emoji_and_email_subjects_round_trip",
+          "test_password_reset.PasswordResetTests.test_emoji_and_email_subjects_round_trip",
+          "PasswordResetTests.test_emoji_and_email_subjects_round_trip",
+          "test_expiry_enforced",
+          "test_password_reset.PasswordResetTests.test_expiry_enforced",
+          "PasswordResetTests.test_expiry_enforced",
+          "test_invalid_subjects_rejected",
+          "test_password_reset.PasswordResetTests.test_invalid_subjects_rejected",
+          "PasswordResetTests.test_invalid_subjects_rejected",
+          "test_reset_scope_is_signed",
+          "test_password_reset.PasswordResetTests.test_reset_scope_is_signed",
+          "PasswordResetTests.test_reset_scope_is_signed",
+          "test_reset_token_is_not_a_session_token",
+          "test_password_reset.PasswordResetTests.test_reset_token_is_not_a_session_token",
+          "PasswordResetTests.test_reset_token_is_not_a_session_token",
+          "test_reset_token_round_trip",
+          "test_password_reset.PasswordResetTests.test_reset_token_round_trip",
+          "PasswordResetTests.test_reset_token_round_trip",
+          "test_session_tokens_are_not_reset_tokens",
+          "test_password_reset.PasswordResetTests.test_session_tokens_are_not_reset_tokens",
+          "PasswordResetTests.test_session_tokens_are_not_reset_tokens",
+          "test_tampered_and_malformed_tokens_rejected",
+          "test_password_reset.PasswordResetTests.test_tampered_and_malformed_tokens_rejected",
+          "PasswordResetTests.test_tampered_and_malformed_tokens_rejected"
+        ],
+        "evaluated_at": 1793113581.599464
+      }
+    },
+    "completion": {
+      "schema_version": 2,
+      "legacy": false,
+      "status": "verified",
+      "aggregate_status": "verified",
+      "requirements_status": "verified",
+      "fully_verified": true,
+      "verified": true,
+      "verified_completion": true,
+      "run_passed": true,
+      "criterion_states": {
+        "ac_01_jwt_refresh": "verified",
+        "ac_02_auth_session": "verified"
+      },
+      "contract_id": "rc_95895e3bfdbf9698",
+      "contract_version": 1,
+      "sha256": "2c73a0166259916b343612f45a73db5512ac11d8f4aedb1939af2a99dd490a00",
+      "commit_sha": "20024f97adc5b995d7978b044106dbcf0284653a",
+      "run_id": "v761-opencode-reset",
+      "task_id": null,
+      "attempt": null,
+      "criteria": [
+        {
+          "criterion_id": "ac_01_jwt_refresh",
+          "requirement_id": "req_01_jwt_refresh",
+          "text": "Decision 'jwt_refresh' is implemented as 'Kısa access token + refresh token / Short access token + refresh token'",
+          "critical": true,
+          "review_required": true,
+          "decision_ref": "d_6472a5dfedf9fccd",
+          "implementation_files": [],
+          "state": "verified",
+          "level": "implementation",
+          "test_ids": [
+            "test_jwt_access_issuance",
+            "test_jwt_refresh_issuance",
+            "test_invalid_refresh_rejected",
+            "test_jwt_expiry_enforced"
+          ],
+          "required_test_ids": [
+            "test_jwt_access_issuance",
+            "test_jwt_refresh_issuance",
+            "test_invalid_refresh_rejected",
+            "test_jwt_expiry_enforced"
+          ],
+          "missing_test_ids": [],
+          "behavioral_status": "pass",
+          "conformance_status": "pass",
+          "implementation_detail": "changed files are present",
+          "behavioral_detail": "all required test signals observed",
+          "conformance_detail": "independent review passed",
+          "reasons": [],
+          "evidence": {
+            "code": null,
+            "review": "pass",
+            "command_passed": true,
+            "signals": [
+              "test_jwt_access_issuance",
+              "test_jwt_refresh_issuance",
+              "test_invalid_refresh_rejected",
+              "test_jwt_expiry_enforced"
+            ]
+          }
+        },
+        {
+          "criterion_id": "ac_02_auth_session",
+          "requirement_id": "req_02_auth_session",
+          "text": "Decision 'auth_session' is implemented as 'Access/refresh JWT'",
+          "critical": true,
+          "review_required": true,
+          "decision_ref": "d_27e5bf0751443e50",
+          "implementation_files": [],
+          "state": "verified",
+          "level": "implementation",
+          "test_ids": [
+            "test_jwt_access_issuance",
+            "test_jwt_refresh_issuance",
+            "test_invalid_refresh_rejected",
+            "test_jwt_expiry_enforced"
+          ],
+          "required_test_ids": [
+            "test_jwt_access_issuance",
+            "test_jwt_refresh_issuance",
+            "test_invalid_refresh_rejected",
+            "test_jwt_expiry_enforced"
+          ],
+          "missing_test_ids": [],
+          "behavioral_status": "pass",
+          "conformance_status": "pass",
+          "implementation_detail": "changed files are present",
+          "behavioral_detail": "all required test signals observed",
+          "conformance_detail": "code evidence: jwt=True",
+          "reasons": [],
+          "evidence": {
+            "code": "jwt",
+            "review": "pass",
+            "command_passed": true,
+            "signals": [
+              "test_jwt_access_issuance",
+              "test_jwt_refresh_issuance",
+              "test_invalid_refresh_rejected",
+              "test_jwt_expiry_enforced"
+            ]
+          }
+        }
+      ],
+      "levels": {
+        "implementation": {
+          "status": "verified",
+          "checks": [
+            {
+              "criterion_id": "ac_01_jwt_refresh",
+              "state": "verified",
+              "detail": "changed files are present"
+            },
+            {
+              "criterion_id": "ac_02_auth_session",
+              "state": "verified",
+              "detail": "changed files are present"
+            }
+          ]
+        },
+        "behavioral": {
+          "status": "verified",
+          "checks": [
+            {
+              "criterion_id": "ac_01_jwt_refresh",
+              "state": "verified",
+              "detail": "all required test signals observed",
+              "test_ids": [
+                "test_jwt_access_issuance",
+                "test_jwt_refresh_issuance",
+                "test_invalid_refresh_rejected",
+                "test_jwt_expiry_enforced"
+              ],
+              "missing": []
+            },
+            {
+              "criterion_id": "ac_02_auth_session",
+              "state": "verified",
+              "detail": "all required test signals observed",
+              "test_ids": [
+                "test_jwt_access_issuance",
+                "test_jwt_refresh_issuance",
+                "test_invalid_refresh_rejected",
+                "test_jwt_expiry_enforced"
+              ],
+              "missing": []
+            }
+          ]
+        },
+        "conformance": {
+          "status": "verified",
+          "checks": [
+            {
+              "criterion_id": "ac_01_jwt_refresh",
+              "state": "verified",
+              "detail": "independent review passed"
+            },
+            {
+              "criterion_id": "ac_02_auth_session",
+              "state": "verified",
+              "detail": "code evidence: jwt=True"
+            }
+          ]
+        }
+      },
+      "critical_failures": [],
+      "critical_unverified": [],
+      "blocking": [],
+      "stale": false,
+      "stale_reason": null,
+      "scope_violation": false,
+      "scopes": {
+        "violations": [],
+        "checked": true
+      },
+      "test_results": {
+        "accepted": 4,
+        "rejected": [],
+        "matching": 4,
+        "failed": 0,
+        "evidence": [
+          {
+            "command": "python3 -m unittest discover -v",
+            "exit_code": 0,
+            "signals": [
+              "test_invalid_refresh_rejected",
+              "test_auth_jwt.AuthJWTTests.test_invalid_refresh_rejected",
+              "AuthJWTTests.test_invalid_refresh_rejected",
+              "test_jwt_access_issuance",
+              "test_auth_jwt.AuthJWTTests.test_jwt_access_issuance",
+              "AuthJWTTests.test_jwt_access_issuance",
+              "test_jwt_expiry_enforced",
+              "test_auth_jwt.AuthJWTTests.test_jwt_expiry_enforced",
+              "AuthJWTTests.test_jwt_expiry_enforced",
+              "test_jwt_refresh_issuance",
+              "test_auth_jwt.AuthJWTTests.test_jwt_refresh_issuance",
+              "AuthJWTTests.test_jwt_refresh_issuance",
+              "test_emoji_and_email_subjects_round_trip",
+              "test_password_reset.PasswordResetTests.test_emoji_and_email_subjects_round_trip",
+              "PasswordResetTests.test_emoji_and_email_subjects_round_trip",
+              "test_expiry_enforced",
+              "test_password_reset.PasswordResetTests.test_expiry_enforced",
+              "PasswordResetTests.test_expiry_enforced",
+              "test_invalid_subjects_rejected",
+              "test_password_reset.PasswordResetTests.test_invalid_subjects_rejected"
+            ]
+          },
+          {
+            "command": "python3 -m unittest discover -v",
+            "exit_code": 0,
+            "signals": [
+              "test_invalid_refresh_rejected",
+              "test_auth_jwt.AuthJWTTests.test_invalid_refresh_rejected",
+              "AuthJWTTests.test_invalid_refresh_rejected",
+              "test_jwt_access_issuance",
+              "test_auth_jwt.AuthJWTTests.test_jwt_access_issuance",
+              "AuthJWTTests.test_jwt_access_issuance",
+              "test_jwt_expiry_enforced",
+              "test_auth_jwt.AuthJWTTests.test_jwt_expiry_enforced",
+              "AuthJWTTests.test_jwt_expiry_enforced",
+              "test_jwt_refresh_issuance",
+              "test_auth_jwt.AuthJWTTests.test_jwt_refresh_issuance",
+              "AuthJWTTests.test_jwt_refresh_issuance",
+              "test_emoji_and_email_subjects_round_trip",
+              "test_password_reset.PasswordResetTests.test_emoji_and_email_subjects_round_trip",
+              "PasswordResetTests.test_emoji_and_email_subjects_round_trip",
+              "test_expiry_enforced",
+              "test_password_reset.PasswordResetTests.test_expiry_enforced",
+              "PasswordResetTests.test_expiry_enforced",
+              "test_invalid_subjects_rejected",
+              "test_password_reset.PasswordResetTests.test_invalid_subjects_rejected"
+            ]
+          },
+          {
+            "command": "python3 -m unittest discover -v",
+            "exit_code": 0,
+            "signals": [
+              "test_invalid_refresh_rejected",
+              "test_auth_jwt.AuthJWTTests.test_invalid_refresh_rejected",
+              "AuthJWTTests.test_invalid_refresh_rejected",
+              "test_jwt_access_issuance",
+              "test_auth_jwt.AuthJWTTests.test_jwt_access_issuance",
+              "AuthJWTTests.test_jwt_access_issuance",
+              "test_jwt_expiry_enforced",
+              "test_auth_jwt.AuthJWTTests.test_jwt_expiry_enforced",
+              "AuthJWTTests.test_jwt_expiry_enforced",
+              "test_jwt_refresh_issuance",
+              "test_auth_jwt.AuthJWTTests.test_jwt_refresh_issuance",
+              "AuthJWTTests.test_jwt_refresh_issuance",
+              "test_emoji_and_email_subjects_round_trip",
+              "test_password_reset.PasswordResetTests.test_emoji_and_email_subjects_round_trip",
+              "PasswordResetTests.test_emoji_and_email_subjects_round_trip",
+              "test_expiry_enforced",
+              "test_password_reset.PasswordResetTests.test_expiry_enforced",
+              "PasswordResetTests.test_expiry_enforced",
+              "test_invalid_subjects_rejected",
+              "test_password_reset.PasswordResetTests.test_invalid_subjects_rejected"
+            ]
+          },
+          {
+            "command": "python3 -m unittest discover -v",
+            "exit_code": 0,
+            "signals": [
+              "test_invalid_refresh_rejected",
+              "test_auth_jwt.AuthJWTTests.test_invalid_refresh_rejected",
+              "AuthJWTTests.test_invalid_refresh_rejected",
+              "test_jwt_access_issuance",
+              "test_auth_jwt.AuthJWTTests.test_jwt_access_issuance",
+              "AuthJWTTests.test_jwt_access_issuance",
+              "test_jwt_expiry_enforced",
+              "test_auth_jwt.AuthJWTTests.test_jwt_expiry_enforced",
+              "AuthJWTTests.test_jwt_expiry_enforced",
+              "test_jwt_refresh_issuance",
+              "test_auth_jwt.AuthJWTTests.test_jwt_refresh_issuance",
+              "AuthJWTTests.test_jwt_refresh_issuance",
+              "test_emoji_and_email_subjects_round_trip",
+              "test_password_reset.PasswordResetTests.test_emoji_and_email_subjects_round_trip",
+              "PasswordResetTests.test_emoji_and_email_subjects_round_trip",
+              "test_expiry_enforced",
+              "test_password_reset.PasswordResetTests.test_expiry_enforced",
+              "PasswordResetTests.test_expiry_enforced",
+              "test_invalid_subjects_rejected",
+              "test_password_reset.PasswordResetTests.test_invalid_subjects_rejected"
+            ]
+          }
+        ]
+      },
+      "rejected_test_results": [],
+      "reviews": [
+        {
+          "task_id": "review",
+          "role": "reviewer",
+          "verdict": "pass",
+          "independent": true,
+          "attempt": null,
+          "commit": "20024f97adc5b995d7978b044106dbcf0284653a"
+        }
+      ],
+      "reasons": [],
+      "binding": {
+        "contract_id": "rc_95895e3bfdbf9698",
+        "contract_version": 1,
+        "contract_schema_version": 2,
+        "contract_sha256": "2c73a0166259916b343612f45a73db5512ac11d8f4aedb1939af2a99dd490a00",
+        "contract_digest": "2c73a0166259916b343612f45a73db5512ac11d8f4aedb1939af2a99dd490a00",
+        "commit_sha": "20024f97adc5b995d7978b044106dbcf0284653a",
+        "run_id": "v761-opencode-reset",
+        "task_id": null,
+        "attempt": null,
+        "test_ids": [
+          "test_invalid_refresh_rejected",
+          "test_auth_jwt.AuthJWTTests.test_invalid_refresh_rejected",
+          "AuthJWTTests.test_invalid_refresh_rejected",
+          "test_jwt_access_issuance",
+          "test_auth_jwt.AuthJWTTests.test_jwt_access_issuance",
+          "AuthJWTTests.test_jwt_access_issuance",
+          "test_jwt_expiry_enforced",
+          "test_auth_jwt.AuthJWTTests.test_jwt_expiry_enforced",
+          "AuthJWTTests.test_jwt_expiry_enforced",
+          "test_jwt_refresh_issuance",
+          "test_auth_jwt.AuthJWTTests.test_jwt_refresh_issuance",
+          "AuthJWTTests.test_jwt_refresh_issuance",
+          "test_emoji_and_email_subjects_round_trip",
+          "test_password_reset.PasswordResetTests.test_emoji_and_email_subjects_round_trip",
+          "PasswordResetTests.test_emoji_and_email_subjects_round_trip",
+          "test_expiry_enforced",
+          "test_password_reset.PasswordResetTests.test_expiry_enforced",
+          "PasswordResetTests.test_expiry_enforced",
+          "test_invalid_subjects_rejected",
+          "test_password_reset.PasswordResetTests.test_invalid_subjects_rejected",
+          "PasswordResetTests.test_invalid_subjects_rejected",
+          "test_reset_scope_is_signed",
+          "test_password_reset.PasswordResetTests.test_reset_scope_is_signed",
+          "PasswordResetTests.test_reset_scope_is_signed",
+          "test_reset_token_is_not_a_session_token",
+          "test_password_reset.PasswordResetTests.test_reset_token_is_not_a_session_token",
+          "PasswordResetTests.test_reset_token_is_not_a_session_token",
+          "test_reset_token_round_trip",
+          "test_password_reset.PasswordResetTests.test_reset_token_round_trip",
+          "PasswordResetTests.test_reset_token_round_trip",
+          "test_session_tokens_are_not_reset_tokens",
+          "test_password_reset.PasswordResetTests.test_session_tokens_are_not_reset_tokens",
+          "PasswordResetTests.test_session_tokens_are_not_reset_tokens",
+          "test_tampered_and_malformed_tokens_rejected",
+          "test_password_reset.PasswordResetTests.test_tampered_and_malformed_tokens_rejected",
+          "PasswordResetTests.test_tampered_and_malformed_tokens_rejected"
+        ],
+        "evaluated_at": 1793113581.599464
+      }
+    },
+    "error": null,
+    "reset_file": true
+  },
+  "final": {
+    "project_id": "p_d10766cd7823ab46",
+    "last_platform": "opencode",
+    "confirmed_topics": [
+      "jwt_refresh",
+      "auth_session"
+    ],
+    "handoffs": 2
+  },
+  "final_contract": {
+    "ok": true,
+    "fully_verified": false,
+    "status": "partially_verified",
+    "contract_id": "rc_95895e3bfdbf9698",
+    "contract_version": 1,
+    "sha256": "2c73a0166259916b343612f45a73db5512ac11d8f4aedb1939af2a99dd490a00",
+    "checks": [
+      {
+        "criterion_id": "ac_01_jwt_refresh",
+        "kind": "not_automated",
+        "status": "not_verified",
+        "evidence": "no automated verification available"
+      },
+      {
+        "criterion_id": "ac_02_auth_session",
+        "kind": "code_evidence",
+        "status": "passed",
+        "evidence": "code evidence: jwt=True"
+      }
+    ],
+    "passed": 1,
+    "not_verified": 1,
+    "reasons": []
+  }
+}

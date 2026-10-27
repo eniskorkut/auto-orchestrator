@@ -7,6 +7,7 @@ import json
 import sys
 import os
 import shlex
+import shutil
 import subprocess
 import tomllib
 from pathlib import Path
@@ -32,6 +33,8 @@ V73_MODULES = ('teamwork.py', 'teamwork_planner.py', 'managed_exec.py',
                'repo_facts.py', 'grill_me.py', 'universal_teamwork.py')
 V761_MODULES = ('requirements_contract.py', 'assumption_guard.py',
                 'git_memory_hook.py')
+V77_MODULES = ('completion_engine.py', 'context_selector.py',
+               'grill_llm.py', 'grill_benchmark.py')
 
 class InstallError(ValueError):
     pass
@@ -58,6 +61,26 @@ def shell_arg(value:Path)->str:
 def sha(data:bytes)->str:
     return hashlib.sha256(data).hexdigest()
 
+def _global_managed_roots(home:Path,platforms:set[str])->tuple[Path,...]:
+    roots=[]
+    if 'codex' in platforms: roots.append(home/'.codex')
+    if 'opencode' in platforms: roots.append(home/'.config/opencode')
+    if 'antigravity' in platforms: roots.extend((home/'.gemini/config',home/'.gemini/antigravity-cli'))
+    if 'cursor' in platforms: roots.append(home/'.cursor')
+    return tuple(root.resolve() for root in roots)
+
+def _prunable_global(path:Path,roots:tuple[Path,...])->bool:
+    """Only integration files are pruned; user config/hooks and AGENTS stay."""
+    resolved=path.resolve()
+    if not any(resolved.is_relative_to(root) for root in roots):
+        return False
+    if resolved.name in ('config.toml','hooks.json','AGENTS.md'):
+        return False
+    parts=resolved.as_posix()
+    return any(marker in parts for marker in (
+        '/auto-orchestrator/', '/skills/', '/commands/', '/agents/', '/plugins/'))
+
+
 def skill_files()->dict[str,bytes]:
     root=ROOT/'.agents/skills/auto-orchestrator'
     return {p.relative_to(root).as_posix():p.read_bytes() for p in root.rglob('*') if p.is_file() and not p.is_symlink() and not p.parent.is_symlink()}
@@ -65,6 +88,19 @@ def skill_files()->dict[str,bytes]:
 def grill_skill_files()->dict[str,bytes]:
     root=ROOT/'.agents/skills/grill-me'
     return {p.relative_to(root).as_posix():p.read_bytes() for p in root.rglob('*') if p.is_file() and not p.is_symlink()}
+
+def ao_grill_skill_files()->dict[str,bytes]:
+    root=ROOT/'.agents/skills/ao-grill-me'
+    return {p.relative_to(root).as_posix():p.read_bytes() for p in root.rglob('*') if p.is_file() and not p.is_symlink()}
+
+def codex_skill_files()->dict[str,bytes]:
+    root=ROOT/'.codex/skills/teamwork'
+    return {p.relative_to(root).as_posix():p.read_bytes() for p in root.rglob('*') if p.is_file() and not p.is_symlink()}
+
+def opencode_skill_files()->dict[str,bytes]:
+    root=ROOT/'.opencode/skills/teamwork'
+    return {p.relative_to(root).as_posix():p.read_bytes() for p in root.rglob('*') if p.is_file() and not p.is_symlink()}
+
 
 def dashboard_files()->dict[str,bytes]:
     """Read the read-only dashboard runtime and its static assets."""
@@ -89,6 +125,8 @@ def installed_map(home:Path,platforms:set[str],opencode_version:str,codex_model:
         skills_at(codex/'skills/auto-orchestrator')
         for path,content in grill_skill_files().items():
             files[codex/'skills/grill-me'/path]=content
+        for path,content in codex_skill_files().items():
+            files[codex/'skills/teamwork'/path]=content
         for source in (ROOT/'.codex/agents').glob('*.toml'):
             files[codex/'agents'/source.name]=source.read_bytes()
         # Global runtime adapters. Existing hook files belong to the user and are left untouched.
@@ -98,7 +136,7 @@ def installed_map(home:Path,platforms:set[str],opencode_version:str,codex_model:
         for name in ('supervisor.py','router.py','router_eval.py','worktree.py','benchmark.py','quality_gate.py','review_gate.py'):
             files[codex/'auto-orchestrator/tools'/name]=(ROOT/'tools'/name).read_bytes()
         dashboard_at(codex/'auto-orchestrator/tools')
-        for name in V71_MODULES + V73_MODULES + V761_MODULES:
+        for name in V71_MODULES + V73_MODULES + V761_MODULES + V77_MODULES:
             source=ROOT/'tools'/name
             if source.is_file():
                 files[codex/'auto-orchestrator/tools'/name]=source.read_bytes()
@@ -134,22 +172,27 @@ def installed_map(home:Path,platforms:set[str],opencode_version:str,codex_model:
         if commands.is_dir():
             for source in commands.glob('*.md'):
                 files[oc/'commands'/source.name]=source.read_bytes()
+        for path,content in opencode_skill_files().items():
+            files[oc/'skills/teamwork'/path]=content
         plugin=ROOT/('adapters/opencode-v2/auto_orchestrator.js' if opencode_version=='v2' else '.opencode/plugins/auto_orchestrator.js')
         files[oc/'plugins/auto_orchestrator.js']=plugin.read_bytes()
         files[oc/'auto-orchestrator/tools/perf.py']=(ROOT/'tools/perf.py').read_bytes()
         for name in ('supervisor.py','router.py','router_eval.py','worktree.py','benchmark.py','quality_gate.py','review_gate.py'):
             files[oc/'auto-orchestrator/tools'/name]=(ROOT/'tools'/name).read_bytes()
         dashboard_at(oc/'auto-orchestrator/tools')
-        for name in V71_MODULES + V73_MODULES + V761_MODULES:
+        for name in V71_MODULES + V73_MODULES + V761_MODULES + V77_MODULES:
             source=ROOT/'tools'/name
             if source.is_file():
                 files[oc/'auto-orchestrator/tools'/name]=source.read_bytes()
     if 'antigravity' in platforms:
         gemini=home/'.gemini'
         skills_at(gemini/'config/skills/auto-orchestrator')
-        for path,content in grill_skill_files().items():
-            files[gemini/'config/skills/grill-me'/path]=content
-            files[gemini/'antigravity-cli/skills/grill-me'/path]=content
+        # Native /grill-me and /teamwork-preview stay authoritative. Our
+        # non-native interview is installed under a distinct name so it cannot
+        # shadow the native command.
+        for path,content in ao_grill_skill_files().items():
+            files[gemini/'config/skills/ao-grill-me'/path]=content
+            files[gemini/'antigravity-cli/skills/ao-grill-me'/path]=content
         skills_at(gemini/'antigravity-cli/skills/auto-orchestrator')
         for source in (ROOT/'.agents/agents').glob('*.md'):
             files[gemini/'config/agents'/source.stem/'agent.md']=source.read_bytes()
@@ -159,7 +202,7 @@ def installed_map(home:Path,platforms:set[str],opencode_version:str,codex_model:
         for name in ('supervisor.py','router.py','router_eval.py','worktree.py','benchmark.py','quality_gate.py','review_gate.py'):
             files[gemini/'config/auto-orchestrator/tools'/name]=(ROOT/'tools'/name).read_bytes()
         dashboard_at(gemini/'config/auto-orchestrator/tools')
-        for name in V71_MODULES + V73_MODULES + V761_MODULES:
+        for name in V71_MODULES + V73_MODULES + V761_MODULES + V77_MODULES:
             source=ROOT/'tools'/name
             if source.is_file():
                 files[gemini/'config/auto-orchestrator/tools'/name]=source.read_bytes()
@@ -186,7 +229,7 @@ def installed_map(home:Path,platforms:set[str],opencode_version:str,codex_model:
         for name in ('supervisor.py','router.py','router_eval.py','worktree.py','quality_gate.py','review_gate.py','perf.py','hook_bridge.py'):
             files[cursor/'auto-orchestrator/tools'/name]=(ROOT/'tools'/name).read_bytes()
         dashboard_at(cursor/'auto-orchestrator/tools')
-        for name in V71_MODULES + V73_MODULES + V761_MODULES:
+        for name in V71_MODULES + V73_MODULES + V761_MODULES + V77_MODULES:
             source=ROOT/'tools'/name
             if source.is_file():
                 files[cursor/'auto-orchestrator/tools'/name]=source.read_bytes()
@@ -331,17 +374,33 @@ def execute(home:Path,platforms:set[str],opencode_version:str='v2',codex_model:s
         if path.is_file() and path.read_bytes()!=content and old_files.get(str(path))!=sha(path.read_bytes()):
             raise InstallError('Existing unmanaged/modified file: '+str(path))
         if path.exists() and not path.is_file():raise InstallError('Non-file collision: '+str(path))
+    roots=_global_managed_roots(home,platforms)
+    obsolete=[]
+    for name,checksum in old_files.items():
+        path=Path(name)
+        if path in files or not path.is_file():
+            continue
+        if not _prunable_global(path,roots):
+            continue
+        if sha(path.read_bytes())==checksum:
+            obsolete.append(path)
     edits=[]
     for path in guides:
         before=path.read_text(encoding='utf-8') if path.exists() else ''
         edits.append((path,with_guidance(before)))
     new_files=dict(old_files)
     for path,content in files.items():new_files[str(path)]=sha(content)
+    for path in obsolete:new_files.pop(str(path),None)
     new_guidance=sorted(set(old.get('guidance',[]))|{str(path) for path in guides})
     if not dry_run:
         for path,content in files.items():
             path.parent.mkdir(parents=True,exist_ok=True)
+            if path.is_file() and path.read_bytes()!=content:
+                shutil.copy2(path,path.with_name(path.name+'.bak'))
             path.write_bytes(content)
+        for path in obsolete:
+            path.unlink()
+            notes.append('pruned obsolete managed integration: '+str(path))
         for path,content in edits:
             path.parent.mkdir(parents=True,exist_ok=True)
             path.write_text(content,encoding='utf-8')
