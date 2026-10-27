@@ -40,8 +40,10 @@ one project  →  one owner record  →  one fence  →  one active writer
 `tools/run_owner.py`; it does **not** create a second supervisor, a second
 memory store or a second scheduler.
 
-No module in this path starts a process. There is no `subprocess.Popen`, no
-foreign provider launch and no background IDE switch.
+No module in this path starts an IDE, provider, runner or supervisor process.
+Git is invoked read-only to describe repository state; there is no
+`subprocess.Popen` for an agent, no foreign provider launch and no background
+IDE switch.
 
 ## 3. Ownership state machine
 
@@ -319,5 +321,8 @@ runs, not a benchmark of model quality or human time saved.
   guessing.
 - Cursor and Antigravity have no managed process adapter here; their rows are
   contract-only until a documented native surface is exercised.
+- Native token and cost data are not observable from this repository. Managed
+  runs keep their measured telemetry; native reports record only what the
+  client explicitly reports, and no estimate is synthesized.
 - The fence is a recorded monotonic counter, not a security boundary against a
   user who rolls back the state directory.
