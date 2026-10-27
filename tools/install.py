@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import argparse
-import shutil
-import sys
+import hashlib
+import json
 import os
 import shlex
-import json
+import shutil
 import subprocess
+import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,9 +24,14 @@ MODEL_SETTING = {
     'inherit': '[agents]\nenabled = true\nmax_concurrent_threads_per_session = 3\n',
     'luna-max': '[agents]\nenabled = true\nmax_concurrent_threads_per_session = 3\ndefault_subagent_model = "gpt-6-luna"\ndefault_subagent_reasoning_effort = "max"\n',
 }
+MANIFEST_RELATIVE = Path('.auto-orchestrator/install-manifest.json')
+MANIFEST_VERSION = 1
+V761_MODULES = ('requirements_contract.py', 'assumption_guard.py',
+                'git_memory_hook.py')
 
 class Conflict(Exception):
     pass
+
 
 def guard_dest(target:Path, dest:Path)->None:
     try:
@@ -51,21 +58,25 @@ def rendered(source:Path, target:Path)->str:
     return content
 
 
-def write_file(dest: Path, text: str, dry_run: bool, force: bool = False) -> str:
-    if dest.is_file():
+def write_file(dest: Path, text: str, dry_run: bool, force: bool = False,
+               managed: bool = False) -> str:
+    existed = dest.is_file()
+    if existed:
         old = dest.read_text(encoding='utf-8')
         if old == text:
             return 'unchanged'
-        if not force:
+        if not force and not managed:
             raise Conflict(f'Existing file differs: {dest}. No overwrite (use --force-generated for generated profiles).')
         if not dry_run:
-            shutil.copy2(dest, dest.with_name(dest.name + '.bak'))
+            if force:
+                shutil.copy2(dest, dest.with_name(dest.name + '.bak'))
+            dest.write_text(text, encoding='utf-8')
     elif dest.exists():
         raise Conflict(f'Not a normal file: {dest}')
-    if not dry_run:
+    elif not dry_run:
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(text, encoding='utf-8')
-    return 'updated' if dest.exists() else 'created'
+    return 'updated' if existed else 'created'
 
 
 def patch_guidance(dest: Path, dry_run: bool) -> str:
@@ -106,11 +117,128 @@ def patch_ignore(dest: Path, dry_run: bool) -> str:
     return 'updated'
 
 
+def remove_guidance(dest: Path, dry_run: bool) -> str:
+    """Remove only the managed block, preserving all surrounding user text."""
+    if not dest.is_file():
+        return 'missing'
+    old = dest.read_text(encoding='utf-8')
+    if old.count(START) != old.count(END) or old.count(START) > 1:
+        raise Conflict(f'Invalid managed markers in {dest}')
+    if START not in old:
+        return 'unchanged'
+    prefix = old[:old.index(START)]
+    suffix = old[old.index(END) + len(END):]
+    new = (prefix + suffix).rstrip()
+    if new:
+        new += '\n'
+    if not dry_run:
+        dest.write_text(new, encoding='utf-8')
+    return 'updated'
+
+
+def _sha256_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _sha256_file(path: Path) -> str:
+    return _sha256_bytes(path.read_bytes())
+
+
+def _manifest_path(target: Path) -> Path:
+    return target / MANIFEST_RELATIVE
+
+
+def _load_manifest(target: Path) -> dict:
+    path = _manifest_path(target)
+    guard_dest(target, path)
+    if path.is_symlink():
+        raise Conflict('Install manifest must not be a symlink')
+    if not path.is_file():
+        return {'version': MANIFEST_VERSION, 'files': {}, 'created': [],
+                'guidance': [], 'guidance_created': [], 'gitignore': {},
+                'platforms': []}
+    try:
+        value = json.loads(path.read_text(encoding='utf-8'))
+    except (OSError, ValueError) as exc:
+        raise Conflict('Install manifest is invalid; refusing unsafe uninstall') from exc
+    if not isinstance(value, dict) or value.get('version') != MANIFEST_VERSION:
+        raise Conflict('Unsupported install manifest; refusing unsafe uninstall')
+    files = value.get('files', {})
+    created = value.get('created', [])
+    guidance = value.get('guidance', [])
+    guidance_created = value.get('guidance_created', [])
+    gitignore = value.get('gitignore', {})
+    platforms = value.get('platforms', [])
+    if (not isinstance(files, dict)
+            or not all(isinstance(key, str) and isinstance(item, str)
+                       for key, item in files.items())
+            or not isinstance(created, list)
+            or not all(isinstance(item, str) for item in created)
+            or not isinstance(guidance, list)
+            or not all(isinstance(item, str) for item in guidance)
+            or not isinstance(guidance_created, list)
+            or not all(isinstance(item, str) for item in guidance_created)
+            or not isinstance(gitignore, dict)
+            or (gitignore and not isinstance(gitignore.get('path'), str))
+            or not isinstance(platforms, list)
+            or not all(isinstance(item, str) for item in platforms)):
+        raise Conflict('Install manifest structure is invalid')
+    return {'version': MANIFEST_VERSION, 'files': files,
+            'created': created, 'guidance': guidance,
+            'guidance_created': guidance_created, 'gitignore': gitignore,
+            'platforms': platforms}
+
+
+def _write_manifest(target: Path, value: dict, dry_run: bool) -> None:
+    if dry_run:
+        return
+    path = _manifest_path(target)
+    guard_dest(target, path)
+    text = json.dumps(value, indent=2, sort_keys=True) + '\n'
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + f'.tmp-{os.getpid()}')
+    try:
+        temporary.write_text(text, encoding='utf-8')
+        try:
+            temporary.chmod(0o600)
+        except OSError:
+            pass
+        os.replace(temporary, path)
+    finally:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def _runtime_sources() -> list[Path]:
+    sources = [ROOT/'tools/perf.py', ROOT/'tools/hook_bridge.py',
+               ROOT/'tools/supervisor.py', ROOT/'tools/router.py', ROOT/'tools/router_eval.py', ROOT/'tools/worktree.py', ROOT/'tools/benchmark.py', ROOT/'tools/quality_gate.py', ROOT/'tools/review_gate.py',
+               ROOT/'tools/dashboard.py', ROOT/'tools/project_registry.py',
+               ROOT/'tools/event_stream.py', ROOT/'tools/event_model.py',
+               ROOT/'tools/office_model.py', ROOT/'tools/capabilities.py',
+               ROOT/'tools/telemetry.py', ROOT/'tools/project_planner.py',
+               ROOT/'tools/executor.py', ROOT/'tools/teamwork.py',
+               ROOT/'tools/teamwork_planner.py', ROOT/'tools/managed_exec.py',
+               ROOT/'tools/teamwork_runner.py', ROOT/'tools/teamwork_benchmark.py',
+               ROOT/'tools/teamwork_cli.py', ROOT/'tools/teamwork_chat.py',
+               ROOT/'tools/scheduler.py', ROOT/'tools/run_owner.py',
+               ROOT/'tools/repo_profile.py', ROOT/'tools/project_identity.py',
+               ROOT/'tools/project_memory.py', ROOT/'tools/repo_facts.py',
+               ROOT/'tools/grill_me.py', ROOT/'tools/universal_teamwork.py']
+    # V7.6.1 modules ship when present. A partial source tree must not make a
+    # previously working installer unusable.
+    sources.extend(ROOT/'tools'/name for name in V761_MODULES
+                   if (ROOT/'tools'/name).is_file())
+    return sources
+
+
 def install(target: Path, platform: str, codex_model: str, dry_run: bool, force_generated: bool, opencode_version: str = 'v2') -> list[tuple[str,str]]:
     if not target.is_dir():
         raise Conflict(f'Target project directory does not exist: {target}')
     if (target / 'tools' / 'install.py').resolve() == Path(__file__).resolve():
         raise Conflict('Install into a separate target project (do not self-install).')
+    target = target.resolve()
     selected = {'codex','opencode','antigravity','cursor'} if platform == 'all' else {platform}
     def destination(source: Path) -> Path:
         if source == ROOT/'adapters/opencode-v2/auto_orchestrator.js':
@@ -119,20 +247,7 @@ def install(target: Path, platform: str, codex_model: str, dry_run: bool, force_
     sources = [ROOT/'.agents/skills/auto-orchestrator/SKILL.md',
                ROOT/'.agents/skills/grill-me/SKILL.md']
     sources.extend(sorted((ROOT/'.agents/skills/auto-orchestrator/references').glob('*.md')))
-    sources += [ROOT/'tools/perf.py', ROOT/'tools/hook_bridge.py',
-                ROOT/'tools/supervisor.py', ROOT/'tools/router.py', ROOT/'tools/router_eval.py', ROOT/'tools/worktree.py', ROOT/'tools/benchmark.py', ROOT/'tools/quality_gate.py', ROOT/'tools/review_gate.py',
-                ROOT/'tools/dashboard.py', ROOT/'tools/project_registry.py',
-                ROOT/'tools/event_stream.py', ROOT/'tools/event_model.py',
-                ROOT/'tools/office_model.py', ROOT/'tools/capabilities.py',
-                ROOT/'tools/telemetry.py', ROOT/'tools/project_planner.py',
-                ROOT/'tools/executor.py', ROOT/'tools/teamwork.py',
-                ROOT/'tools/teamwork_planner.py', ROOT/'tools/managed_exec.py',
-                ROOT/'tools/teamwork_runner.py', ROOT/'tools/teamwork_benchmark.py', ROOT/'tools/teamwork_cli.py',
-                ROOT/'tools/teamwork_chat.py', ROOT/'tools/scheduler.py',
-                ROOT/'tools/run_owner.py',
-                ROOT/'tools/repo_profile.py', ROOT/'tools/project_identity.py',
-                ROOT/'tools/project_memory.py', ROOT/'tools/repo_facts.py',
-                ROOT/'tools/grill_me.py', ROOT/'tools/universal_teamwork.py']
+    sources.extend(_runtime_sources())
     sources.extend(sorted(p for p in (ROOT/'tools/dashboard_assets').rglob('*') if p.is_file()))
     if 'codex' in selected:
         sources.extend(sorted((ROOT/'.codex/agents').glob('*.toml')))
@@ -149,16 +264,48 @@ def install(target: Path, platform: str, codex_model: str, dry_run: bool, force_
     if 'cursor' in selected:
         sources.extend(sorted((ROOT/'.cursor/agents').glob('*.md')))
         sources.append(ROOT/'.cursor/hooks.json')
+
+    outputs: list[tuple[Path, str]] = [
+        (destination(source), rendered(source, target)) for source in sources]
+    if 'antigravity' in selected:
+        grill = ROOT/'.agents/skills/grill-me/SKILL.md'
+        if grill.is_file():
+            outputs.append((
+                target/'.gemini/antigravity-cli/skills/grill-me/SKILL.md',
+                grill.read_text(encoding='utf-8')))
+
+    manifest_path = _manifest_path(target)
+    manifest = _load_manifest(target)
+    old_files = manifest['files']
+    old_created = set(manifest['created'])
+
+    def managed(relative: str, dest: Path) -> bool:
+        if not dest.is_file() or relative not in old_files:
+            return False
+        try:
+            return _sha256_file(dest) == old_files[relative]
+        except OSError:
+            return False
+
     # Preflight all non-managed destinations, so no partial install on conflict.
-    for source in sources:
-        dest = destination(source)
-        guard_dest(target,dest)
-        if dest.exists() and not force_generated and dest.read_text(encoding='utf-8') != rendered(source,target):
-            raise Conflict(f'Existing file differs: {dest}; nothing changed.')
+    for dest, text in outputs:
+        relative = dest.relative_to(target).as_posix()
+        guard_dest(target, dest)
+        if dest.exists() and not dest.is_file():
+            raise Conflict(f'Not a normal file: {dest}')
+        if dest.is_file() and not force_generated:
+            old = dest.read_text(encoding='utf-8')
+            # Runtime modules and dashboard assets may upgrade in place only
+            # when the manifest proves the file is still installer-generated.
+            # Profiles, plugins and skill files keep the stricter opt-in rule.
+            managed_update = relative.startswith('tools/') and managed(relative, dest)
+            if old != text and not managed_update:
+                raise Conflict(f'Existing file differs: {dest}; nothing changed.')
     conf = target/'.codex/config.toml'
     guard_dest(target,conf)
     guard_dest(target,target/'AGENTS.md')
     guard_dest(target,target/'.gitignore')
+    guard_dest(target, manifest_path)
     if 'codex' in selected and conf.exists():
         current = conf.read_text(encoding='utf-8')
         if current not in MODEL_SETTING.values():
@@ -169,14 +316,151 @@ def install(target: Path, platform: str, codex_model: str, dry_run: bool, force_
         s=g.read_text(encoding='utf-8')
         if s.count(START)!=s.count(END) or s.count(START)>1:
             raise Conflict(f'Invalid markers in {g}; nothing changed.')
+
     results=[]
-    for source in sources:
-        dest=destination(source)
-        results.append((dest.relative_to(target).as_posix(),write_file(dest,rendered(source,target),dry_run,force_generated)))
+    records: dict[str, dict] = {}
+    for dest, text in outputs:
+        relative = dest.relative_to(target).as_posix()
+        existed = dest.is_file()
+        managed_update = relative.startswith('tools/') and managed(relative, dest)
+        state = write_file(dest, text, dry_run, force_generated,
+                           managed_update)
+        results.append((relative, state))
+        records[relative] = {
+            'sha256': _sha256_bytes(text.encode('utf-8')),
+            'created': bool(not existed or relative in old_created),
+        }
     if 'codex' in selected:
-        results.append(('.codex/config.toml',write_file(conf,MODEL_SETTING[codex_model],dry_run,force=True)))
-    results.append(('AGENTS.md',patch_guidance(g,dry_run)))
-    results.append(('.gitignore',patch_ignore(target/'.gitignore',dry_run)))
+        existed = conf.is_file()
+        state = write_file(conf, MODEL_SETTING[codex_model], dry_run, True,
+                           managed('.codex/config.toml', conf))
+        results.append(('.codex/config.toml', state))
+        records['.codex/config.toml'] = {
+            'sha256': _sha256_bytes(MODEL_SETTING[codex_model].encode('utf-8')),
+            'created': bool(not existed or '.codex/config.toml' in old_created),
+        }
+    g_existed = g.is_file()
+    ignore_path = target/'.gitignore'
+    ignore_existed = ignore_path.is_file()
+    ignore_lines = (ignore_path.read_text(encoding='utf-8').splitlines()
+                    if ignore_existed else [])
+    ignore_had_lines = ('.auto-orchestrator/*' in ignore_lines
+                        and '!.auto-orchestrator/project.json' in ignore_lines)
+    guidance_state = patch_guidance(g, dry_run)
+    results.append(('AGENTS.md', guidance_state))
+    results.append(('.gitignore', patch_ignore(ignore_path, dry_run)))
+
+    new_files = dict(old_files)
+    new_created = set(old_created)
+    for relative, record in records.items():
+        new_files[relative] = record['sha256']
+        if record['created']:
+            new_created.add(relative)
+        else:
+            new_created.discard(relative)
+    new_guidance = set(manifest['guidance'])
+    if g.is_file() or not dry_run:
+        new_guidance.add('AGENTS.md')
+    guidance_created = set(manifest.get('guidance_created', []))
+    if not g_existed:
+        guidance_created.add('AGENTS.md')
+    old_gitignore = manifest.get('gitignore')
+    old_gitignore = old_gitignore if isinstance(old_gitignore, dict) else {}
+    gitignore_info = {
+        'path': '.gitignore',
+        'created': bool(not ignore_existed or old_gitignore.get('created')),
+        'added': bool(not ignore_had_lines or old_gitignore.get('added')),
+    }
+    manifest_value = {
+        'version': MANIFEST_VERSION,
+        'files': new_files,
+        'created': sorted(new_created),
+        'guidance': sorted(new_guidance),
+        'guidance_created': sorted(guidance_created),
+        'gitignore': gitignore_info,
+        'platforms': sorted(set(manifest.get('platforms', [])) | selected),
+        'updated_at': time.time(),
+    }
+    _write_manifest(target, manifest_value, dry_run)
+    return results
+
+
+def uninstall(target: Path, dry_run: bool = False) -> list[tuple[str, str]]:
+    """Remove only files this project installer created, preserving user edits."""
+    if not target.is_dir():
+        raise Conflict(f'Target project directory does not exist: {target}')
+    target = target.resolve()
+    manifest_path = _manifest_path(target)
+    guard_dest(target, manifest_path)
+    if not manifest_path.is_file():
+        # Without a manifest ownership is unknown; remove nothing.
+        return []
+    manifest = _load_manifest(target)
+    # Validate every recorded path before deleting anything, so one corrupt
+    # manifest entry cannot cause a partial uninstall.
+    for relative in (set(manifest['created']) | set(manifest['guidance'])):
+        guard_dest(target, target / relative)
+    for relative in set(manifest['guidance']):
+        path = target / relative
+        if path.is_file():
+            text = path.read_text(encoding='utf-8')
+            if text.count(START) != text.count(END) or text.count(START) > 1:
+                raise Conflict(f'Invalid managed markers in {path}; nothing was removed.')
+    gitignore_preflight = manifest.get('gitignore') or {}
+    if isinstance(gitignore_preflight.get('path'), str):
+        guard_dest(target, target / gitignore_preflight['path'])
+    results: list[tuple[str, str]] = []
+    for relative in sorted(set(manifest['created'])):
+        dest = target / relative
+        guard_dest(target, dest)
+        if not dest.is_file():
+            results.append((relative, 'missing'))
+            continue
+        expected = manifest['files'].get(relative)
+        if expected is not None and _sha256_file(dest) != expected:
+            results.append((relative, 'preserved'))
+            continue
+        if not dry_run:
+            dest.unlink()
+        results.append((relative, 'would-remove' if dry_run else 'removed'))
+    guidance_created = set(manifest.get('guidance_created', []))
+    for relative in sorted(set(manifest['guidance'])):
+        dest = target / relative
+        guard_dest(target, dest)
+        if not dest.is_file():
+            results.append((relative, 'missing'))
+            continue
+        state = remove_guidance(dest, dry_run)
+        if (not dry_run and relative in guidance_created
+                and dest.is_file() and not dest.read_text(encoding='utf-8').strip()):
+            dest.unlink()
+            state = 'removed'
+        results.append((relative, 'would-update'
+                        if dry_run and state == 'updated' else state))
+    gitignore = manifest.get('gitignore') or {}
+    if ((gitignore.get('created') or gitignore.get('added'))
+            and isinstance(gitignore.get('path'), str)):
+        dest = target / gitignore['path']
+        guard_dest(target, dest)
+        if dest.is_file():
+            lines = dest.read_text(encoding='utf-8').splitlines()
+            kept = [line for line in lines if line.strip() not in (
+                '.auto-orchestrator/*', '!.auto-orchestrator/project.json')]
+            if any(line.strip() for line in kept):
+                if not dry_run:
+                    dest.write_text('\n'.join(kept).rstrip() + '\n',
+                                    encoding='utf-8')
+                results.append((gitignore['path'],
+                                'would-update' if dry_run else 'updated'))
+            else:
+                if not dry_run:
+                    dest.unlink()
+                results.append((gitignore['path'],
+                                'would-remove' if dry_run else 'removed'))
+    if not dry_run:
+        manifest_path.unlink()
+    results.append((MANIFEST_RELATIVE.as_posix(),
+                    'would-remove' if dry_run else 'removed'))
     return results
 
 
@@ -188,8 +472,18 @@ def main(argv=None):
     p.add_argument('--opencode-version',choices=['v1','v2'],default='v2')
     p.add_argument('--dry-run',action='store_true')
     p.add_argument('--force-generated',action='store_true',help='Back up and replace generated profiles/skill files; not existing Codex config')
+    p.add_argument('--uninstall',action='store_true',help='Remove files recorded by this project installer')
     args=p.parse_args(argv)
     try:
+        if args.uninstall:
+            results = uninstall(args.target.resolve(),args.dry_run)
+            if not results:
+                print('No project install manifest was found; nothing was removed.')
+                return 0
+            for path,state in results:
+                print(f'{state:13s} {path}')
+            print('DRY RUN — no files written' if args.dry_run else 'Uninstalled project-local files recorded in the install manifest.')
+            return 0
         for path,state in install(args.target.resolve(),args.platform,args.codex_model,args.dry_run,args.force_generated,args.opencode_version):
             print(f'{state:9s} {path}')
     except (Conflict,OSError) as e:

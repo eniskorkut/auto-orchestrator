@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import hashlib
 import http.client
 import json
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 
@@ -83,6 +85,84 @@ class MilestoneDashboardTests(unittest.TestCase):
         self.assertTrue(payload["available"])
         self.assertTrue(any(item["decision"] == "JWT"
                             for item in payload["decisions"]))
+
+    def test_memory_endpoint_exposes_continuity_and_contract_fields(self):
+        with ProjectMemory(self.root) as memory:
+            memory.add_decision(topic="auth", decision="JWT",
+                                status="confirmed", confirmed_by="user",
+                                source="user")
+            memory.add_decision(topic="db", decision="SQLite",
+                                status="code_derived", source="code")
+            memory.add_requirement("Use secure cookies")
+            resolved = memory.add_requirement("Rotate secrets")
+            memory.resolve_requirement(resolved["requirement_id"],
+                                       status="confirmed")
+            interview_id = "iv_" + "a" * 16
+            question_id = "q_" + "b" * 16
+            now = time.time()
+            memory.conn.execute(
+                "INSERT INTO interviews(interview_id,project_id,"
+                "origin_platform,request_hash,request_summary,mode,status,"
+                "created_at,updated_at,schema_version) VALUES (?,?,?,?,?,?,?,?,?,1)",
+                (interview_id, memory.project_id, "codex",
+                 hashlib.sha256(b"login").hexdigest(), "Login feature",
+                 "auto", "open", now, now))
+            memory.conn.execute(
+                "INSERT INTO interview_questions(interview_id,question_id,"
+                "ordinal,question_key,question,options,status,depends_on,"
+                "created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                (interview_id, question_id, 0, "auth_session",
+                 "How should sessions work?",
+                 json.dumps([{"id": "jwt", "label": "JWT"}]),
+                 "open", "[]", now))
+            memory.conn.commit()
+            memory.record_handoff(
+                run_id="run-1", milestone_id="M2", platform="codex",
+                payload={"milestone_id": "M2", "context_summary": "M2 passed",
+                         "verified_tests": ["test_login"]})
+            memory.record_observation(kind="verification", files=["a.py"],
+                                      test_evidence="11 tests passed")
+            memory.update_meta(last_platform="codex", last_milestone="M2")
+            contracts = memory.directory / "contracts"
+            contracts.mkdir(parents=True)
+            (contracts / "current.json").write_text(json.dumps({
+                "contract_id": "rc_" + "c" * 16,
+                "contract_version": 3,
+                "sha256": "d" * 64,
+                "path": "rc_" + "c" * 16 + "-v3.json",
+                "updated_at": now,
+            }), encoding="utf-8")
+            memory.write_context_files()
+        payload = self.catalog.memory(self.project_id)
+        self.assertTrue(payload["available"])
+        self.assertEqual(payload["last_ide"], "codex")
+        self.assertEqual(payload["last_milestone"], "M2")
+        self.assertEqual(payload["active_interview"]["interview_id"],
+                         interview_id)
+        self.assertEqual(payload["active_interview"]["question"]["question"],
+                         "How should sessions work?")
+        self.assertEqual(payload["question"]["question_id"], question_id)
+        self.assertEqual(len(payload["confirmed_decisions"]), 1)
+        self.assertEqual(len(payload["derived_decisions"]), 1)
+        self.assertEqual([item["text"] for item in payload["blockers"]],
+                         ["Use secure cookies"])
+        self.assertEqual(payload["approved_requirements"]["contract_version"], 3)
+        self.assertEqual(payload["approved_requirements"]["contract_id"],
+                         "rc_" + "c" * 16)
+        self.assertTrue(payload["handoff"]["verified"])
+        self.assertTrue(payload["stale"]["is_stale"])
+        self.assertIn("missing_head", payload["stale"]["reasons"])
+        self.assertEqual(payload["verification"]["test_evidence"],
+                         "11 tests passed")
+
+    def test_memory_endpoint_does_not_label_unverified_handoff_verified(self):
+        with ProjectMemory(self.root) as memory:
+            memory.record_handoff(
+                run_id="run-1", milestone_id="M1", platform="codex",
+                payload={"milestone_id": "M1", "context_summary": "M1 passed"})
+            memory.update_meta(last_platform="opencode")
+        payload = self.catalog.memory(self.project_id)
+        self.assertFalse(payload["handoff"]["verified"])
 
     def test_recovery_labels_do_not_mislabel_normal_terminal_runs(self):
         self._seed()

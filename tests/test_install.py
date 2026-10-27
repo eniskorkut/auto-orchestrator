@@ -1,7 +1,11 @@
+import hashlib
+import json
 import tempfile
 import unittest
 from pathlib import Path
-from tools.install import install,Conflict,START,END
+from tools.install import install, uninstall, Conflict, START, END, MANIFEST_RELATIVE
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class InstallerTests(unittest.TestCase):
@@ -73,6 +77,79 @@ class InstallerTests(unittest.TestCase):
         p.write_text('important user file')
         with self.assertRaises(Conflict):self.call('opencode')
         self.assertEqual(p.read_text(),'important user file')
+
+    def test_project_uninstall_preserves_user_files_and_modified_generated_files(self):
+        guidance = self.dest/'AGENTS.md'
+        guidance.write_text('# My project\nKeep security checks.\n')
+        user_file = self.dest/'notes.txt'
+        user_file.write_text('user notes')
+        gitignore = self.dest/'.gitignore'
+        gitignore.write_text('.env\n')
+        self.call('opencode')
+        generated = self.dest/'tools/dashboard.py'
+        modified = self.dest/'tools/dashboard_assets/app.css'
+        modified.write_text('user customization', encoding='utf-8')
+        self.assertTrue(generated.is_file())
+        dry = dict(uninstall(self.dest, dry_run=True))
+        self.assertTrue(generated.is_file())
+        self.assertTrue((self.dest/MANIFEST_RELATIVE).is_file())
+        self.assertEqual(dry['tools/dashboard.py'], 'would-remove')
+        result = dict(uninstall(self.dest))
+        self.assertFalse(generated.exists())
+        self.assertEqual(modified.read_text(encoding='utf-8'),
+                         'user customization')
+        self.assertEqual(result['tools/dashboard_assets/app.css'], 'preserved')
+        self.assertEqual(user_file.read_text(), 'user notes')
+        self.assertIn('Keep security checks.', guidance.read_text())
+        self.assertNotIn(START, guidance.read_text())
+        self.assertIn('.env', gitignore.read_text())
+        self.assertNotIn('.auto-orchestrator/*', gitignore.read_text())
+        self.assertFalse((self.dest/MANIFEST_RELATIVE).exists())
+
+    def test_project_uninstall_without_manifest_removes_nothing(self):
+        user_file = self.dest/'notes.txt'
+        user_file.write_text('user notes')
+        self.assertEqual(uninstall(self.dest), [])
+        self.assertEqual(user_file.read_text(), 'user notes')
+
+    def test_manifest_upgrade_replaces_untouched_generated_module(self):
+        self.call('opencode')
+        module = self.dest/'tools/requirements_contract.py'
+        module.write_text('old generated module', encoding='utf-8')
+        manifest_path = self.dest/MANIFEST_RELATIVE
+        manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+        manifest['files']['tools/requirements_contract.py'] = hashlib.sha256(
+            b'old generated module').hexdigest()
+        manifest_path.write_text(json.dumps(manifest), encoding='utf-8')
+        results = dict(self.call('opencode'))
+        self.assertEqual(results['tools/requirements_contract.py'], 'updated')
+        self.assertEqual(module.read_bytes(),
+                         (ROOT/'tools/requirements_contract.py').read_bytes())
+
+    def test_manifest_upgrade_refuses_user_modified_generated_module(self):
+        self.call('opencode')
+        module = self.dest/'tools/dashboard.py'
+        module.write_text('my own dashboard', encoding='utf-8')
+        with self.assertRaises(Conflict):
+            self.call('opencode')
+        self.assertEqual(module.read_text(), 'my own dashboard')
+
+    def test_uninstall_removes_antigravity_cli_skill_it_created(self):
+        self.call('antigravity')
+        skill = (self.dest/'.gemini/antigravity-cli/skills/grill-me/SKILL.md')
+        self.assertTrue(skill.is_file())
+        uninstall(self.dest)
+        self.assertFalse(skill.exists())
+
+    def test_uninstall_keeps_file_that_preexisted_identical(self):
+        skill = self.dest/'.agents/skills/grill-me/SKILL.md'
+        skill.parent.mkdir(parents=True)
+        skill.write_bytes((ROOT/'.agents/skills/grill-me/SKILL.md').read_bytes())
+        self.call('opencode')
+        uninstall(self.dest)
+        self.assertTrue(skill.is_file())
+        self.assertEqual(skill.read_bytes(),
+                         (ROOT/'.agents/skills/grill-me/SKILL.md').read_bytes())
 
 
 class OpenCodeVersionTests(unittest.TestCase):
