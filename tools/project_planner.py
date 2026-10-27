@@ -110,6 +110,9 @@ def validate_rich_plan(plan: dict) -> dict:
         "require_review": bool(plan.get("require_review", False)),
         "created_at": time.time(),
         "tasks": list(normalized.values()),
+        **{key: plan[key] for key in
+           ("requirements_contract", "contract_ref", "assumption_guard")
+           if key in plan},
     }
 
 

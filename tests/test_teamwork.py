@@ -274,6 +274,12 @@ class TeamworkValidationTests(unittest.TestCase):
 
 
 class TeamworkEngineTests(TeamworkTestCase):
+    def test_new_request_without_guard_or_contract_is_rejected(self):
+        value = sample_plan("unguarded-request")
+        value["request"] = "Add a new feature"
+        with self.assertRaises(TeamworkError):
+            self.engine.init(value)
+
     def test_interrupted_sqlite_transaction_rolls_back(self):
         self.init_sample()
         before = self.milestone("team-run", "M1")["status"]
@@ -698,6 +704,68 @@ class TeamworkEngineTests(TeamworkTestCase):
             self.engine.record_managed_session(
                 "team-run", "discover", 2, provider="opencode",
                 session_id="ses_bad", status="invented")
+
+
+class TeamworkGuardMetadataTests(TeamworkTestCase):
+    def test_contract_and_assumption_guard_survive_snapshot(self):
+        contract = {
+            "contract_id": "rc_" + "7" * 16,
+            "contract_version": 2,
+            "sha256": "8" * 64,
+            "status": "confirmed",
+            "project_id": "p_" + "a" * 16,
+            "interview_id": "iv_" + "9" * 16,
+            "goal": "Keep contract metadata during coordination",
+            "source": {"kind": "grill-me", "ref": "iv_" + "9" * 16},
+            "confirmed_decisions": [],
+            "constraints": ["Do not widen task scopes"],
+            "out_of_scope": [],
+            "acceptance_criteria": [{
+                "id": "ac_01_scope",
+                "text": "Scopes remain unchanged",
+                "applies_to": ["verify"],
+                "decision_ref": None,
+                "evidence": {"kind": "not_automated"},
+            }],
+            "verification_strategy": {"commands": [], "required_roles": []},
+            "blockers": [],
+            "tasks": [],
+            "created_at": 1000.0,
+            "approved_at": 1001.0,
+        }
+        contract_ref = {
+            "contract_id": contract["contract_id"],
+            "contract_version": contract["contract_version"],
+            "sha256": contract["sha256"],
+        }
+        guard = {"assumptions": [{"id": "a1", "status": "guarded"}]}
+        plan = sample_plan("guard-run")
+        plan["requirements_contract"] = contract
+        plan["contract_ref"] = contract_ref
+        plan["assumption_guard"] = guard
+
+        normalized = validate_teamwork_plan(plan)
+        self.assertEqual(normalized["requirements_contract"], contract)
+        self.assertEqual(normalized["contract_ref"], contract_ref)
+        self.assertEqual(normalized["assumption_guard"], guard)
+
+        self.engine.init(plan)
+        snapshot = self.engine._load_plan_snapshot("guard-run")
+        self.assertEqual(snapshot["requirements_contract"], contract)
+        self.assertEqual(snapshot["contract_ref"], contract_ref)
+        self.assertEqual(snapshot["assumption_guard"], guard)
+        state = self.engine.status("guard-run")
+        self.assertEqual(state["requirements_contract"], contract)
+        self.assertEqual(state["contract_ref"], contract_ref)
+        self.assertEqual(state["assumption_guard"], guard)
+
+        restarted = TeamworkEngine(self.root)
+        try:
+            reloaded = restarted.status("guard-run")
+        finally:
+            restarted.close()
+        self.assertEqual(reloaded["requirements_contract"], contract)
+        self.assertEqual(reloaded["assumption_guard"], guard)
 
 
 if __name__ == "__main__":

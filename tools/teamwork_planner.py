@@ -15,17 +15,43 @@ from __future__ import annotations
 import re
 
 try:
+    from tools.requirements_contract import (
+        ContractError,
+        compact_contract_ref,
+        validate_for_plan,
+    )
     from tools.supervisor import SupervisorError, identifier
-    from tools.teamwork import PATTERNS, validate_teamwork_plan
+    from tools.teamwork import (
+        MAX_ACCEPTANCE,
+        MAX_ACCEPTANCE_TEXT,
+        MAX_VERIFY_COMMANDS,
+        PATTERNS,
+        validate_teamwork_plan,
+    )
 except ModuleNotFoundError:  # Running as ``python tools/teamwork_planner.py``.
+    from requirements_contract import (  # type: ignore
+        ContractError,
+        compact_contract_ref,
+        validate_for_plan,
+    )
     from supervisor import SupervisorError, identifier  # type: ignore
-    from teamwork import PATTERNS, validate_teamwork_plan  # type: ignore
+    from teamwork import (  # type: ignore
+        MAX_ACCEPTANCE,
+        MAX_ACCEPTANCE_TEXT,
+        MAX_VERIFY_COMMANDS,
+        PATTERNS,
+        validate_teamwork_plan,
+    )
 
 PROJECT_ID = re.compile(r"^p_[0-9a-f]{16}$")
 MAX_REQUEST = 20000
 PROVIDER = "opencode"
 TEST_COMMAND = "python3.11 -m unittest discover -s tests -q"
 STATUS_COMMAND = "git status --short"
+MAX_OBJECTIVE = 1500
+MAX_CONTRACT_OBJECTIVE_SUFFIX = 700
+REVIEW_ROLES = frozenset({"reviewer", "challenger"})
+AUDIT_ROLES = frozenset({"auditor", "success-auditor"})
 
 RESEARCH_WORDS = (
     "research", "investigate", "investigation", "analyze", "analysis",
@@ -240,6 +266,99 @@ def _task(task_id, role, milestone, objective, depends_on, read_scope,
         "requires_repo": True,
         "repo_dependent_fields": repo_fields,
     }
+
+
+def _contract_objective_suffix(contract):
+    """Bounded constraints/decisions appended to build-phase objectives."""
+    parts = []
+    constraints = contract.get("constraints") or []
+    if constraints:
+        parts.append("Contract constraints: " + "; ".join(constraints))
+    decisions = contract.get("confirmed_decisions") or []
+    if decisions:
+        parts.append("Confirmed decisions: " + "; ".join(
+            f"{item['topic']}={item['decision']}" for item in decisions))
+    if not parts:
+        return ""
+    return "\n".join(parts)[:MAX_CONTRACT_OBJECTIVE_SUFFIX]
+
+
+def _append_contract_objective(task, suffix):
+    if not suffix:
+        return
+    objective = task.get("objective")
+    if not isinstance(objective, str) or suffix in objective:
+        return
+    available = MAX_OBJECTIVE - len(objective) - 1
+    if available <= 0:
+        return
+    task["objective"] = objective + "\n" + suffix[:available]
+
+
+def _task_contract_phase(task):
+    """Map a teamwork task to the contract phase whose criteria it owns."""
+    phase = task.get("phase")
+    role = task.get("role")
+    if phase in ("build", "repair"):
+        return "build"
+    if role in REVIEW_ROLES:
+        return "review"
+    if role in AUDIT_ROLES:
+        return "audit"
+    return "verify"
+
+
+def _acceptance_labels(contract):
+    labels = []
+    for criterion in contract.get("acceptance_criteria") or []:
+        label = f"AC {criterion['id']}: {criterion['text']}"
+        if len(label) > MAX_ACCEPTANCE_TEXT:
+            label = label[:MAX_ACCEPTANCE_TEXT]
+        labels.append((criterion.get("applies_to") or [], label))
+    return labels
+
+
+def _apply_requirements_contract(tasks, contract):
+    """Attach contract constraints, criteria and validated commands.
+
+    Read/write scopes are never touched: contract evidence must not widen what
+    an agent is allowed to change.
+    """
+    suffix = _contract_objective_suffix(contract)
+    labels = _acceptance_labels(contract)
+    for task in tasks:
+        phase = _task_contract_phase(task)
+        if phase == "build":
+            _append_contract_objective(task, suffix)
+            continue
+        acceptance = task.setdefault("acceptance", [])
+        for applies_to, label in labels:
+            if phase not in applies_to or label in acceptance:
+                continue
+            if len(acceptance) >= MAX_ACCEPTANCE:
+                break
+            acceptance.append(label)
+    commands = [
+        criterion["evidence"]["command"]
+        for criterion in contract.get("acceptance_criteria") or []
+        if criterion.get("evidence", {}).get("kind") == "command"
+    ]
+    if not commands:
+        return
+    targets = [task for task in tasks
+               if task.get("phase") == "verify" and task.get("role") == "tester"]
+    if not targets:
+        targets = [task for task in tasks if task.get("phase") == "verify"]
+    if not targets:
+        return
+    target = targets[0]
+    verify_commands = target.setdefault("verify_commands", [])
+    for command in commands:
+        if command in verify_commands:
+            continue
+        if len(verify_commands) >= MAX_VERIFY_COMMANDS:
+            break
+        verify_commands.append(command)
 
 
 def _milestone(milestone_id, objective, depends_on, acceptance, require_roles,
@@ -575,7 +694,8 @@ def _balanced_plan(pattern, text, model):
 
 def plan_request(request, *, run_id, project_id=None, max_parallel=3,
                  model=None, pattern=None, mode=None, repo_profile=None,
-                 provider="opencode"):
+                 provider="opencode", requirements_contract=None,
+                 codex_sandbox="read-only"):
     """Return a deterministic rich teamwork plan for ``request``."""
     try:
         run_id = identifier(run_id)
@@ -584,6 +704,19 @@ def plan_request(request, *, run_id, project_id=None, max_parallel=3,
     if project_id is not None:
         if not isinstance(project_id, str) or not PROJECT_ID.fullmatch(project_id):
             raise TeamworkPlannerError("project_id must be p_<16 hex> when supplied")
+    if codex_sandbox not in ("read-only", "workspace-write"):
+        raise TeamworkPlannerError("codex_sandbox must be read-only or workspace-write")
+    contract = None
+    if requirements_contract is not None:
+        if project_id is None:
+            raise TeamworkPlannerError(
+                "requirements_contract requires an explicit project_id")
+        try:
+            contract = validate_for_plan(requirements_contract,
+                                         project_id=project_id)
+        except ContractError as exc:
+            raise TeamworkPlannerError(
+                f"Invalid requirements contract: {exc}") from exc
     if type(max_parallel) is not int or not 1 <= max_parallel <= 3:
         raise TeamworkPlannerError("max_parallel must be 1..3")
     if model is not None:
@@ -710,12 +843,16 @@ def plan_request(request, *, run_id, project_id=None, max_parallel=3,
         "milestones": milestones,
         "tasks": tasks,
     }
+    if contract is not None:
+        _apply_requirements_contract(tasks, contract)
+        plan["requirements_contract"] = contract
+        plan["contract_ref"] = compact_contract_ref(contract)
     for task in tasks:
         task["provider"] = provider
         if provider == "codex":
-            # V7.5 verified Codex managed execution in read-only mode only.
-            # Do not imply that Codex write/approval bridging is available.
-            task.setdefault("sandbox", "read-only")
+            # Write mode must be explicitly requested. Approval bridging is not
+            # implemented; Codex tasks always use approvalPolicy never.
+            task.setdefault("sandbox", codex_sandbox)
             task.setdefault("approval_policy", "never")
     try:
         validate_teamwork_plan(plan)

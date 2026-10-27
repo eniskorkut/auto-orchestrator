@@ -15,18 +15,25 @@ import time
 from pathlib import Path
 
 try:
+    from tools import assumption_guard
     from tools.project_memory import MemoryError, ProjectMemory
     from tools.repo_facts import scan_repository
+    from tools.requirements_contract import (
+        ContractError,
+        build_from_interview,
+        load_current,
+    )
 except ModuleNotFoundError:
+    import assumption_guard  # type: ignore
     from project_memory import MemoryError, ProjectMemory  # type: ignore
     from repo_facts import scan_repository  # type: ignore
+    from requirements_contract import (  # type: ignore
+        ContractError,
+        build_from_interview,
+        load_current,
+    )
 
 MODES = ("off", "auto", "required", "plan-only")
-CRITICAL_WORDS = (
-    "auth", "login", "password", "payment", "migration", "permission", "role",
-    "database", "share", "multi-user", "multiuser", "tenant", "breaking",
-    "delete", "privacy", "credential", "secret",
-)
 INTERVIEW_ID = re.compile(r"^iv_[0-9a-f]{16}$")
 QUESTION_ID = re.compile(r"^q_[0-9a-f]{16}$")
 
@@ -61,12 +68,13 @@ class GrillMeEngine:
         self.close()
 
     # -- start/resume ----------------------------------------------------
-    def start(self, request, *, origin_platform="unknown", mode="auto") -> dict:
+    def start(self, request, *, origin_platform="unknown", mode="auto",
+              allow_new=False) -> dict:
         request = _text(request, "request", limit=20000)
         if mode not in MODES:
             raise GrillError("mode must be off, auto, required or plan-only")
         digest = hashlib.sha256(request.encode("utf-8")).hexdigest()
-        existing = self.open_interview()
+        existing = None if allow_new else self.open_interview()
         if existing and existing["status"] not in ("approved", "cancelled"):
             if not self.verify_request(existing["interview_id"], request):
                 raise GrillError(
@@ -161,104 +169,43 @@ class GrillMeEngine:
                 "question": self.next_question(interview["interview_id"])}
 
     # -- question generation --------------------------------------------
+    def _active_decisions(self) -> list[dict]:
+        return [item for item in self.memory.list_decisions(limit=500)
+                if item["status"] in ("confirmed", "code_derived")]
+
     def _build_questions(self, request: str, facts: dict, mode: str = "auto") -> list[dict]:
-        text = request.lower()
-        decisions = {item["topic"] for item in self.memory.list_decisions(limit=200)}
-        detected = facts.get("detected", {})
-        questions = []
-        if (any(word in text for word in ("auth", "login", "password", "sign-in",
-                                          "signin", "giriş", "şifre", "oturum",
-                                          "kullanıcı giriş", "kullanıcı girişi",
-                                          "kullanıcı oturum"))
-                and not detected.get("auth") and not detected.get("jwt")
-                and not detected.get("session") and "auth_session" not in decisions):
-            questions.append(self._make_question(
-                "auth_session", "Kullanıcı oturumları nasıl yönetilsin?",
-                [
-                    ("cookie", "HttpOnly secure session cookie", True),
-                    ("jwt", "Access/refresh JWT", False),
-                    ("sso", "Mevcut kurum SSO sistemi", False),
-                    ("other", "Diğer — kendim yazacağım", False),
-                ], critical=True))
-        if (any(word in text for word in ("share", "sharing", "multi-user",
-                                          "multiuser", "file upload", "paylaş",
-                                          "dosya", "çok kullanıcı"))
-                and "file_access" not in decisions):
-            questions.append(self._make_question(
-                "file_access", "Dosya paylaşımında erişim modeli ne olsun?",
-                [
-                    ("owner", "Yalnızca dosya sahibi", True),
-                    ("team", "Ekip üyeleri", False),
-                    ("role", "Rol tabanlı erişim", False),
-                    ("public", "Herkese açık bağlantı", False),
-                ], critical=True))
-        if (any(word in text for word in ("share", "sharing", "storage", "upload",
-                                          "dosya", "depolama"))
-                and not detected.get("s3") and "file_storage" not in decisions):
-            questions.append(self._make_question(
-                "file_storage", "Dosyalar nerede saklansın?",
-                [
-                    ("local", "Yerel dosya sistemi", True),
-                    ("s3", "S3 uyumlu object storage", False),
-                    ("db", "Veritabanı içinde", False),
-                    ("other", "Diğer", False),
-                ], critical=True, depends_on=["file_access"]))
-        if (any(word in text for word in ("database", "migration", "schema",
-                                          "veritabanı", "migrasyon"))
-                and not (detected.get("postgres") or detected.get("sqlite")
-                         or detected.get("mysql"))
-                and "database" not in decisions):
-            questions.append(self._make_question(
-                "database", "Veritabanı yaklaşımı ne olsun?",
-                [
-                    ("postgres", "PostgreSQL", True),
-                    ("sqlite", "SQLite", False),
-                    ("existing", "Mevcut kurum veritabanı", False),
-                    ("other", "Diğer", False),
-                ], critical=True))
-        if "breaking" in text and "api_compat" not in decisions:
-            questions.append(self._make_question(
-                "api_compat", "Breaking API değişikliği nasıl yönetilsin?",
-                [
-                    ("versioned", "Yeni API versiyonu", True),
-                    ("deprecate", "Kademeli deprecation", False),
-                    ("break", "Doğrudan breaking change", False),
-                ], critical=True))
-        if not questions and mode == "required":
-            questions.append(self._make_question(
-                "scope", "Bu görevin kapsam dışında bırakılacak maddeleri neler?",
-                [
-                    ("none", "Ek kapsam dışı madde yok", True),
-                    ("other", "Diğer — kendim yazacağım", False),
-                ], critical=True))
-        return questions
+        return assumption_guard.critical_questions(
+            request, self._active_decisions(), facts, mode=mode)
 
     @staticmethod
     def _make_question(key, text, options, *, critical, depends_on=None):
-        return {
-            "key": key, "text": text,
-            "options": [{"id": option_id, "label": label,
-                         "recommended": recommended}
-                        for option_id, label, recommended in options],
-            "recommended_option": next(
-                (option_id for option_id, _, recommended in options if recommended),
-                None),
-            "depends_on": list(depends_on or []),
-            "critical": bool(critical),
-        }
+        return assumption_guard.make_question(
+            key, text, options, critical=critical, depends_on=depends_on)
 
-    def _insert_questions(self, interview_id, questions, now):
-        row = self.conn.execute(
-            "SELECT COALESCE(MAX(ordinal),0) FROM interview_questions "
-            "WHERE interview_id=?", (interview_id,)).fetchone()
-        ordinal = int(row[0] or 0)
+    def _insert_questions(self, interview_id, questions, now,
+                          *, after_ordinal=None):
+        existing_rows = {
+            row["question_key"]: row for row in self.conn.execute(
+                "SELECT question_key,question_id,status,ordinal "
+                "FROM interview_questions WHERE interview_id=?",
+                (interview_id,))}
+        new_questions = [question for question in questions
+                         if question["key"] not in existing_rows]
+        if after_ordinal is not None and new_questions:
+            self.conn.execute(
+                "UPDATE interview_questions SET ordinal=ordinal+? "
+                "WHERE interview_id=? AND ordinal>?",
+                (len(new_questions), interview_id, int(after_ordinal)))
+            ordinal = int(after_ordinal)
+        else:
+            row = self.conn.execute(
+                "SELECT COALESCE(MAX(ordinal),0) FROM interview_questions "
+                "WHERE interview_id=?", (interview_id,)).fetchone()
+            ordinal = int(row[0] or 0)
         for question in questions:
-            exists = self.conn.execute(
-                "SELECT question_id,status FROM interview_questions "
-                "WHERE interview_id=? AND question_key=?",
-                (interview_id, question["key"])).fetchone()
-            if exists:
-                if exists["status"] == "invalidated":
+            exists = existing_rows.get(question["key"])
+            if exists is not None:
+                if exists["status"] in ("invalidated", "superseded"):
                     self.conn.execute("""
                       UPDATE interview_questions SET status='open',
                         selected_option=NULL,answer_text=NULL,answer_source=NULL,
@@ -283,38 +230,59 @@ class GrillMeEngine:
                   json.dumps(question["depends_on"], ensure_ascii=False), now))
 
     def _record_code_facts(self, facts, request):
-        detected = facts.get("detected", {})
-        if detected.get("jwt"):
-            self.memory.add_decision(
-                topic="auth_session", decision="JWT",
-                rationale="Detected JWT usage in repository code",
-                source="code", source_ref="repository scan", status="code_derived")
-        elif detected.get("session"):
-            self.memory.add_decision(
-                topic="auth_session", decision="session cookie",
-                rationale="Detected session/cookie usage in repository code",
-                source="code", source_ref="repository scan", status="code_derived")
-        if detected.get("postgres"):
-            self.memory.add_decision(
-                topic="database", decision="PostgreSQL",
-                rationale="Detected PostgreSQL usage in repository code",
-                source="code", source_ref="repository scan", status="code_derived")
-        elif detected.get("sqlite"):
-            self.memory.add_decision(
-                topic="database", decision="SQLite",
-                rationale="Detected SQLite usage in repository code",
-                source="code", source_ref="repository scan", status="code_derived")
+        detected = facts.get("code_detected") or facts.get("detected") or {}
+        active_topics = {item["topic"] for item in self._active_decisions()}
+        if "auth_session" not in active_topics:
+            if bool(detected.get("jwt")) != bool(detected.get("session")):
+                if detected.get("jwt"):
+                    self.memory.add_decision(
+                        topic="auth_session", decision="JWT",
+                        rationale="Detected JWT usage in repository code/config",
+                        source="code", source_ref="repository scan",
+                        status="code_derived")
+                else:
+                    self.memory.add_decision(
+                        topic="auth_session", decision="session cookie",
+                        rationale="Detected session/cookie usage in repository code/config",
+                        source="code", source_ref="repository scan",
+                        status="code_derived")
+        if "database" not in active_topics:
+            found = [name for name, key in (
+                ("PostgreSQL", "postgres"), ("SQLite", "sqlite"),
+                ("MySQL", "mysql")) if detected.get(key)]
+            if len(found) == 1:
+                self.memory.add_decision(
+                    topic="database", decision=found[0],
+                    rationale=f"Detected {found[0]} usage in repository code/config",
+                    source="code", source_ref="repository scan",
+                    status="code_derived")
 
     # -- conversation ----------------------------------------------------
+    def _eligible(self, interview_id, row, rows_by_key) -> bool:
+        raw = row["depends_on"]
+        dependencies = json.loads(raw) if isinstance(raw, str) else (raw or [])
+        for dependency in dependencies:
+            parent = rows_by_key.get(dependency)
+            if parent is None or parent["status"] != "answered":
+                return False
+        return True
+
     def next_question(self, interview_id) -> dict | None:
         self.get_interview(interview_id)
-        row = self.conn.execute(
+        rows = list(self.conn.execute(
             "SELECT * FROM interview_questions WHERE interview_id=? AND status='open' "
-            "ORDER BY ordinal LIMIT 1", (interview_id,)).fetchone()
-        if row is None:
+            "ORDER BY ordinal", (interview_id,)))
+        if not rows:
             self._settle(interview_id)
             return None
-        return self._question_dict(row)
+        rows_by_key = {row["question_key"]: row for row in self.conn.execute(
+            "SELECT question_key,status FROM interview_questions "
+            "WHERE interview_id=?", (interview_id,))}
+        for row in rows:
+            if self._eligible(interview_id, row, rows_by_key):
+                return self._question_dict(row)
+        self._settle(interview_id)
+        return None
 
     @staticmethod
     def _question_dict(row):
@@ -327,6 +295,12 @@ class GrillMeEngine:
         question = self._question(question_id)
         if question["status"] not in ("open", "skipped"):
             raise GrillError("question is not open")
+        rows_by_key = {row["question_key"]: row for row in self.conn.execute(
+            "SELECT question_key,status FROM interview_questions "
+            "WHERE interview_id=?", (question["interview_id"],))}
+        if question["status"] == "open" and not self._eligible(
+                question["interview_id"], question, rows_by_key):
+            raise GrillError("a dependency question must be answered first")
         options = {item["id"]: item for item in question["options"]}
         if option is not None:
             if not isinstance(option, str) or option not in options:
@@ -347,15 +321,29 @@ class GrillMeEngine:
         """, (option, label, answer_source, now,
               question["interview_id"], question_id))
         self.conn.commit()
-        self.memory.add_decision(
-            topic=question["question_key"], decision=label,
-            rationale=f"User answered: {question['question']}",
-            alternatives=[item["label"] for item in question["options"]
-                          if item["id"] != option],
-            source="user", source_ref=f"question:{question_id}",
-            status="confirmed", confirmed_by="user")
+        existing = self.conn.execute(
+            "SELECT * FROM decisions WHERE project_id=? AND topic=? AND decision=? "
+            "AND status='code_derived'",
+            (self.project_id, question["question_key"], label)).fetchone()
+        if existing is not None:
+            self.conn.execute("""
+              UPDATE decisions SET status='confirmed',source='user',
+                source_ref=?,confirmed_by='user',confirmed_at=?,updated_at=?
+              WHERE project_id=? AND decision_id=?
+            """, (f"question:{question_id}", now, now, self.project_id,
+                  existing["decision_id"]))
+            self.conn.commit()
+        else:
+            self.memory.add_decision(
+                topic=question["question_key"], decision=label,
+                rationale=f"User answered: {question['question']}",
+                alternatives=[item["label"] for item in question["options"]
+                              if item["id"] != option],
+                source="user", source_ref=f"question:{question_id}",
+                status="confirmed", confirmed_by="user")
         self.memory.resolve_requirements_by_ref(f"question:{question_id}")
-        self._expand(question["interview_id"], question["question_key"], option, now)
+        self._expand(question["interview_id"], question["question_key"], option, now,
+                     after_ordinal=question.get("ordinal"))
         self.conn.execute("UPDATE interviews SET updated_at=? WHERE interview_id=?",
                           (now, question["interview_id"]))
         self.conn.commit()
@@ -363,23 +351,20 @@ class GrillMeEngine:
         return {"question": self._question(question_id),
                 "next": self.next_question(question["interview_id"])}
 
-    def _expand(self, interview_id, key, option, now):
-        if key == "auth_session" and option == "jwt":
-            self._insert_questions(interview_id, [self._make_question(
-                "jwt_refresh", "JWT yenileme ve logout davranışı ne olsun?",
-                [
-                    ("refresh", "Kısa access token + refresh token", True),
-                    ("short", "Yalnızca kısa ömürlü access token", False),
-                    ("sliding", "Sliding session", False),
-                ], critical=True, depends_on=["auth_session"])], now)
-        if key == "file_access" and option in ("team", "role", "public"):
-            self._insert_questions(interview_id, [self._make_question(
-                "file_delete", "Dosya silme politikası ne olsun?",
-                [
-                    ("soft", "Soft delete + geri alma", True),
-                    ("hard", "Kalıcı silme", False),
-                    ("retain", "Saklama süresi sonunda sil", False),
-                ], critical=True, depends_on=["file_access"])], now)
+    def _expand(self, interview_id, key, option, now, *, after_ordinal=None):
+        if key == "database":
+            row = self.conn.execute(
+                "SELECT request_summary FROM interviews WHERE interview_id=?",
+                (interview_id,)).fetchone()
+            summary = row["request_summary"] if row is not None else ""
+            if not assumption_guard.mentions_any(
+                    summary, ("migration", "migrations", "migrasyon",
+                              "schema", "şema", "sema", "migrate")):
+                return
+        questions = assumption_guard.followup_questions(key, option)
+        if questions:
+            self._insert_questions(interview_id, questions, now,
+                                   after_ordinal=after_ordinal)
 
     def skip(self, question_id) -> dict:
         question = self._question(question_id)
@@ -469,13 +454,18 @@ class GrillMeEngine:
         return self.get_interview(interview["interview_id"])
 
     def _settle(self, interview_id):
-        open_rows = self.conn.execute(
-            "SELECT COUNT(*) FROM interview_questions WHERE interview_id=? "
-            "AND status='open'", (interview_id,)).fetchone()[0]
+        open_rows = list(self.conn.execute(
+            "SELECT * FROM interview_questions WHERE interview_id=? "
+            "AND status='open' ORDER BY ordinal", (interview_id,)))
         skipped = self.conn.execute(
             "SELECT COUNT(*) FROM interview_questions WHERE interview_id=? "
             "AND status='skipped'", (interview_id,)).fetchone()[0]
-        if skipped:
+        rows_by_key = {row["question_key"]: row for row in self.conn.execute(
+            "SELECT question_key,status FROM interview_questions "
+            "WHERE interview_id=?", (interview_id,))}
+        eligible = [row for row in open_rows
+                    if self._eligible(interview_id, row, rows_by_key)]
+        if skipped or (open_rows and not eligible):
             status = "blocked"
         elif open_rows:
             status = "open"
@@ -514,7 +504,26 @@ class GrillMeEngine:
                 "Recommendations are not user confirmations.",
             ],
         }
+        if interview["status"] == "approved":
+            try:
+                current = load_current(self.root)
+            except ContractError:
+                current = None
+            if (current is not None
+                    and current.get("interview_id") == interview["interview_id"]):
+                summary["requirements_contract"] = self._contract_ref(current)
         return summary
+
+    @staticmethod
+    def _contract_ref(contract):
+        return {
+            "contract_id": contract["contract_id"],
+            "contract_version": contract["contract_version"],
+            "sha256": contract["sha256"],
+            "interview_id": contract.get("interview_id"),
+            "source": contract.get("source"),
+            "status": contract.get("status"),
+        }
 
     @staticmethod
     def _suggest_milestones(request):
@@ -540,11 +549,32 @@ class GrillMeEngine:
         self.conn.execute("UPDATE interviews SET status='approved',approved_at=?,"
                           "updated_at=? WHERE interview_id=?",
                           (now, now, interview))
+        # Invalidated dependents are obsolete, not unresolved. The contract
+        # builder treats them as blockers, so retire them before building.
+        self.conn.execute(
+            "UPDATE interview_questions SET status='superseded' "
+            "WHERE interview_id=? AND status='invalidated'", (interview,))
         self.conn.commit()
-        self.memory.update_meta(last_platform="grill-me",
-                                last_run_id=None, last_milestone=None)
+        try:
+            try:
+                contract = build_from_interview(self.root, interview)
+            except ContractError:
+                contract = assumption_guard.build_requirements_contract(
+                    self.root, interview)
+        except (ContractError, KeyError, MemoryError, ValueError) as exc:
+            self.conn.execute(
+                "UPDATE interviews SET status='ready',approved_at=NULL,"
+                "updated_at=? WHERE interview_id=?",
+                (time.time(), interview))
+            self.conn.commit()
+            raise GrillError(f"requirements contract could not be created: {exc}") from exc
+        contract_ref = self._contract_ref(contract)
+        summary["requirements_contract"] = contract_ref
+        # Approval must not rewrite the active platform. The next real run
+        # owns that field, not the interview.
         self.memory.write_context_files()
         return {"interview_id": interview, "approved": True,
+                "requirements_contract": contract_ref,
                 "summary": summary}
 
     def _question(self, question_id) -> dict:

@@ -16,12 +16,14 @@ import time
 from pathlib import Path
 
 try:
-    from tools import teamwork_chat
+    from tools import assumption_guard, teamwork_chat
     from tools.grill_me import GrillError, GrillMeEngine
     from tools.project_identity import ensure_project_identity
     from tools.project_memory import MemoryError, ProjectMemory
     from tools.run_owner import atomic_write_json
 except ModuleNotFoundError:
+    import assumption_guard  # type: ignore
+    import git_memory_hook  # type: ignore
     import teamwork_chat  # type: ignore
     from grill_me import GrillError, GrillMeEngine  # type: ignore
     from project_identity import ensure_project_identity  # type: ignore
@@ -51,13 +53,17 @@ def _platform(args):
 
 def _chat_args(root, *, command, request=None, request_file=None,
                request_stdin=False, mode="auto", run_id=None, model=None,
-               max_seconds=7200, origin_platform="unknown", provider=None):
+               max_seconds=7200, origin_platform="unknown", provider=None,
+               interview_id=None, grill_mode="auto", guard_receipt=None,
+               codex_sandbox="read-only"):
     return type("Args", (), {
         "root": str(root), "command": command, "request": request,
         "request_file": request_file, "request_stdin": request_stdin,
         "mode": mode, "run_id": run_id, "model": model,
         "max_seconds": max_seconds, "origin_platform": origin_platform,
-        "provider": provider,
+        "provider": provider, "interview_id": interview_id,
+        "grill_mode": grill_mode, "guard_receipt": guard_receipt,
+        "codex_sandbox": codex_sandbox,
     })()
 
 
@@ -65,43 +71,62 @@ def start(args) -> dict:
     root = _root(args.root)
     platform = _platform(args)
     identity = ensure_project_identity(root)
-    chat_request = args.request
-    if args.interview_id:
-        # The approved interview does not store the raw request. Require the
-        # original request again and verify its hash so a long or multi-line
-        # task is never silently truncated to the stored summary.
-        chat_request = _request_text(root, args)
-        with GrillMeEngine(root, identity=identity) as engine:
-            interview = engine.get_interview(args.interview_id)
-            if interview["status"] != "approved":
-                raise UniversalError("interview is not approved")
-            if not engine.verify_request(args.interview_id, chat_request):
-                raise UniversalError(
-                    "request does not match the approved interview; "
-                    "use the original request text")
-            summary = engine.summary(args.interview_id)
-        if summary["blocking_questions"]:
-            raise UniversalError("interview still has blocking questions")
-    elif args.grill:
+    interview_id = getattr(args, "interview_id", None)
+    grill_mode = getattr(args, "grill_mode", "auto") or "auto"
+    if getattr(args, "grill", False) and not interview_id:
         with GrillMeEngine(root, identity=identity) as engine:
             result = engine.start(
                 _request_text(root, args), origin_platform=platform,
-                mode=args.grill_mode)
+                mode=grill_mode)
         return {"status": "interview_required",
                 "platform": platform,
                 "interview": result["interview"],
                 "question": result["question"],
                 "note": "Answer or skip with the grill commands, then approve and start."}
-    if not args.interview_id and not args.grill:
-        _request_text(root, args)
+    # Read the exact request once. The approved interview does not store the
+    # raw request, so its hash is verified against this text.
+    request = _request_text(root, args)
+    if interview_id:
+        with GrillMeEngine(root, identity=identity) as engine:
+            interview = engine.get_interview(interview_id)
+            if interview["status"] != "approved":
+                raise UniversalError("interview is not approved")
+            if not engine.verify_request(interview_id, request):
+                raise UniversalError(
+                    "request does not match the approved interview; "
+                    "use the original request text")
+            summary = engine.summary(interview_id)
+        if summary["blocking_questions"]:
+            raise UniversalError("interview still has blocking questions")
+    try:
+        guard = assumption_guard.evaluate(
+            root, request, platform=platform, mode=grill_mode,
+            interview_id=interview_id)
+    except assumption_guard.AssumptionGuardError as exc:
+        raise UniversalError(str(exc)) from exc
+    if guard["status"] != "allowed":
+        return {"status": "interview_required",
+                "platform": platform,
+                "interview": guard.get("interview"),
+                "question": guard.get("question"),
+                "reasons": guard.get("reasons") or [],
+                "contradictions": guard.get("contradictions") or [],
+                "assumption_guard": guard["receipt"],
+                "guard_receipt": guard["receipt"],
+                "note": ("Critical ambiguity: answer/approve the persistent "
+                         "Grill-Me interview, then start with --interview-id. "
+                         "No plan or runner state was written.")}
     result = teamwork_chat.start(_chat_args(
-        root, command="start", request=chat_request,
-        request_file=args.request_file if args.interview_id is None else None,
-        request_stdin=False,
+        root, command="start", request=request,
+        request_file=None, request_stdin=False,
         mode=args.mode, run_id=args.run_id, model=args.model,
         max_seconds=args.max_seconds, origin_platform=platform,
-        provider=getattr(args, "provider", None)))
+        provider=getattr(args, "provider", None),
+        interview_id=interview_id, grill_mode=grill_mode,
+        guard_receipt=guard["receipt"],
+        codex_sandbox=getattr(args, "codex_sandbox", "read-only")))
     result["platform"] = platform
+    result.setdefault("assumption_guard", guard["receipt"])
     return result
 
 
@@ -126,15 +151,26 @@ def context(args) -> dict:
     root = _root(args.root)
     identity = ensure_project_identity(root)
     with ProjectMemory(root, identity=identity) as memory:
+        bundle = memory.context_bundle(limit=8)
         return {
             "platform": _platform(args),
             "identity": {k: identity.get(k) for k in
                          ("project_id", "project_uuid", "instance_id", "root")},
             "state": memory.context_state(),
             "summary": memory.context_summary(limit=args.limit),
-            "handoff": memory.latest_handoff(),
+            "handoff": memory.handoff_view(memory.latest_handoff()),
             "decisions": memory.list_decisions(status="confirmed", limit=20),
             "blocking": memory.list_requirements(status="unresolved_blocking"),
+            "active_interview": bundle.get("active_interview"),
+            "last_milestone": bundle.get("last_milestone"),
+            "stale": bundle.get("stale"),
+            "requirements_contract": bundle.get("contract"),
+            "contract_ref": bundle.get("contract_ref"),
+            "verification": bundle.get("verification"),
+            "open_tasks": {
+                "next_tasks": (bundle.get("handoff") or {}).get("payload", {}).get("next_tasks", []),
+                "next_milestone": (bundle.get("handoff") or {}).get("payload", {}).get("next_milestone"),
+            },
         }
 
 
@@ -142,18 +178,29 @@ def handoff(args) -> dict:
     root = _root(args.root)
     identity = ensure_project_identity(root)
     with ProjectMemory(root, identity=identity) as memory:
-        latest = memory.latest_handoff()
+        latest = memory.handoff_view(memory.latest_handoff())
         return {
             "platform": _platform(args),
             "project_id": identity["project_id"],
             "handoff": latest,
+            "handoff_verified": bool((latest or {}).get("verified")),
             "summary": memory.context_summary(limit=args.limit),
             "state": memory.context_state(),
+            "requirements_contract": memory.contract_ref(),
         }
 
 
 def memory_command(args) -> dict:
     root = _root(args.root)
+    if args.memory_command in ("install-hook", "uninstall-hook", "hook-status"):
+        try:
+            if args.memory_command == "install-hook":
+                return git_memory_hook.install(root, dry_run=args.dry_run)
+            if args.memory_command == "uninstall-hook":
+                return git_memory_hook.uninstall(root, dry_run=args.dry_run)
+            return git_memory_hook.status(root)
+        except git_memory_hook.HookError as exc:
+            raise UniversalError(str(exc)) from exc
     identity = ensure_project_identity(root)
     with ProjectMemory(root, identity=identity) as memory:
         if args.memory_command == "capture":
@@ -243,6 +290,10 @@ def main(argv=None) -> int:
     start_p.add_argument("--interview-id")
     start_p.add_argument("--run-id")
     start_p.add_argument("--model", default=teamwork_chat.DEFAULT_MODEL)
+    start_p.add_argument("--codex-sandbox",
+                         choices=["read-only", "workspace-write"],
+                         default="read-only",
+                         help="explicit Codex sandbox; workspace-write is opt-in")
     start_p.add_argument("--provider", choices=["opencode", "codex"],
                          help="explicit managed execution provider; required "
                               "to opt in from Codex/Cursor/Antigravity")
@@ -261,7 +312,7 @@ def main(argv=None) -> int:
     memory_p = sub.add_parser("memory")
     memory_sub = memory_p.add_subparsers(dest="memory_command", required=True)
     memory_capture = memory_sub.add_parser("capture")
-    memory_capture.add_argument("--platform")
+    memory_capture.add_argument("--platform", default=argparse.SUPPRESS)
     memory_summary = memory_sub.add_parser("summary")
     memory_summary.add_argument("--limit", type=int, default=2400)
     memory_export = memory_sub.add_parser("export")
@@ -269,7 +320,12 @@ def main(argv=None) -> int:
     memory_import = memory_sub.add_parser("import")
     memory_import.add_argument("--path", required=True)
     memory_import.add_argument("--apply", action="store_true")
-    memory_import.add_argument("--platform")
+    memory_import.add_argument("--platform", default=argparse.SUPPRESS)
+    memory_install = memory_sub.add_parser("install-hook")
+    memory_install.add_argument("--dry-run", action="store_true")
+    memory_uninstall = memory_sub.add_parser("uninstall-hook")
+    memory_uninstall.add_argument("--dry-run", action="store_true")
+    memory_sub.add_parser("hook-status")
 
     grill_p = sub.add_parser("grill")
     grill_sub = grill_p.add_subparsers(dest="grill_command", required=True)
@@ -280,20 +336,20 @@ def main(argv=None) -> int:
     gsource.add_argument("--request-stdin", action="store_true")
     gs.add_argument("--grill-mode", default="auto",
                     choices=["off", "auto", "required", "plan-only"])
-    gs.add_argument("--platform")
+    gs.add_argument("--platform", default=argparse.SUPPRESS)
     for name in ("next", "resume", "summary", "approve", "status", "cancel"):
         gp = grill_sub.add_parser(name)
         gp.add_argument("--interview-id")
-        gp.add_argument("--platform")
+        gp.add_argument("--platform", default=argparse.SUPPRESS)
     ga = grill_sub.add_parser("answer")
     ga.add_argument("--question-id", required=True)
     ga.add_argument("--option")
     ga.add_argument("--text")
-    ga.add_argument("--platform")
+    ga.add_argument("--platform", default=argparse.SUPPRESS)
     for name in ("skip", "back"):
         gp = grill_sub.add_parser(name)
         gp.add_argument("--question-id", required=True)
-        gp.add_argument("--platform")
+        gp.add_argument("--platform", default=argparse.SUPPRESS)
 
     args = parser.parse_args(argv)
     try:
