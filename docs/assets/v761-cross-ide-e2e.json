@@ -4,7 +4,7 @@
   "codex_model": "gpt-6.1-sol",
   "opencode_model": "opencode-go/deepseek-v4.1-flash",
   "contract": {
-    "contract_id": "rc_5ef18e630e157808",
+    "contract_id": "rc_7c7794261f79db3b",
     "version": 1,
     "decisions": [
       "jwt_refresh",
@@ -49,22 +49,23 @@
     },
     "tokens": {
       "cache": {
-        "read": 142080,
+        "read": 96000,
         "write": 0
       },
-      "cache_read": 142080,
+      "cache_read": 96000,
       "cache_write": 0,
-      "input": 160964,
-      "output": 2769,
-      "reasoning": 94,
-      "total": 163733
+      "input": 128324,
+      "output": 2471,
+      "reasoning": 110,
+      "total": 130795
     },
     "requirements_contract": {
       "ok": true,
+      "fully_verified": false,
       "status": "partially_verified",
-      "contract_id": "rc_5ef18e630e157808",
+      "contract_id": "rc_7c7794261f79db3b",
       "contract_version": 1,
-      "sha256": "11b34d7aa6cbc4c9449feb5b7c2a5eaaae27a8de8e2ccee82e713fb2e4cbfe20",
+      "sha256": "b81a49dd5476b7974feb2271c3bee1e6d38e1c10521f85bf4e8a3fc867f18fc7",
       "checks": [
         {
           "criterion_id": "ac_01_jwt_refresh",
@@ -94,7 +95,7 @@
     "handoff": true
   },
   "opencode_context": {
-    "project_id": "p_9aa01f3fe41e5a74",
+    "project_id": "p_9049121121dae9ca",
     "same_project": true,
     "last_platform": "codex",
     "confirmed_topics": [
@@ -142,21 +143,22 @@
     },
     "tokens": {
       "cache": {
-        "read": 128512,
+        "read": 131968,
         "write": 0
       },
-      "cache_read": 128512,
+      "cache_read": 131968,
       "cache_write": 0,
-      "input": 20179,
-      "output": 2350,
-      "reasoning": 2473
+      "input": 18110,
+      "output": 2011,
+      "reasoning": 1083
     },
     "requirements_contract": {
       "ok": true,
+      "fully_verified": false,
       "status": "partially_verified",
-      "contract_id": "rc_5ef18e630e157808",
+      "contract_id": "rc_7c7794261f79db3b",
       "contract_version": 1,
-      "sha256": "11b34d7aa6cbc4c9449feb5b7c2a5eaaae27a8de8e2ccee82e713fb2e4cbfe20",
+      "sha256": "b81a49dd5476b7974feb2271c3bee1e6d38e1c10521f85bf4e8a3fc867f18fc7",
       "checks": [
         {
           "criterion_id": "ac_01_jwt_refresh",
@@ -185,7 +187,7 @@
     "reset_file": true
   },
   "final": {
-    "project_id": "p_9aa01f3fe41e5a74",
+    "project_id": "p_9049121121dae9ca",
     "last_platform": "opencode",
     "confirmed_topics": [
       "jwt_refresh",
@@ -195,10 +197,11 @@
   },
   "final_contract": {
     "ok": true,
+    "fully_verified": false,
     "status": "partially_verified",
-    "contract_id": "rc_5ef18e630e157808",
+    "contract_id": "rc_7c7794261f79db3b",
     "contract_version": 1,
-    "sha256": "11b34d7aa6cbc4c9449feb5b7c2a5eaaae27a8de8e2ccee82e713fb2e4cbfe20",
+    "sha256": "b81a49dd5476b7974feb2271c3bee1e6d38e1c10521f85bf4e8a3fc867f18fc7",
     "checks": [
       {
         "criterion_id": "ac_01_jwt_refresh",
