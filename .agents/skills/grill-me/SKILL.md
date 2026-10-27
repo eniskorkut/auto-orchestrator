@@ -37,23 +37,48 @@ when the IDE changes.
 9. Show the summary and ask for plan approval before code when risk is high.
    Approval creates a digest-bound, versioned requirements contract; the
    contract is what the planner and verifier consume, not an agent claim.
-10. Start Teamwork only from an approved interview, and pass the original
-   request again so the full text is verified, not truncated:
+10. Before native code, write an inspectable plan and approve it explicitly:
+   `... plan --mode <mode> --request-file <relative_path>`, then
+   `... approve-plan --run-id <id> --approver <user>`, then
+   `... start --plan <id>`. Never auto-approve or reuse a changed digest.
+   `start --native` is the direct native-plan path and also leaves approval
+   pending.
+11. Start managed Teamwork only from an approved interview, and pass the
+   original request again so the full text is verified, not truncated:
    `... start --interview-id <id> --request-file <relative_path> --mode <mode>`.
    A different request is rejected. The plan carries the approved contract and
    its version; the runner rejects a stale or contradictory contract.
+12. Only one IDE owns write authority. `context`/`status` are read-only; before
+   answering or approving check owner/fence and stop if another IDE owns the
+   project. Handoff is explicit through `ide prepare`, `ide release` and
+   `ide accept`; never release automatically when an agent finishes.
+
+## Antigravity native import
+
+Antigravity's native `/grill-me` and `/teamwork-preview` remain authoritative.
+When the native interview finishes, import only the user's explicit
+confirmations into shared memory:
+
+```bash
+python3.11 tools/universal_teamwork.py --root . --platform antigravity \
+  grill import-native --file <native-export.json>
+```
+
+The JSON contains `answers` with `confirmed: true` and `confirmed_by: "user"`.
+Unconfirmed answers, recommended values, model output and prose are rejected.
+This is an import bridge, not a second `/grill-me` command.
 
 ## Platform notes
 
-- OpenCode: `/grill-me` and `/teamwork --grill` are project commands.
+- OpenCode: `/grill-me` and `/teamwork --grill` are project commands and expose
+  both managed and native execution.
 - Codex: invoke this skill by name (`$grill-me` where the client supports skill
-  invocation; otherwise reference `.agents/skills/grill-me/SKILL.md`).
+  invocation; otherwise reference `.agents/skills/grill-me/SKILL.md`). Codex
+  uses native plans and native subagents.
 - Cursor: skills are discovered from `.agents/skills/` and `.cursor/skills/`.
 - Antigravity: native `/teamwork-preview` and native `/grill-me` are
-  authoritative. This portable `grill-me` skill must not be installed as a
-  second `grill-me` under Antigravity's skill roots; the non-native fallback is
-  `ao-grill-me`, which imports decisions into the same project memory instead of
-  duplicating the interview UI.
+  authoritative. Do not install a second `grill-me` under Antigravity's skill
+  roots; `ao-grill-me` is an explicit import bridge only.
 
 Do not claim native IDE delegation, execution or completion that was not
 observed. A contract/skill file is not a live execution test.

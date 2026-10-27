@@ -9,6 +9,8 @@ actually available. No fake cross-provider dispatch is performed.
 from __future__ import annotations
 
 import argparse
+import copy
+import inspect
 import json
 import os
 import sys
@@ -20,7 +22,8 @@ try:
     from tools.grill_me import GrillError, GrillMeEngine
     from tools.project_identity import ensure_project_identity
     from tools.project_memory import MemoryError, ProjectMemory
-    from tools.run_owner import atomic_write_json
+    from tools.run_owner import atomic_write_json, read_json, teamwork_dir
+    from tools.teamwork import TeamworkError
     try:
         from tools import context_selector
     except ModuleNotFoundError:  # older flat installation
@@ -32,13 +35,23 @@ except ModuleNotFoundError:
     from grill_me import GrillError, GrillMeEngine  # type: ignore
     from project_identity import ensure_project_identity  # type: ignore
     from project_memory import MemoryError, ProjectMemory  # type: ignore
-    from run_owner import atomic_write_json  # type: ignore
+    from run_owner import atomic_write_json, read_json, teamwork_dir  # type: ignore
+    from teamwork import TeamworkError  # type: ignore
     try:
         import context_selector  # type: ignore
     except ModuleNotFoundError:  # older flat installation
         context_selector = None  # type: ignore
 
 DEFAULT_PLATFORM = os.environ.get("AO_PLATFORM", "unknown")
+NATIVE_PLATFORMS = ("opencode", "codex", "cursor", "antigravity")
+NATIVE_OWNER_TTL = 14_400  # 4h; refreshed by owner commands and `ide heartbeat`
+IDE_HANDOFF_COMMANDS = ("status", "activate", "heartbeat", "prepare",
+                        "accept", "release", "recover")
+FORBIDDEN_NATIVE_FIELDS = frozenset({
+    "model", "recommended", "recommendation", "recommendations", "suggested",
+    "suggestion", "preselected", "preselection", "llm", "confidence",
+    "auto_selected", "selected_by_model", "agent_choice", "default_option",
+})
 
 
 class UniversalError(ValueError):
@@ -59,11 +72,24 @@ def _platform(args):
     return value
 
 
+def _native_platform(args):
+    platform = _platform(args)
+    if platform not in NATIVE_PLATFORMS:
+        raise UniversalError(
+            "native execution requires platform opencode, codex, cursor or "
+            "antigravity")
+    return platform
+
+
+def _run_id(value):
+    return teamwork_chat._safe_run_id(value)
+
+
 def _chat_args(root, *, command, request=None, request_file=None,
                request_stdin=False, mode="auto", run_id=None, model=None,
                max_seconds=7200, origin_platform="unknown", provider=None,
                interview_id=None, grill_mode="auto", guard_receipt=None,
-               codex_sandbox="read-only"):
+               codex_sandbox="read-only", native=False, plan=None):
     return type("Args", (), {
         "root": str(root), "command": command, "request": request,
         "request_file": request_file, "request_stdin": request_stdin,
@@ -71,13 +97,335 @@ def _chat_args(root, *, command, request=None, request_file=None,
         "max_seconds": max_seconds, "origin_platform": origin_platform,
         "provider": provider, "interview_id": interview_id,
         "grill_mode": grill_mode, "guard_receipt": guard_receipt,
-        "codex_sandbox": codex_sandbox,
+        "codex_sandbox": codex_sandbox, "native": native, "plan": plan,
     })()
+
+
+def _ide_handoff_module():
+    """Import the optional ownership module without making it mandatory."""
+    try:
+        from tools import ide_handoff  # type: ignore
+        return ide_handoff
+    except ModuleNotFoundError:
+        pass
+    try:
+        import ide_handoff  # type: ignore
+        return ide_handoff
+    except ModuleNotFoundError:
+        return None
+
+
+def _handoff_kwargs(function, values):
+    try:
+        parameters = inspect.signature(function).parameters
+    except (TypeError, ValueError):
+        return {key: value for key, value in values.items()
+                if value is not None}
+    if any(item.kind is inspect.Parameter.VAR_KEYWORD
+           for item in parameters.values()):
+        return {key: value for key, value in values.items()
+                if value is not None}
+    return {key: value for key, value in values.items()
+            if key in parameters and value is not None}
+
+
+def _handoff_call(module, name, root, **values):
+    function = getattr(module, name, None)
+    if not callable(function):
+        raise UniversalError(f"ide_handoff.{name} is not available")
+    try:
+        result = function(str(root), **_handoff_kwargs(function, values))
+    except UniversalError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - boundary to optional module
+        raise UniversalError(f"ide_handoff.{name} failed: {exc}") from exc
+    if not isinstance(result, dict):
+        raise UniversalError(f"ide_handoff.{name} returned an invalid result")
+    return result
+
+
+def _owner_view(payload):
+    payload = payload if isinstance(payload, dict) else {}
+    owner = payload.get("owner")
+    platform = None
+    owner_id = None
+    active = None
+    if isinstance(owner, dict):
+        platform = (owner.get("platform") or owner.get("ide")
+                    or owner.get("origin_platform"))
+        owner_id = (owner.get("owner_id") or owner.get("session_id")
+                    or owner.get("id") or owner.get("name"))
+        if "active" in owner:
+            active = bool(owner.get("active"))
+        elif "alive" in owner:
+            active = bool(owner.get("alive"))
+    elif isinstance(owner, str):
+        platform = owner
+        owner_id = owner
+    if platform is None:
+        platform = payload.get("owner_platform") or payload.get("platform")
+    if owner_id is None:
+        owner_id = payload.get("owner_id") or payload.get("session_id")
+    fence = payload.get("fence", payload.get("owner_fence",
+                                            payload.get("lease_fence")))
+    if active is None:
+        if "active" in payload:
+            active = bool(payload.get("active"))
+        elif "held" in payload:
+            active = bool(payload.get("held"))
+        else:
+            active = bool(owner)
+    return {
+        "owner": copy.deepcopy(owner),
+        "owner_platform": platform,
+        "owner_id": owner_id,
+        "fence": fence,
+        "active": active,
+        "run_id": payload.get("run_id"),
+        "status": payload.get("status"),
+        "state": payload.get("state") or payload.get("status"),
+        "ok": payload.get("ok"),
+        "handoff": payload.get("handoff"),
+        "reasons": copy.deepcopy(payload.get("reasons") or []),
+    }
+
+
+def _credential_path(root, platform):
+    return teamwork_dir(root) / f"ide-owner-{platform}.json"
+
+
+def _load_credential(root, platform):
+    value = read_json(_credential_path(root, platform), {})
+    if not isinstance(value, dict):
+        return {}
+    token = value.get("owner_token")
+    fence = value.get("fence")
+    if not isinstance(token, str) or len(token) != 48:
+        return {}
+    return {"owner_token": token, "fence": fence,
+            "owner_id": value.get("owner_id"), "platform": platform}
+
+
+def _store_credential(root, platform, result):
+    token = result.get("owner_token")
+    if not isinstance(token, str) or len(token) != 48:
+        return
+    owner = result.get("owner") if isinstance(result.get("owner"), dict) else {}
+    atomic_write_json(_credential_path(root, platform), {
+        "version": 1,
+        "platform": platform,
+        "owner_token": token,
+        "fence": result.get("fence"),
+        "owner_id": owner.get("owner_id"),
+        "stored_at": time.time(),
+    })
+
+
+def _credential(root, platform, explicit=None):
+    if isinstance(explicit, str) and explicit:
+        return {"owner_token": explicit,
+                "fence": None, "owner_id": None, "platform": platform}
+    return _load_credential(root, platform)
+
+
+def _ownership_status(root, platform):
+    module = _ide_handoff_module()
+    if module is None:
+        return {
+            "available": False, "platform": platform, "owner": None,
+            "owner_platform": None, "owner_id": None, "fence": None,
+            "active": False, "foreign": False, "read_only": True,
+            "note": "ide_handoff is not installed; ownership is unguarded",
+        }
+    try:
+        payload = _handoff_call(module, "status", root)
+    except UniversalError as exc:
+        return {
+            "available": True, "platform": platform, "owner": None,
+            "owner_platform": None, "owner_id": None, "fence": None,
+            "active": False, "foreign": False, "read_only": True,
+            "error": str(exc),
+        }
+    view = _owner_view(payload)
+    view.update({
+        "available": True,
+        "platform": platform,
+        "read_only": True,
+        "foreign": bool(view["active"] and view["owner_platform"]
+                        and view["owner_platform"] != platform),
+        "snapshot": payload,
+    })
+    return view
+
+
+def _claim_ownership(root, platform, *, run_id=None, owner_id=None,
+                     ttl_seconds=NATIVE_OWNER_TTL, action="write",
+                     owner_token=None):
+    """Call status/activate and refuse a live owner from another IDE.
+
+    Same-IDE ownership is not re-activated (that would be a conflict in the
+    handoff state machine). The caller keeps using the existing fence; a
+    stored owner token is available for the explicit handoff subcommands.
+    """
+    module = _ide_handoff_module()
+    if module is None:
+        return {
+            "available": False, "platform": platform, "owner": None,
+            "owner_platform": None, "owner_id": owner_id, "fence": None,
+            "active": False, "claimed": False,
+            "note": "ide_handoff is not installed; ownership guard unavailable",
+        }
+    current = _owner_view(_handoff_call(module, "status", root))
+    current_state = current.get("state") or current.get("status")
+    if (current["active"] and current["owner_platform"]
+            and current["owner_platform"] != platform):
+        raise UniversalError(
+            f"project ownership is held by {current['owner_platform']} "
+            f"at fence {current['fence']}; {action} from {platform} is "
+            "rejected. Use `ide status` and ask the owner to hand off or "
+            "release the project")
+    if (owner_id is not None and current["active"]
+            and current["owner_id"] is not None
+            and str(current["owner_id"]) != str(owner_id)):
+        raise UniversalError(
+            "project ownership is held by a different session of "
+            f"{platform}; current fence {current['fence']}. Use the "
+            "owning session or hand off explicitly")
+    if current["active"]:
+        if current_state == "handoff_prepared":
+            if action not in ("ide release", "ide prepare"):
+                raise UniversalError(
+                    "a handoff is prepared; accept it in the target IDE before "
+                    f"{action}")
+        elif current_state not in ("active", "transferred"):
+            raise UniversalError(
+                f"ownership state {current_state} requires explicit recovery "
+                f"before {action}")
+        fence = current["fence"]
+        if action != "ide heartbeat":
+            # Any real command from the current owner refreshes its native
+            # heartbeat, so a long working session does not look stale. The
+            # heartbeat is a liveness signal only; it never grants a fence.
+            stored = _credential(root, platform)
+            if (isinstance(stored.get("owner_token"), str)
+                    and isinstance(stored.get("fence"), int)):
+                refreshed = _handoff_call(
+                    module, "heartbeat", root,
+                    owner_token=stored["owner_token"], fence=stored["fence"])
+                if refreshed.get("ok") and isinstance(
+                        refreshed.get("fence"), int):
+                    _remember_handoff_result(root, platform, refreshed)
+                    fence = refreshed["fence"]
+        return {
+            "available": True, "platform": platform, "claimed": False,
+            "owner": current["owner"],
+            "owner_platform": current["owner_platform"],
+            "owner_id": current["owner_id"], "fence": fence,
+            "active": True, "state": current_state,
+            "credential_present": bool(
+                _credential(root, platform, owner_token)),
+        }
+    if (current.get("ok") is False
+            and current_state not in ("inactive", "released")):
+        reasons = "; ".join(
+            item.get("message") or item.get("code") or str(item)
+            for item in (current.get("reasons") or []))
+        raise UniversalError(
+            f"ownership cannot be activated from state {current_state}: "
+            f"{reasons or 'blocked'}")
+    activated = _handoff_call(
+        module, "activate", root,
+        ide=platform, platform=platform, origin_platform=platform,
+        run_id=run_id, owner=owner_id or platform,
+        owner_id=owner_id or platform, session_id=owner_id,
+        ttl_seconds=ttl_seconds, ttl=ttl_seconds)
+    if activated.get("ok") is False:
+        reasons = "; ".join(
+            item.get("message") or item.get("code") or str(item)
+            for item in (activated.get("reasons") or []))
+        raise UniversalError(
+            f"ide_handoff rejected activation for {platform}: "
+            f"{reasons or activated.get('status') or 'blocked'}")
+    _store_credential(root, platform, activated)
+    view = _owner_view(activated)
+    if (view["active"] and view["owner_platform"]
+            and view["owner_platform"] != platform):
+        raise UniversalError(
+            f"ide_handoff returned a foreign owner {view['owner_platform']} "
+            f"after activation at fence {view['fence']}")
+    return {
+        "available": True, "platform": platform, "claimed": True,
+        "owner": view["owner"], "owner_platform": view["owner_platform"],
+        "owner_id": view["owner_id"], "fence": view["fence"],
+        "active": view["active"], "state": view.get("state"),
+        "credential_present": bool(activated.get("owner_token")),
+        "activation_ok": True,
+    }
+
+
+def _with_ownership(result, ownership):
+    result = result if isinstance(result, dict) else {"result": result}
+    ownership = ownership if isinstance(ownership, dict) else {}
+    result["ownership"] = ownership
+    result["owner"] = ownership.get("owner")
+    result["owner_platform"] = ownership.get("owner_platform")
+    result["fence"] = ownership.get("fence")
+    return result
+
+
+def _plan_start(args) -> dict:
+    root = _root(args.root)
+    platform = _native_platform(args)
+    run_id = _run_id(getattr(args, "plan", None) or "")
+    request = getattr(args, "request", None)
+    request_file = getattr(args, "request_file", None)
+    supplied = any((isinstance(request, str) and request.strip(),
+                    isinstance(request_file, str) and request_file.strip(),
+                    bool(getattr(args, "request_stdin", False))))
+    ownership = _claim_ownership(root, platform, run_id=run_id,
+                                 action="start an approved native plan")
+    try:
+        plan = teamwork_chat.load_native_plan(root, run_id)
+        if supplied:
+            supplied_text = _request_text(root, args)
+            if supplied_text != plan.get("request"):
+                raise UniversalError(
+                    "the supplied request does not match the approved plan")
+        # An approved plan is project state, not another IDE's live session.
+        # After a sequential handoff the new owner continues the same plan;
+        # ownership, not the authoring platform, decides who may execute it.
+        authored_by = plan.get("native_platform")
+        result = teamwork_chat.start_native_plan(
+            _chat_args(root, command="start", run_id=run_id, plan=run_id,
+                       origin_platform=platform, native=True))
+    except teamwork_chat.ChatError as exc:
+        raise UniversalError(str(exc)) from exc
+    result["platform"] = platform
+    if authored_by and authored_by != platform:
+        result["plan_authored_by"] = authored_by
+        result["continued_by"] = platform
+        result["handoff_continuation"] = True
+    return _with_ownership(result, ownership)
 
 
 def start(args) -> dict:
     root = _root(args.root)
     platform = _platform(args)
+    native = bool(getattr(args, "native", False))
+    plan_id = getattr(args, "plan", None)
+    if plan_id and native:
+        raise UniversalError("start accepts either --native or --plan, not both")
+    if plan_id:
+        return _plan_start(args)
+    if native:
+        platform = _native_platform(args)
+        if getattr(args, "provider", None):
+            raise UniversalError(
+                "--provider is a managed execution option; --native starts no "
+                "provider and uses this IDE's own subagents")
+    ownership = _claim_ownership(
+        root, platform, run_id=getattr(args, "run_id", None),
+        action="start a Teamwork plan")
     identity = ensure_project_identity(root)
     interview_id = getattr(args, "interview_id", None)
     grill_mode = getattr(args, "grill_mode", "auto") or "auto"
@@ -86,11 +434,13 @@ def start(args) -> dict:
             result = engine.start(
                 _request_text(root, args), origin_platform=platform,
                 mode=grill_mode)
-        return {"status": "interview_required",
+        return _with_ownership({
+                "status": "interview_required",
                 "platform": platform,
                 "interview": result["interview"],
                 "question": result["question"],
-                "note": "Answer or skip with the grill commands, then approve and start."}
+                "note": "Answer or skip with the grill commands, then approve and start."},
+                ownership)
     # Read the exact request once. The approved interview does not store the
     # raw request, so its hash is verified against this text.
     request = _request_text(root, args)
@@ -113,7 +463,8 @@ def start(args) -> dict:
     except assumption_guard.AssumptionGuardError as exc:
         raise UniversalError(str(exc)) from exc
     if guard["status"] != "allowed":
-        return {"status": "interview_required",
+        return _with_ownership({
+                "status": "interview_required",
                 "platform": platform,
                 "interview": guard.get("interview"),
                 "question": guard.get("question"),
@@ -123,7 +474,8 @@ def start(args) -> dict:
                 "guard_receipt": guard["receipt"],
                 "note": ("Critical ambiguity: answer/approve the persistent "
                          "Grill-Me interview, then start with --interview-id. "
-                         "No plan or runner state was written.")}
+                         "No plan or runner state was written.")},
+                ownership)
     result = teamwork_chat.start(_chat_args(
         root, command="start", request=request,
         request_file=None, request_stdin=False,
@@ -132,10 +484,58 @@ def start(args) -> dict:
         provider=getattr(args, "provider", None),
         interview_id=interview_id, grill_mode=grill_mode,
         guard_receipt=guard["receipt"],
-        codex_sandbox=getattr(args, "codex_sandbox", "read-only")))
+        codex_sandbox=getattr(args, "codex_sandbox", "read-only"),
+        native=native))
     result["platform"] = platform
     result.setdefault("assumption_guard", guard["receipt"])
-    return result
+    return _with_ownership(result, ownership)
+
+
+def plan(args) -> dict:
+    root = _root(args.root)
+    platform = _native_platform(args)
+    ownership = _claim_ownership(
+        root, platform, run_id=getattr(args, "run_id", None),
+        action="write a native plan")
+    try:
+        result = teamwork_chat.prepare_native_plan(_chat_args(
+            root, command="plan", request=getattr(args, "request", None),
+            request_file=getattr(args, "request_file", None),
+            request_stdin=bool(getattr(args, "request_stdin", False)),
+            mode=getattr(args, "mode", "auto") or "auto",
+            run_id=getattr(args, "run_id", None),
+            model=getattr(args, "model", None),
+            max_seconds=getattr(args, "max_seconds", 7200),
+            origin_platform=platform,
+            interview_id=getattr(args, "interview_id", None),
+            grill_mode=getattr(args, "grill_mode", "auto") or "auto",
+            native=True))
+    except teamwork_chat.ChatError as exc:
+        raise UniversalError(str(exc)) from exc
+    result["platform"] = platform
+    return _with_ownership(result, ownership)
+
+
+def approve_plan(args) -> dict:
+    root = _root(args.root)
+    platform = _native_platform(args)
+    run_id = _run_id(getattr(args, "run_id", None) or "")
+    ownership = _claim_ownership(
+        root, platform, run_id=run_id,
+        action="approve a native plan")
+    try:
+        plan = teamwork_chat.load_native_plan(root, run_id)
+        # Approval is bound to the plan digest and the explicit approver, not
+        # to the IDE that wrote it. A new owner may approve a pending plan
+        # after a handoff; ownership gating above already decided who writes.
+        result = teamwork_chat.approve_native_plan(
+            root, run_id, getattr(args, "approver", None), platform=platform)
+    except teamwork_chat.ChatError as exc:
+        raise UniversalError(str(exc)) from exc
+    result["platform"] = platform
+    result["execution"] = "native"
+    result["plan_authored_by"] = plan.get("native_platform")
+    return _with_ownership(result, ownership)
 
 
 def _request_text(root, args) -> str:
@@ -157,6 +557,8 @@ def _request_text(root, args) -> str:
 
 def context(args) -> dict:
     root = _root(args.root)
+    platform = _platform(args)
+    ownership = _ownership_status(root, platform)
     identity = ensure_project_identity(root)
     with ProjectMemory(root, identity=identity) as memory:
         bundle = memory.context_bundle(limit=8)
@@ -170,7 +572,11 @@ def context(args) -> dict:
                          "token_estimate": 0, "reason":
                          "context selector module is not installed"}
         return {
-            "platform": _platform(args),
+            "platform": platform,
+            "ownership": ownership,
+            "owner": ownership.get("owner"),
+            "owner_platform": ownership.get("owner_platform"),
+            "fence": ownership.get("fence"),
             "identity": {k: identity.get(k) for k in
                          ("project_id", "project_uuid", "instance_id", "root")},
             "state": memory.context_state(),
@@ -195,11 +601,17 @@ def context(args) -> dict:
 
 def handoff(args) -> dict:
     root = _root(args.root)
+    platform = _platform(args)
+    ownership = _ownership_status(root, platform)
     identity = ensure_project_identity(root)
     with ProjectMemory(root, identity=identity) as memory:
         latest = memory.handoff_view(memory.latest_handoff())
         return {
-            "platform": _platform(args),
+            "platform": platform,
+            "ownership": ownership,
+            "owner": ownership.get("owner"),
+            "owner_platform": ownership.get("owner_platform"),
+            "fence": ownership.get("fence"),
             "project_id": identity["project_id"],
             "handoff": latest,
             "handoff_verified": bool((latest or {}).get("verified")),
@@ -239,55 +651,647 @@ def memory_command(args) -> dict:
 
 def pause(args) -> dict:
     root = _root(args.root)
+    platform = _platform(args)
     active = teamwork_chat._active(root)
     run_id = args.run_id or active.get("run_id")
     if not run_id:
         raise UniversalError("no active teamwork run")
     run_id = teamwork_chat._safe_run_id(run_id)
+    ownership = _claim_ownership(root, platform, run_id=run_id,
+                                 action="pause a run")
     path = root / ".auto-orchestrator" / "teamwork" / f"pause-{run_id}.json"
     atomic_write_json(path, {"run_id": run_id, "requested_at": time.time(),
-                             "requested_by": _platform(args)})
-    return {"run_id": run_id, "status": "pause_requested",
+                             "requested_by": platform})
+    return _with_ownership({
+            "run_id": run_id, "status": "pause_requested",
             "native_cancel_ack": False,
-            "note": "Active children finish; no new task is dispatched."}
+            "note": "Active children finish; no new task is dispatched."},
+            ownership)
+
+
+GRILL_READ_ONLY = frozenset({"next", "summary", "status"})
 
 
 def grill(args) -> dict:
     root = _root(args.root)
     platform = _platform(args)
+    if args.grill_command == "import-native":
+        return import_native_grill(args)
+    if args.grill_command in GRILL_READ_ONLY:
+        ownership = _ownership_status(root, platform)
+    else:
+        ownership = _claim_ownership(
+            root, platform, action=f"grill {args.grill_command}")
     identity = ensure_project_identity(root)
     with GrillMeEngine(root, identity=identity) as engine:
         if args.grill_command == "start":
-            return engine.start(_request_text(root, args),
-                                origin_platform=platform, mode=args.grill_mode)
-        if args.grill_command == "resume":
-            return engine.resume(args.interview_id)
-        if args.grill_command == "next":
-            return {"question": engine.next_question(args.interview_id)}
-        if args.grill_command == "answer":
-            return engine.answer(args.question_id, option=args.option,
-                                 text=args.text)
-        if args.grill_command == "skip":
-            return engine.skip(args.question_id)
-        if args.grill_command == "back":
-            return engine.back(args.question_id)
-        if args.grill_command == "cancel":
-            return {"interview": engine.cancel()}
-        if args.grill_command == "summary":
-            return engine.summary(args.interview_id)
-        if args.grill_command == "approve":
-            return engine.approve(args.interview_id)
-        if args.grill_command == "status":
-            return engine.status()
-    raise UniversalError("unknown grill command")
+            result = engine.start(_request_text(root, args),
+                                  origin_platform=platform,
+                                  mode=args.grill_mode)
+        elif args.grill_command == "resume":
+            result = engine.resume(args.interview_id)
+        elif args.grill_command == "next":
+            result = {"question": engine.next_question(args.interview_id)}
+        elif args.grill_command == "answer":
+            result = engine.answer(args.question_id, option=args.option,
+                                   text=args.text)
+        elif args.grill_command == "skip":
+            result = engine.skip(args.question_id)
+        elif args.grill_command == "back":
+            result = engine.back(args.question_id)
+        elif args.grill_command == "cancel":
+            result = {"interview": engine.cancel()}
+        elif args.grill_command == "summary":
+            result = engine.summary(args.interview_id)
+        elif args.grill_command == "approve":
+            result = engine.approve(args.interview_id)
+        elif args.grill_command == "status":
+            result = engine.status()
+        else:
+            raise UniversalError("unknown grill command")
+    return _with_ownership(result, ownership)
+
+
+def _read_native_import_file(path_value) -> dict:
+    if isinstance(path_value, dict):
+        return path_value
+    if not path_value:
+        raise UniversalError("grill import-native requires --file")
+    try:
+        path = Path(path_value)
+    except (TypeError, ValueError) as exc:
+        raise UniversalError("native import path is invalid") from exc
+    if path.is_symlink():
+        raise UniversalError("native import file must not be a symlink")
+    try:
+        resolved = path.resolve()
+        if not resolved.is_file():
+            raise UniversalError("native import file is missing")
+        if resolved.stat().st_size > 262144:
+            raise UniversalError("native import file is too large")
+        raw = resolved.read_text(encoding="utf-8")
+        payload = json.loads(raw)
+    except UniversalError:
+        raise
+    except (OSError, ValueError) as exc:
+        raise UniversalError("native import file is not valid JSON") from exc
+    if not isinstance(payload, dict):
+        raise UniversalError("native import must be a JSON object")
+    return payload
+
+
+def _reject_native_import_fields(value, path="payload"):
+    if isinstance(value, dict):
+        for key, item in value.items():
+            lowered = str(key).strip().lower()
+            if lowered in FORBIDDEN_NATIVE_FIELDS:
+                raise UniversalError(
+                    f"native import rejected {key!r} at {path}; only explicit "
+                    "user-confirmed answers may be imported, never "
+                    "recommendations or model output")
+            _reject_native_import_fields(item, f"{path}.{key}")
+    elif isinstance(value, (list, tuple)):
+        for index, item in enumerate(value):
+            _reject_native_import_fields(item, f"{path}[{index}]")
+
+
+def _bounded_text(value, field, limit, required=True):
+    if value is None and not required:
+        return ""
+    if not isinstance(value, str):
+        raise UniversalError(f"{field} must be text")
+    value = value.strip()
+    if required and not value:
+        raise UniversalError(f"{field} is required")
+    if len(value) > limit or any(ord(ch) < 32 and ch not in "\n\t" for ch in value):
+        raise UniversalError(f"{field} is not a bounded single field")
+    return value
+
+
+def _native_import_answers(payload):
+    answers = payload.get("answers")
+    decisions = payload.get("decisions")
+    if answers is not None and decisions is not None:
+        raise UniversalError("use either answers or decisions, not both")
+    rows = answers if answers is not None else decisions
+    if not isinstance(rows, list) or not rows:
+        raise UniversalError(
+            "native import needs a non-empty answers array of explicit "
+            "user-confirmed answers")
+    if len(rows) > 50:
+        raise UniversalError("native import accepts at most 50 answers")
+    normalized = []
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            raise UniversalError(f"answers[{index}] must be an object")
+        if row.get("confirmed") is not True:
+            raise UniversalError(
+                f"answers[{index}] is not explicitly user-confirmed")
+        confirmed_by = row.get("confirmed_by")
+        if not isinstance(confirmed_by, str) or confirmed_by.strip().lower() != "user":
+            raise UniversalError(
+                f"answers[{index}] confirmed_by must be 'user'")
+        topic = (row.get("topic") or row.get("question_key")
+                 or row.get("key"))
+        topic = _bounded_text(topic, f"answers[{index}].topic", 300)
+        decision = _bounded_text(row.get("decision"),
+                                 f"answers[{index}].decision", 2000)
+        rationale = _bounded_text(row.get("rationale", ""),
+                                  f"answers[{index}].rationale", 2000,
+                                  required=False)
+        alternatives = row.get("alternatives") or []
+        if not isinstance(alternatives, list) or len(alternatives) > 20:
+            raise UniversalError(
+                f"answers[{index}].alternatives must be a short array")
+        alternatives = [_bounded_text(item,
+                                      f"answers[{index}].alternatives",
+                                      1000) for item in alternatives]
+        requirements = row.get("requirements") or []
+        if not isinstance(requirements, list) or len(requirements) > 20:
+            raise UniversalError(
+                f"answers[{index}].requirements must be a short array")
+        requirements = [_bounded_text(item,
+                                      f"answers[{index}].requirements",
+                                      2000) for item in requirements]
+        normalized.append({
+            "topic": topic, "decision": decision, "rationale": rationale,
+            "alternatives": alternatives, "requirements": requirements,
+        })
+    return normalized
+
+
+def import_native_grill(args) -> dict:
+    root = _root(args.root)
+    platform = _platform(args)
+    payload = _read_native_import_file(getattr(args, "file", None))
+    _reject_native_import_fields(payload)
+    declared = payload.get("platform") or payload.get("origin_platform")
+    if declared is not None and declared != "antigravity":
+        raise UniversalError(
+            "grill import-native only imports Antigravity native interviews")
+    if platform not in ("antigravity", "unknown"):
+        raise UniversalError(
+            "grill import-native is an Antigravity native bridge; run it with "
+            "--platform antigravity")
+    if platform == "unknown" and declared != "antigravity":
+        raise UniversalError(
+            "grill import-native needs --platform antigravity or a payload "
+            "platform field of 'antigravity'")
+    platform = "antigravity"
+    answers = _native_import_answers(payload)
+    interview_ref = payload.get("interview_id")
+    if interview_ref is not None:
+        interview_ref = _bounded_text(interview_ref, "interview_id", 120)
+    source_ref = f"native:antigravity:{interview_ref or 'import'}"
+    ownership = _claim_ownership(
+        root, platform, action="import a native Antigravity interview")
+    identity = ensure_project_identity(root)
+    decisions = []
+    requirements = []
+    with ProjectMemory(root, identity=identity) as memory:
+        for answer in answers:
+            decision = memory.add_decision(
+                topic=answer["topic"], decision=answer["decision"],
+                rationale=answer["rationale"],
+                alternatives=answer["alternatives"],
+                source="user", source_ref=(
+                    f"{source_ref}:{answer['topic']}"),
+                status="confirmed", confirmed_by="user")
+            decisions.append({
+                "decision_id": decision.get("decision_id"),
+                "topic": decision.get("topic"),
+                "decision": decision.get("decision"),
+                "status": decision.get("status"),
+            })
+            for requirement_text in answer["requirements"]:
+                requirement = memory.add_requirement(
+                    requirement_text, category="confirmed",
+                    status="confirmed", source="user",
+                    source_ref=f"{source_ref}:{answer['topic']}")
+                requirements.append({
+                    "requirement_id": requirement.get("requirement_id"),
+                    "text": requirement.get("text"),
+                    "status": requirement.get("status"),
+                })
+        memory.write_context_files()
+    return _with_ownership({
+        "status": "imported",
+        "execution": "native",
+        "platform": platform,
+        "interview_id": interview_ref,
+        "source": "antigravity-native",
+        "decisions": decisions,
+        "requirements": requirements,
+        "note": ("Only explicitly user-confirmed native answers were stored. "
+                 "No recommended, model-generated or unconfirmed field was "
+                 "imported, and no native /grill-me command was replaced."),
+    }, ownership)
 
 
 def delegate(args, command):
     root = _root(args.root)
     platform = _platform(args)
+    if command in ("cancel", "resume"):
+        ownership = _claim_ownership(root, platform,
+                                     run_id=getattr(args, "run_id", None),
+                                     action=command)
+    else:
+        ownership = _ownership_status(root, platform)
     namespace = _chat_args(root, command=command, run_id=args.run_id,
                            origin_platform=platform)
-    return getattr(teamwork_chat, command)(namespace)
+    result = getattr(teamwork_chat, command)(namespace)
+    return _with_ownership(result, ownership)
+
+
+def _require_ide_platform(args):
+    platform = _platform(args)
+    if platform not in NATIVE_PLATFORMS:
+        raise UniversalError(
+            "ide commands require an explicit platform: opencode, codex, "
+            "cursor or antigravity")
+    return platform
+
+
+def _ide_result(command, platform, payload, ownership, *, read_only=False):
+    view = _owner_view(payload)
+    return {
+        "command": command,
+        "platform": platform,
+        "available": True,
+        "ok": payload.get("ok"),
+        "status": view.get("status") or payload.get("state") or "ok",
+        "state": view.get("state"),
+        "result": payload,
+        "owner": view["owner"] or ownership.get("owner"),
+        "owner_platform": (view["owner_platform"]
+                           or ownership.get("owner_platform")),
+        "owner_id": view["owner_id"] or ownership.get("owner_id"),
+        "fence": (view["fence"] if view["fence"] is not None
+                  else ownership.get("fence")),
+        "active": view["active"],
+        "foreign": bool(view["active"] and view["owner_platform"]
+                        and view["owner_platform"] != platform),
+        "credential_present": ownership.get("credential_present", False),
+        "ownership": dict(ownership, read_only=read_only),
+    }
+
+
+def _reason_text(payload):
+    return "; ".join(
+        item.get("message") or item.get("code") or str(item)
+        for item in (payload.get("reasons") or [])) or "blocked"
+
+
+def _remember_handoff_result(root, platform, payload):
+    _store_credential(root, platform, payload)
+    credential = _load_credential(root, platform)
+    if (credential and payload.get("fence") is not None
+            and credential.get("fence") != payload.get("fence")):
+        credential["fence"] = payload.get("fence")
+        atomic_write_json(_credential_path(root, platform), {
+            "version": 1, "platform": platform,
+            "owner_token": credential["owner_token"],
+            "fence": payload.get("fence"),
+            "owner_id": credential.get("owner_id"),
+            "stored_at": time.time(),
+        })
+
+
+def _resolve_handoff(args):
+    value = getattr(args, "handoff", None)
+    if not value:
+        raise UniversalError("--handoff requires a handoff id or snapshot path")
+    digest = getattr(args, "digest", None)
+    try:
+        path = Path(value)
+        if path.is_file() and not path.is_symlink():
+            snapshot = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(snapshot, dict):
+                raise UniversalError("handoff snapshot is not a JSON object")
+            return (path.stem, digest or snapshot.get("digest"))
+    except UniversalError:
+        raise
+    except (OSError, ValueError):
+        pass
+    return (value, digest)
+
+
+def ide(args) -> dict:
+    root = _root(args.root)
+    platform = _require_ide_platform(args)
+    command = args.ide_command
+    if command not in IDE_HANDOFF_COMMANDS:
+        raise UniversalError("unknown ide command")
+    module = _ide_handoff_module()
+    if module is None:
+        if command == "status":
+            return {
+                "command": command, "platform": platform,
+                "available": False, "status": "unavailable",
+                "result": None, "ownership": _ownership_status(root, platform),
+                "owner": None, "fence": None,
+                "note": "ide_handoff is not installed; no ownership state exists",
+            }
+        raise UniversalError(
+            "ide_handoff is not installed; IDE ownership and handoff commands "
+            "are unavailable")
+    if command == "status":
+        payload = _handoff_call(module, "status", root)
+        view = _owner_view(payload)
+        return _ide_result(
+            command, platform, payload,
+            dict(view, available=True, platform=platform),
+            read_only=True)
+    if command == "activate":
+        current = _owner_view(_handoff_call(module, "status", root))
+        if current["active"]:
+            if (current["owner_platform"]
+                    and current["owner_platform"] != platform):
+                raise UniversalError(
+                    f"project ownership is held by "
+                    f"{current['owner_platform']} at fence {current['fence']}")
+            return _ide_result(
+                command, platform,
+                _handoff_call(module, "status", root),
+                dict(current, available=True, platform=platform,
+                     credential_present=bool(
+                         _credential(root, platform,
+                                     getattr(args, "owner_token", None)))),
+                read_only=True)
+        payload = _handoff_call(
+            module, "activate", root, ide=platform,
+            session_id=getattr(args, "owner_id", None),
+            owner_id=getattr(args, "owner_id", None),
+            ttl=_validate_ttl(getattr(args, "ttl_seconds", None)))
+        if payload.get("ok") is False:
+            raise UniversalError(
+                f"ide_handoff.activate failed: {_reason_text(payload)}")
+        _remember_handoff_result(root, platform, payload)
+        return _ide_result(
+            command, platform, payload,
+            {"available": True, "platform": platform,
+             "owner": payload.get("owner"), "fence": payload.get("fence"),
+             "credential_present": bool(payload.get("owner_token")),
+             "claimed": True})
+    if command == "accept":
+        handoff_id, digest = _resolve_handoff(args)
+        if not isinstance(digest, str) or len(digest) != 64:
+            raise UniversalError(
+                "ide accept requires --digest or a snapshot JSON path with "
+                "a digest")
+        payload = _handoff_call(
+            module, "accept", root, handoff_id=handoff_id, digest=digest,
+            ide=platform, session_id=getattr(args, "owner_id", None))
+        if payload.get("ok") is False:
+            raise UniversalError(
+                f"ide_handoff.accept failed: {_reason_text(payload)}")
+        _remember_handoff_result(root, platform, payload)
+        status_payload = _handoff_call(module, "status", root)
+        return _ide_result(
+            command, platform, payload,
+            dict(_owner_view(status_payload), available=True,
+                 platform=platform, claimed=True,
+                 credential_present=bool(
+                     _credential(root, platform,
+                                 getattr(args, "owner_token", None)))),
+            read_only=False)
+    if command == "recover":
+        evidence = None
+        evidence_path = getattr(args, "evidence", None)
+        if evidence_path:
+            evidence = _read_evidence_file(evidence_path, "recovery evidence")
+        payload = _handoff_call(
+            module, "recover", root,
+            actor=getattr(args, "owner_id", None) or platform,
+            reason=getattr(args, "reason", None) or
+            "explicit operator recovery",
+            evidence=evidence,
+            apply=bool(getattr(args, "apply", False)),
+            discard_handoff=bool(getattr(args, "discard_handoff", False)))
+        status_payload = _handoff_call(module, "status", root)
+        return _ide_result(
+            command, platform, payload,
+            dict(_owner_view(status_payload), available=True,
+                 platform=platform), read_only=True)
+    action = f"ide {command}"
+    ownership = _claim_ownership(
+        root, platform, run_id=getattr(args, "run_id", None),
+        owner_id=getattr(args, "owner_id", None),
+        ttl_seconds=getattr(args, "ttl_seconds", None) or NATIVE_OWNER_TTL,
+        action=action,
+        owner_token=getattr(args, "owner_token", None))
+    credential = _credential(root, platform,
+                             getattr(args, "owner_token", None))
+    token = credential.get("owner_token")
+    fence = getattr(args, "fence", None)
+    if fence is None:
+        fence = credential.get("fence")
+    if fence is None:
+        fence = ownership.get("fence")
+    if not token:
+        raise UniversalError(
+            "an owner token is required for this handoff command; run "
+            "`ide activate` and keep the returned owner_token, or pass "
+            "--owner-token")
+    if type(fence) is not int:
+        raise UniversalError(
+            "a fence is required for this handoff command; pass --fence or "
+            "use the fence returned by ide activate")
+    values = {
+        "owner_token": token,
+        "fence": fence,
+        "target_ide": getattr(args, "target_platform", None),
+        "next_action": (getattr(args, "next_action", None)
+                        or getattr(args, "summary", None)),
+        "allow_dirty": bool(getattr(args, "allow_dirty", False)),
+        "confirm_idle": True if command == "prepare" else None,
+        "handoff_id": (getattr(args, "handoff", None)
+                       if command == "release" else None),
+        "reason": getattr(args, "reason", None),
+    }
+    function_name = "prepare_handoff" if command == "prepare" else command
+    payload = _handoff_call(module, function_name, root, **values)
+    if payload.get("ok") is False:
+        raise UniversalError(
+            f"ide_handoff.{function_name} failed: {_reason_text(payload)}")
+    _remember_handoff_result(root, platform, payload)
+    return _ide_result(command, platform, payload, ownership)
+
+
+def _validate_ttl(value):
+    if value is None:
+        return NATIVE_OWNER_TTL
+    if type(value) not in (int, float) or value <= 0 or value > 86400:
+        raise UniversalError("ttl_seconds must be a positive number up to 86400")
+    return int(value)
+
+
+def _read_evidence_file(path_value, label):
+    if path_value is None or path_value == "":
+        raise UniversalError(f"{label} JSON file is required")
+    if isinstance(path_value, (list, dict)):
+        return path_value
+    if isinstance(path_value, str) and path_value.lstrip().startswith(("[", "{")):
+        if len(path_value) > 262144:
+            raise UniversalError(f"{label} JSON is too large")
+        try:
+            return json.loads(path_value)
+        except ValueError as exc:
+            raise UniversalError(f"{label} JSON is invalid") from exc
+    try:
+        path = Path(path_value)
+    except (TypeError, ValueError) as exc:
+        raise UniversalError(f"{label} path is invalid") from exc
+    if path.is_symlink():
+        raise UniversalError(f"{label} file must not be a symlink")
+    try:
+        resolved = path.resolve()
+        if not resolved.is_file():
+            raise UniversalError(f"{label} file is missing")
+        if resolved.stat().st_size > 262144:
+            raise UniversalError(f"{label} file is too large")
+        return json.loads(resolved.read_text(encoding="utf-8"))
+    except UniversalError:
+        raise
+    except (OSError, ValueError) as exc:
+        raise UniversalError(f"{label} file is not valid JSON") from exc
+
+
+def _validate_native_tests(value):
+    if not isinstance(value, list):
+        raise UniversalError(
+            "tests JSON must be an array of test objects; prose is not test "
+            "evidence")
+    if len(value) > 100:
+        raise UniversalError("tests JSON accepts at most 100 entries")
+    normalized = []
+    for index, item in enumerate(value):
+        if not isinstance(item, dict):
+            raise UniversalError(
+                f"tests[{index}] must be an object; prose is not evidence")
+        name = item.get("name") or item.get("command") or item.get("test_id")
+        if not isinstance(name, str) or not name.strip():
+            raise UniversalError(f"tests[{index}] needs a name or command")
+        status = item.get("status")
+        if status not in ("passed", "failed", "skipped"):
+            raise UniversalError(
+                f"tests[{index}].status must be passed, failed or skipped")
+        if "exit_code" in item:
+            if type(item["exit_code"]) is not int:
+                raise UniversalError(
+                    f"tests[{index}].exit_code must be an integer")
+            if status == "passed" and item["exit_code"] != 0:
+                raise UniversalError(
+                    f"tests[{index}] is passed but its exit code is not 0")
+        normalized.append(dict(item))
+    return normalized
+
+
+def native_report(args) -> dict:
+    root = _root(args.root)
+    platform = _native_platform(args)
+    run_id = _run_id(getattr(args, "run_id", None) or "")
+    task_id = _run_id(getattr(args, "task_id", None) or "")
+    status = getattr(args, "status", None)
+    verdict = getattr(args, "verdict", None)
+    if status not in ("passed", "failed", "blocked"):
+        raise UniversalError("native-report status must be passed, failed or blocked")
+    if verdict not in ("passed", "failed", "needs_review"):
+        raise UniversalError(
+            "native-report verdict must be passed, failed or needs_review")
+    tests = _validate_native_tests(
+        _read_evidence_file(getattr(args, "tests", None), "tests"))
+    if status == "passed":
+        if verdict == "failed":
+            raise UniversalError(
+                "a passed native task cannot carry a failed verdict")
+        if not tests:
+            raise UniversalError(
+                "a passed native task needs non-empty tests JSON; prose is "
+                "not test evidence")
+        if any(item.get("status") != "passed" for item in tests):
+            raise UniversalError(
+                "a passed native task cannot have failing or skipped tests")
+    if status == "failed" and verdict == "passed":
+        raise UniversalError(
+            "a failed native task cannot carry a passed verdict")
+    if status == "blocked" and verdict == "passed":
+        raise UniversalError(
+            "a blocked native task cannot carry a passed verdict")
+    ownership = _claim_ownership(root, platform, run_id=run_id,
+                                 action="record a native task report")
+    try:
+        plan = teamwork_chat.load_native_plan(root, run_id)
+        # Evidence is attributed to the reporting platform, but the approved
+        # plan may be continued by a new owner after a sequential handoff.
+        approval = teamwork_chat.verify_plan_approval(root, plan, run_id)
+    except teamwork_chat.ChatError as exc:
+        raise UniversalError(str(exc)) from exc
+    tasks = [item for item in plan.get("tasks", [])
+             if isinstance(item, dict)]
+    task = next((item for item in tasks if item.get("id") == task_id), None)
+    if task is None:
+        raise UniversalError("native-report task id is not in the approved plan")
+    try:
+        state = teamwork_chat._engine_status(root, run_id)
+    except TeamworkError as exc:
+        raise UniversalError(
+            "native-plan state is not initialized; run start --plan first") from exc
+    engine_task = None
+    for milestone in state.get("milestones", []):
+        for item in milestone.get("tasks", []):
+            if item.get("id") == task_id:
+                engine_task = item
+                break
+    if engine_task is None:
+        raise UniversalError("native-report task id is not in engine state")
+    summary = getattr(args, "summary", None)
+    if summary is not None:
+        summary = _bounded_text(summary, "summary", 2000, required=False)
+    directory = teamwork_dir(root) / "native-reports"
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    report_path = (directory /
+                   f"{run_id}-{task_id}-{time.time_ns()}.json")
+    payload = {
+        "version": 1,
+        "kind": "native-report",
+        "run_id": run_id,
+        "task_id": task_id,
+        "status": status,
+        "verdict": verdict,
+        "tests": tests,
+        "summary": summary or "",
+        "platform": platform,
+        "origin_platform": platform,
+        "execution": "native",
+        "execution_provider": platform,
+        "approval": approval,
+        "plan_sha256": approval["plan_sha256"],
+        "owner": ownership.get("owner"),
+        "fence": ownership.get("fence"),
+        "engine_task_state": engine_task.get("state"),
+        "recorded_at": time.time(),
+        "native_session_id": None,
+        "verified": False,
+        "completion_recorded": False,
+        "note": ("Stored as native evidence only. This command does not mark "
+                 "the task verified, does not claim a native session id and "
+                 "does not replace Supervisor acceptance or review evidence."),
+    }
+    atomic_write_json(report_path, payload)
+    return _with_ownership({
+        "status": status,
+        "record_status": "recorded",
+        "verdict": verdict,
+        "run_id": run_id,
+        "task_id": task_id,
+        "report": str(report_path),
+        "tests_count": len(tests),
+        "verified": False,
+        "completion_recorded": False,
+        "native_session_id": None,
+        "note": payload["note"],
+    }, ownership)
 
 
 def main(argv=None) -> int:
@@ -317,6 +1321,40 @@ def main(argv=None) -> int:
                          help="explicit managed execution provider; required "
                               "to opt in from Codex/Cursor/Antigravity")
     start_p.add_argument("--max-seconds", type=float, default=7200)
+    start_p.add_argument("--native", action="store_true",
+                         help="write a native plan/engine state; never spawn "
+                              "a provider, runner or PID")
+    start_p.add_argument("--plan", metavar="RUN_ID",
+                         help="start an already approved native plan by run id")
+
+    plan_p = sub.add_parser("plan")
+    plan_source = plan_p.add_mutually_exclusive_group(required=True)
+    plan_source.add_argument("--request")
+    plan_source.add_argument("--request-file")
+    plan_source.add_argument("--request-stdin", action="store_true")
+    plan_p.add_argument("--mode", default="auto",
+                        choices=["solo", "auto", "fast", "balanced", "rigorous"])
+    plan_p.add_argument("--run-id")
+    plan_p.add_argument("--model", default=teamwork_chat.DEFAULT_MODEL)
+    plan_p.add_argument("--interview-id")
+    plan_p.add_argument("--grill-mode", default="auto",
+                        choices=["off", "auto", "required", "plan-only"])
+    plan_p.add_argument("--max-seconds", type=float, default=7200)
+
+    approve_p = sub.add_parser("approve-plan")
+    approve_p.add_argument("--run-id", required=True)
+    approve_p.add_argument("--approver", required=True)
+
+    report_p = sub.add_parser("native-report")
+    report_p.add_argument("--run-id", required=True)
+    report_p.add_argument("--task-id", required=True)
+    report_p.add_argument("--status", required=True,
+                          choices=["passed", "failed", "blocked"])
+    report_p.add_argument("--tests", required=True,
+                          help="path to a JSON array of test evidence objects")
+    report_p.add_argument("--verdict", required=True,
+                          choices=["passed", "failed", "needs_review"])
+    report_p.add_argument("--summary")
 
     context_p = sub.add_parser("context")
     context_p.add_argument("--limit", type=int, default=2400)
@@ -330,6 +1368,46 @@ def main(argv=None) -> int:
     for name in ("status", "agents", "milestones", "cancel", "resume"):
         command = sub.add_parser(name)
         command.add_argument("--run-id")
+
+    ide_p = sub.add_parser("ide")
+    ide_sub = ide_p.add_subparsers(dest="ide_command", required=True)
+    ide_status = ide_sub.add_parser("status")
+    ide_status.add_argument("--platform", default=argparse.SUPPRESS)
+    ide_activate = ide_sub.add_parser("activate")
+    ide_activate.add_argument("--run-id")
+    ide_activate.add_argument("--owner-id")
+    ide_activate.add_argument("--owner-token")
+    ide_activate.add_argument("--ttl-seconds", type=float,
+                             default=NATIVE_OWNER_TTL)
+    ide_activate.add_argument("--platform", default=argparse.SUPPRESS)
+    for name in ("heartbeat", "prepare", "accept", "release", "recover"):
+        ide_command = ide_sub.add_parser(name)
+        ide_command.add_argument("--run-id")
+        ide_command.add_argument("--owner-id")
+        ide_command.add_argument("--owner-token")
+        ide_command.add_argument("--fence", type=int)
+        ide_command.add_argument("--platform", default=argparse.SUPPRESS)
+        if name == "prepare":
+            ide_command.add_argument("--summary")
+            ide_command.add_argument("--next-action")
+            ide_command.add_argument("--target-platform", required=True,
+                                     choices=list(NATIVE_PLATFORMS))
+            ide_command.add_argument("--allow-dirty", action="store_true")
+        if name == "accept":
+            ide_command.add_argument("--handoff", required=True,
+                                     help="handoff id or snapshot JSON path")
+            ide_command.add_argument("--digest")
+        if name in ("release", "recover"):
+            ide_command.add_argument("--reason")
+        if name == "release":
+            ide_command.add_argument("--handoff")
+        if name == "recover":
+            ide_command.add_argument("--evidence")
+            ide_command.add_argument("--apply", action="store_true")
+            ide_command.add_argument(
+                "--discard-handoff", action="store_true",
+                help="abandon an unaccepted handoff so a new owner can "
+                     "activate; requires --apply and evidence")
 
     memory_p = sub.add_parser("memory")
     memory_sub = memory_p.add_subparsers(dest="memory_command", required=True)
@@ -372,12 +1450,19 @@ def main(argv=None) -> int:
         gp = grill_sub.add_parser(name)
         gp.add_argument("--question-id", required=True)
         gp.add_argument("--platform", default=argparse.SUPPRESS)
+    gi = grill_sub.add_parser("import-native")
+    gi.add_argument("--file", required=True,
+                    help="JSON export of explicitly user-confirmed Antigravity "
+                         "answers")
+    gi.add_argument("--platform", default=argparse.SUPPRESS)
 
     args = parser.parse_args(argv)
     try:
         action = {
-            "start": start, "context": context, "handoff": handoff,
-            "pause": pause, "grill": grill, "memory": memory_command,
+            "start": start, "plan": plan, "approve-plan": approve_plan,
+            "native-report": native_report, "context": context,
+            "handoff": handoff, "pause": pause, "grill": grill,
+            "memory": memory_command, "ide": ide,
             "status": lambda a: delegate(a, "status"),
             "agents": lambda a: delegate(a, "agents"),
             "milestones": lambda a: delegate(a, "milestones"),

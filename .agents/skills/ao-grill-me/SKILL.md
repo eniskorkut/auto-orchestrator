@@ -1,37 +1,63 @@
 ---
 name: ao-grill-me
-description: Non-native Auto-Orchestrator interview for Antigravity. Use only when the native /grill-me is unavailable or when the user explicitly asks for durable project memory, contracts and handoffs; the native surfaces remain authoritative.
+description: Explicit import bridge for Antigravity native Grill-Me answers. Use only after the native /grill-me interview has user-confirmed answers that must be stored in shared Auto-Orchestrator project memory; never shadows or overrides the native command.
 ---
 
-# Auto-Orchestrator interview (Antigravity, non-native)
+# Auto-Orchestrator import bridge (Antigravity)
 
-Antigravity's native `/teamwork-preview` and `/grill-me` are authoritative.
-This skill is the **ao-grill-me** layer: it stores the interview answers,
-decisions, requirements contract and handoff in the shared project memory. It
-does not shadow, replace or duplicate the native `/grill-me` command.
+Antigravity's native `/teamwork-preview` and native `/grill-me` are
+authoritative. This skill is **not** an interview UI and **not** a replacement
+for `/grill-me`. It only imports answers the user has already confirmed in the
+native interview into the same project memory.
+
+## What is imported
+
+The native export must be a JSON object with exactly the explicit user
+confirmations:
+
+```json
+{
+  "platform": "antigravity",
+  "interview_id": "optional-native-id",
+  "answers": [
+    {
+      "question_key": "auth_session",
+      "decision": "JWT",
+      "rationale": "the user selected JWT",
+      "confirmed": true,
+      "confirmed_by": "user",
+      "requirements": ["JWT access and refresh tokens"]
+    }
+  ]
+}
+```
+
+Run:
+
+```bash
+python3.11 tools/universal_teamwork.py --root . --platform antigravity \
+  grill import-native --file <native-export.json>
+```
+
+Every answer must have `confirmed: true` and `confirmed_by: "user"`. The import
+rejects unconfirmed, recommended, preselected or model-generated fields and
+never records prose as a decision. A rejected import writes nothing.
 
 ## Rules
 
-1. Prefer native `/grill-me` for the interview UI. If the user uses it, import
-   the resulting decisions into project memory rather than asking again.
-2. If native memory is unavailable, or the user explicitly asks for the
-   portable layer, run one question at a time through:
-
-   ```bash
-   python3.11 tools/universal_teamwork.py --root . --platform antigravity \
-     grill start --grill-mode auto --request-file <relative_path>
-   ```
-
-3. Never treat the recommended option as selected. Never record a
-   recommendation as a user answer.
-4. Critical skipped questions stay `unresolved_blocking` and block approval.
-5. Approval creates a digest-bound requirements contract. `not_automated`
-   criteria remain `not_verified`; they are not counted as passes.
-6. The native parent session owns subagent dispatch, sandbox and approval. Do
-   not create a second supervisor or launch another IDE's process.
-7. Report `origin_platform=antigravity`, the execution provider if one was
-   explicitly selected, and whether execution is native or managed. If unknown,
-   say unknown.
-
-Do not claim that a native session was bound, cancelled or resumed from this
-skill file.
+1. Do not ask the interview questions again in this layer. Use native
+   `/grill-me`; this bridge is for durable memory only.
+2. Do not create, rename or override a native `/grill-me` command.
+3. Do not treat a recommendation as selected. Do not import an option the user
+   did not explicitly confirm.
+4. After import, `context` shows the confirmed decisions and requirements. The
+   existing contract and approval rules still apply; a plan approval is still a
+   separate explicit `approve-plan` step.
+5. Write authority is project-scoped. Check owner/fence with `ide status`;
+   read-only context is always allowed, but a foreign owner must not be raced.
+6. The native parent session owns subagent dispatch, sandbox, approvals and
+   native session evidence. Do not create a second supervisor, start another
+   IDE or launch a foreign provider.
+7. Report `origin_platform=antigravity`, the execution provider if explicitly
+   selected, and `execution=native` or `unknown`. Never claim a native session
+   was bound, cancelled or resumed from this skill file.
