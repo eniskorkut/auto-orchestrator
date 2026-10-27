@@ -305,7 +305,7 @@ different file and are the only ones allowed to claim `live-verified`.
 | Handoff to OpenCode | ownership CLI | snapshot accepted |
 | OpenCode recovers `next_action` and writes | `opencode v2.1.1` (`--standalone --auto`) | marker from `ide status` written in 17.2 s |
 | Handoff back to Codex | ownership CLI | snapshot accepted |
-| Codex continues from the second handoff | `codex exec` | final marker written in 18.9 s |
+| Codex continues from the second handoff | `codex exec` | final marker written in 18.8 s |
 
 Evidence: `docs/assets/v78-live-handoff.json` (`mode: "live"`,
 `live_ides: ["codex", "opencode"]`). Cursor and Antigravity had no documented
