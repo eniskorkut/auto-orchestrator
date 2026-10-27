@@ -338,7 +338,7 @@ def validate_teamwork_plan(plan):
     repo_profile = plan.get("repo_profile")
     if repo_profile is not None and not isinstance(repo_profile, dict):
         raise TeamworkError("repo_profile must be an object")
-    return {
+    normalized = {
         "run_id": run_id,
         "pattern": pattern,
         "work_mode": work_mode,
@@ -349,6 +349,12 @@ def validate_teamwork_plan(plan):
         "milestones": [milestone_by_id[mid] for mid in milestone_order],
         "tasks": normalized_tasks,
     }
+    # Guard metadata is opaque to milestone coordination but must survive
+    # validation so the planner artifact, snapshot and status agree.
+    for key in ("requirements_contract", "contract_ref", "assumption_guard"):
+        if key in plan:
+            normalized[key] = plan[key]
+    return normalized
 
 
 def _canonical(value):
@@ -499,7 +505,7 @@ class TeamworkEngine:
             pass
 
     def _snapshot(self, normalized):
-        return {
+        snapshot = {
             "run_id": normalized["run_id"],
             "pattern": normalized["pattern"],
             "work_mode": normalized.get("work_mode", "legacy"),
@@ -527,6 +533,10 @@ class TeamworkEngine:
                 "department": task["department"],
             } for task_id, task in normalized["tasks"].items()],
         }
+        for key in ("requirements_contract", "contract_ref", "assumption_guard"):
+            if key in normalized:
+                snapshot[key] = normalized[key]
+        return snapshot
 
     def _load_plan_snapshot(self, run_id):
         row = self.conn.execute(
@@ -575,6 +585,34 @@ class TeamworkEngine:
     # -- initialization --------------------------------------------------
     def init(self, plan):
         normalized = validate_teamwork_plan(plan)
+        request = normalized.get("request")
+        receipt = normalized.get("assumption_guard")
+        contract = normalized.get("requirements_contract")
+        if request:
+            if receipt is not None:
+                try:
+                    try:
+                        from tools import assumption_guard
+                    except ModuleNotFoundError:
+                        import assumption_guard  # type: ignore
+                    assumption_guard.validate_receipt(self.root, request, receipt)
+                except Exception as exc:
+                    raise TeamworkError(
+                        f"Assumption Guard receipt is invalid: {exc}") from exc
+            if contract is not None:
+                try:
+                    try:
+                        from tools import requirements_contract
+                    except ModuleNotFoundError:
+                        import requirements_contract  # type: ignore
+                    requirements_contract.validate_contract(contract)
+                except Exception as exc:
+                    raise TeamworkError(
+                        f"Requirements contract is invalid: {exc}") from exc
+            if receipt is None and contract is None:
+                raise TeamworkError(
+                    "A new development plan requires an Assumption Guard receipt "
+                    "or an approved requirements contract")
         run_id = normalized["run_id"]
         snapshot = self._snapshot(normalized)
         canonical = _canonical(snapshot)
@@ -956,6 +994,9 @@ class TeamworkEngine:
         run_row = self.conn.execute(
             "SELECT max_parallel FROM runs WHERE id=?", (run_id,)).fetchone()
         return {
+            **{key: snapshot[key] for key in
+               ("requirements_contract", "contract_ref", "assumption_guard")
+               if key in snapshot},
             "run_id": run_id,
             "pattern": snapshot.get("pattern"),
             "work_mode": snapshot.get("work_mode", "legacy"),

@@ -1,4 +1,4 @@
-# Auto-Orchestrator — Native Multi-Agent Coordination (V7.6)
+# Auto-Orchestrator — Native Multi-Agent Coordination (V7.6.1)
 
 Portable, opt-in native-subagent coordination for **OpenCode**, **Codex**, **Cursor**, and **Google Antigravity**. Platform-native runtime capabilities and proof strength differ.
 
@@ -23,6 +23,10 @@ python tools/install.py --target /path/to/your/project --platform all --codex-mo
 python tools/install.py --target /path/to/your/project --platform all --codex-model luna-max
 # Preview without writing:
 python tools/install.py --target /path/to/your/project --platform all --dry-run
+python tools/install.py --target /path/to/your/project --uninstall --dry-run
+python tools/install.py --target /path/to/your/project --uninstall
+# Record normal Git commits into project memory (opt-in, preserves existing hooks)
+python tools/universal_teamwork.py --root /path/to/your/project memory install-hook
 ```
 
 Windows PowerShell:
@@ -296,6 +300,27 @@ adds a small, conservative long-tail domain ontology and
 skill selection rates. None of this proves live IDE reliability or speedup
 until matched native runs are repeated. See
 [execution reliability](docs/V64_RELIABILITY.md).
+
+## V7.6.1 — Assumption Guard, verified requirements and continuity
+
+V7.6.1 makes the guard central instead of optional:
+
+- Every new development start is preflighted against project memory and bounded
+  code/config facts. Critical ambiguity opens a persistent Grill-Me interview;
+  no plan or runner is written before approval.
+- Approval publishes a digest-bound, versioned requirements contract. Confirmed
+  decisions become acceptance criteria verified against real code/test evidence;
+  criteria without executable evidence remain `not_verified`.
+- Codex managed write mode is an explicit
+  `--provider codex --codex-sandbox workspace-write` opt-in and was exercised by
+  a real feature E2E. Approval bridging is still not implemented.
+- Memory export/import now covers handoffs, observations, interviews and
+  questions with conflict preview and transactional apply. Git post-commit
+  capture is available as an opt-in managed hook.
+- The dashboard shows stale reasons, blockers, active interview, contract
+  version, last milestone and whether a handoff has real verification evidence.
+
+See [Assumption Guard and Verified Requirements](docs/V761_ASSUMPTION_GUARD.md).
 
 ## V7.6 — Universal Teamwork, project memory and Grill-Me
 

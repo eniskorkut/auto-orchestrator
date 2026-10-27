@@ -64,6 +64,24 @@ class GlobalInstallTests(unittest.TestCase):
         txt=(self.home/'.config/opencode/plugins/auto_orchestrator.js').read_text()
         self.assertIn('AutoOrchestratorPlugin',txt)
 
+    def test_antigravity_cli_grill_skill_and_v761_modules(self):
+        source = Path(__file__).resolve().parents[1]
+        self.run_install()
+        cli_skill = (self.home/'.gemini/antigravity-cli/skills/grill-me/SKILL.md')
+        self.assertTrue(cli_skill.is_file(), str(cli_skill))
+        self.assertEqual(cli_skill.read_bytes(),
+                         (source/'.agents/skills/grill-me/SKILL.md').read_bytes())
+        tools = {
+            'codex': self.home/'.codex/auto-orchestrator/tools',
+            'opencode': self.home/'.config/opencode/auto-orchestrator/tools',
+            'antigravity': self.home/'.gemini/config/auto-orchestrator/tools',
+        }
+        for base in tools.values():
+            self.assertEqual((base/'requirements_contract.py').read_bytes(),
+                             (source/'tools/requirements_contract.py').read_bytes())
+            if (source/'tools/assumption_guard.py').is_file():
+                self.assertTrue((base/'assumption_guard.py').is_file())
+
 
     def test_global_codex_antigravity_hooks_point_at_installed_bridge(self):
         import json

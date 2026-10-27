@@ -63,8 +63,11 @@ test('project memory panel shows decisions and cross-IDE context', async ({ page
     await route.fulfill({
       json: {
         available: true, project_id: 'demo', summary: 'Confirmed project memory',
-        state: { last_platform: 'codex', stale: false },
-        decisions: [{ topic: 'auth_session', decision: 'JWT', status: 'confirmed' }],
+        state: { last_platform: 'codex', stale: true,
+                 stale_reasons: ['head_mismatch'] },
+        last_ide: 'codex', last_milestone: 'M2',
+        confirmed_decisions: [{ topic: 'auth_session', decision: 'JWT', status: 'confirmed' }],
+        derived_decisions: [{ topic: 'db', decision: 'SQLite', status: 'code_derived' }],
         requirements: [
           ...Array.from({ length: 6 }, (_, index) => ({
             text: `Resolved requirement ${index}`, status: 'confirmed',
@@ -73,10 +76,19 @@ test('project memory panel shows decisions and cross-IDE context', async ({ page
         ],
         interviews: [{ status: 'open', origin_platform: 'codex',
                        request_summary: 'login feature' }],
-        handoff: { payload: { context_summary: 'M1 passed with verified tests' } },
-        question: { question: 'How should sessions be stored?',
-                    options: [{ label: 'Secure cookie', recommended: true },
-                              { label: 'JWT', recommended: false }] },
+        active_interview: {
+          status: 'open', origin_platform: 'codex', request_summary: 'login feature',
+          question: { question: 'How should sessions be stored?',
+                      options: [{ label: 'Secure cookie', recommended: true },
+                                { label: 'JWT', recommended: false }] },
+        },
+        approved_requirements: {
+          contract_id: 'rc_aaaaaaaaaaaaaaaa', contract_version: 2,
+        },
+        handoff: { verified: false,
+                   payload: { context_summary: 'M1 passed with verified tests' } },
+        verification: { kind: 'verification', test_evidence: '11 tests passed' },
+        stale: { is_stale: true, reasons: ['head_mismatch'] },
       },
     });
   });
@@ -85,12 +97,43 @@ test('project memory panel shows decisions and cross-IDE context', async ({ page
   await page.waitForSelector('.project-memory');
   await expect(page.locator('.project-memory')).toContainText('Project memory');
   await expect(page.locator('.project-memory')).toContainText('last IDE: codex');
+  await expect(page.locator('.project-memory')).toContainText('last milestone: M2');
+  await expect(page.locator('.project-memory')).toContainText('contract v2');
   await expect(page.locator('.project-memory')).toContainText('auth_session');
   await expect(page.locator('.project-memory')).toContainText('How should sessions be stored?');
   await expect(page.locator('.project-memory')).toContainText('Use secure cookies');
   await expect(page.locator('.project-memory')).not.toContainText('Resolved requirement 0');
   await expect(page.locator('.project-memory')).toContainText('M1 passed with verified tests');
   await expect(page.locator('.project-memory')).toContainText('Secure cookie — recommended');
+  await expect(page.locator('.memory-stale')).toContainText('head_mismatch');
+  await expect(page.locator('.memory-handoff-state')).toHaveText('unverified');
+  await expect(page.locator('.memory-verification')).toContainText('11 tests passed');
+});
+
+test('project memory shows blockers and a verified handoff only when evidence exists', async ({ page }) => {
+  await page.route('**/api/projects/*/memory', async (route) => {
+    await route.fulfill({
+      json: {
+        available: true, project_id: 'demo', summary: 'Verified project memory',
+        state: { last_platform: 'opencode', stale: false },
+        last_ide: 'opencode', last_milestone: 'M3',
+        confirmed_decisions: [{ topic: 'auth_session', decision: 'JWT', status: 'confirmed' }],
+        requirements: [{ text: 'Resolved legacy item', status: 'confirmed' }],
+        blockers: [{ text: 'Rotate secrets', status: 'unresolved_blocking' }],
+        approved_requirements: { contract_version: 4 },
+        handoff: { verified: true,
+                   payload: { context_summary: 'M3 passed with tests' } },
+        stale: { is_stale: false, reasons: [] },
+      },
+    });
+  });
+  const projectId = await demoProjectId(page, DEMO.ai);
+  await page.goto(`/#/p/${projectId}/board`, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.project-memory');
+  await expect(page.locator('.project-memory')).toContainText('Rotate secrets');
+  await expect(page.locator('.project-memory')).not.toContainText('Resolved legacy item');
+  await expect(page.locator('.memory-handoff-state')).toHaveText('verified');
+  await expect(page.locator('.memory-stale')).toHaveCount(0);
 });
 
 test('office milestone strip opens the matching board milestone', async ({ page }) => {

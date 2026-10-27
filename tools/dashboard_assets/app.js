@@ -1690,35 +1690,105 @@
   function renderProjectMemory() {
     const memory = state.memory;
     if (!memory?.available) return null;
-    const decisions = (memory.decisions || []).slice(0, 5);
-    const requirements = (memory.requirements || [])
-      .filter((item) => item.status.startsWith('unresolved')).slice(0, 5);
+    const confirmed = (memory.confirmed_decisions
+      || (memory.decisions || []).filter((item) => item.status === 'confirmed')).slice(0, 5);
+    const derived = (memory.derived_decisions
+      || (memory.decisions || []).filter((item) => item.status === 'code_derived')).slice(0, 3);
+    const decisions = [...confirmed, ...derived].slice(0, 5);
+    // Filter to unresolved items before slicing, so resolved history cannot
+    // crowd the current blockers out of the bounded panel.
+    const unresolved = (memory.requirements || [])
+      .filter((item) => typeof item.status === 'string'
+        && item.status.startsWith('unresolved'));
+    const blockingFallback = unresolved
+      .filter((item) => item.status === 'unresolved_blocking');
+    const requirements = (memory.blockers?.length
+      ? memory.blockers : blockingFallback).slice(0, 5);
     const interviews = (memory.interviews || []).slice(0, 3);
+    const active = memory.active_interview || null;
+    const question = active?.question || memory.question || null;
+    const staleInfo = memory.stale || {};
+    const staleReasonList = staleInfo.reasons || memory.state?.stale_reasons || [];
+    const stale = {
+      is_stale: Boolean(staleInfo.is_stale ?? memory.state?.stale),
+      reasons: Array.isArray(staleReasonList) ? staleReasonList : [],
+    };
+    const staleReasons = stale.reasons;
+    const handoff = memory.handoff;
+    const handoffVerified = handoff?.verified === true;
+    const contract = memory.contract || memory.contract_ref
+      || memory.approved_requirements?.contract;
+    const contractVersion = memory.approved_requirements?.contract_version
+      ?? memory.approved_requirements?.version
+      ?? memory.contract_version
+      ?? contract?.contract_version
+      ?? contract?.version;
+    const lastMilestone = memory.last_milestone
+      || memory.context?.last_milestone
+      || memory.state?.last_milestone;
+    const lastIde = memory.last_ide || memory.state?.last_platform || 'unknown';
+    const verification = memory.verification || memory.context?.verification;
     return h('div', { class: 'project-memory' },
       h('div', { class: 'project-memory-head' },
         h('div', {},
           h('div', { class: 'eyebrow', text: t('memory.eyebrow') }),
           h('strong', { text: t('memory.title') }),
         ),
-        h('span', { class: 'memory-platform', text: t('memory.lastPlatform', {
-          platform: memory.state?.last_platform || 'unknown',
-        }) }),
+        h('div', { class: 'memory-meta' },
+          h('span', { class: 'memory-platform', text: t('memory.lastPlatform', {
+            platform: lastIde,
+          }) }),
+          lastMilestone
+            ? h('span', { class: 'memory-milestone', text: t('memory.lastMilestone', {
+              milestone: lastMilestone,
+            }) })
+            : null,
+          contractVersion != null
+            ? h('span', { class: 'memory-contract', text: t('memory.contract', {
+              version: contractVersion,
+            }) })
+            : null,
+        ),
       ),
-      h('pre', { class: 'memory-summary', text: (memory.summary || '').slice(0, 1600) }),
-      memory.handoff
-        ? h('div', { class: 'memory-handoff' },
-          h('span', { class: 'memory-label', text: t('memory.handoff') }),
-          h('p', { text: memory.handoff.payload?.context_summary
-            || memory.handoff.payload?.summary || t('memory.none') }),
+      stale.is_stale
+        ? h('div', { class: 'memory-stale', role: 'status' },
+          h('strong', { text: t('memory.staleTitle') }),
+          h('span', { text: t('memory.staleWarning', {
+            reasons: staleReasons.length ? staleReasons.join(', ') : t('memory.none'),
+          }) }),
         )
         : null,
-      memory.question
+      h('pre', { class: 'memory-summary', text: (memory.summary || '').slice(0, 1600) }),
+      handoff
+        ? h('div', { class: 'memory-handoff' },
+          h('div', { class: 'memory-handoff-head' },
+            h('span', { class: 'memory-label', text: t('memory.handoff') }),
+            h('span', {
+              class: `memory-handoff-state ${handoffVerified ? 'verified' : 'unverified'}`,
+              text: handoffVerified ? t('memory.handoffVerified') : t('memory.handoffUnverified'),
+            }),
+          ),
+          h('p', { text: handoff.payload?.context_summary
+            || handoff.payload?.summary || t('memory.none') }),
+        )
+        : null,
+      question
         ? h('div', { class: 'memory-question' },
           h('span', { class: 'memory-label', text: t('memory.currentQuestion') }),
-          h('strong', { text: memory.question.question }),
-          h('ul', {}, ...(memory.question.options || []).map((option) => h('li', {
+          active?.request_summary
+            ? h('span', { class: 'memory-interview-summary', text: active.request_summary })
+            : null,
+          h('strong', { text: question.question }),
+          h('ul', {}, ...(question.options || []).map((option) => h('li', {
             text: `${option.label}${option.recommended ? ' — recommended' : ''}`,
           }))),
+        )
+        : null,
+      verification
+        ? h('div', { class: 'memory-verification' },
+          h('span', { class: 'memory-label', text: t('memory.verification') }),
+          h('p', { text: verification.test_evidence
+            || verification.kind || t('memory.none') }),
         )
         : null,
       h('div', { class: 'memory-columns' },
@@ -1731,7 +1801,7 @@
             : h('p', { class: 'milestone-note', text: t('memory.none') }),
         ),
         h('div', {},
-          h('span', { class: 'memory-label', text: t('memory.openRequirements') }),
+          h('span', { class: 'memory-label', text: t('memory.blockers') }),
           requirements.length
             ? h('ul', {}, ...requirements.map((item) => h('li', { text: item.text })))
             : h('p', { class: 'milestone-note', text: t('memory.none') }),

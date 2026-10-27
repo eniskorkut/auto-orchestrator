@@ -36,6 +36,15 @@ try:
     from tools.managed_exec import ManagedError, adapter_for
     from tools.project_memory import MemoryError, ProjectMemory
     from tools.project_planner import load_plan, write_plan
+    from tools.requirements_contract import (
+        ContractError,
+        contract_blocking_requirements,
+        load_contract,
+        load_current,
+        validate_contract,
+        validate_contract_state,
+        verify_contract,
+    )
     from tools.run_owner import (
         OwnershipError,
         identity_matches,
@@ -60,6 +69,15 @@ except ModuleNotFoundError:  # python tools/teamwork_runner.py
     from managed_exec import ManagedError, adapter_for  # type: ignore
     from project_memory import MemoryError, ProjectMemory  # type: ignore
     from project_planner import load_plan, write_plan  # type: ignore
+    from requirements_contract import (  # type: ignore
+        ContractError,
+        contract_blocking_requirements,
+        load_contract,
+        load_current,
+        validate_contract,
+        validate_contract_state,
+        verify_contract,
+    )
     from run_owner import (  # type: ignore
         OwnershipError,
         identity_matches,
@@ -253,6 +271,20 @@ class TeamworkRunner:
         self.executor = Executor(self.root)
         self.memory = ProjectMemory(self.root)
         self.platform = str(plan.get("origin_platform") or "unknown")
+        raw_contract = plan.get("requirements_contract")
+        self.contract_error = None
+        try:
+            if (isinstance(raw_contract, dict)
+                    and "confirmed_decisions" not in raw_contract
+                    and raw_contract.get("contract_id")):
+                raw_contract = load_contract(
+                    self.root, raw_contract["contract_id"],
+                    raw_contract.get("contract_version"))
+            self.contract = (validate_contract(raw_contract)
+                             if isinstance(raw_contract, dict) else None)
+        except (ContractError, KeyError, TypeError) as exc:
+            self.contract = None
+            self.contract_error = str(exc)[:500]
         self.adapter = adapter
         self.adapters: dict[str, Any] = {}
         self.model = model
@@ -409,6 +441,25 @@ class TeamworkRunner:
             f"Write scope: {json.dumps(task.get('write_scope', task.get('write', [])), ensure_ascii=False)}",
             f"Verification commands: {json.dumps(task.get('verify_commands', []), ensure_ascii=False)}",
             f"Working directory: {run.workdir}",
+        ]
+        if self.contract is not None:
+            contract = self.contract
+            decisions = "; ".join(
+                f"{item['topic']}={item['decision']}"
+                for item in contract["confirmed_decisions"][:10]) or "none"
+            constraints = "; ".join(contract["constraints"][:8]) or "none"
+            criteria = "; ".join(
+                f"{item['id']}: {item['text']}"
+                for item in contract["acceptance_criteria"][:10]) or "none"
+            lines.append(
+                f"Requirements contract {contract['contract_id']} "
+                f"v{contract['contract_version']} (approved):\n"
+                f"Confirmed decisions: {decisions[:1200]}\n"
+                f"Constraints: {constraints[:1200]}\n"
+                f"Acceptance criteria: {criteria[:1600]}\n"
+                "A decision is satisfied only when real code/test evidence shows it. "
+                "Never claim an unverified decision passed.")
+        lines += [
             "Rules: work only inside this directory; never read secrets or absolute outside paths; "
             "never start other agents, push, deploy, delete the repository or force-push; "
             "do not change files outside your write scope; run the relevant tests; "
@@ -464,6 +515,60 @@ class TeamworkRunner:
         lines.append("End with a concise summary; never include secrets or the full prompt in your answer.")
         return "\n".join(lines)
 
+    def _contract_state_check(self) -> None:
+        """Fail closed if approved decisions changed before dispatch."""
+        request = self.plan.get("request")
+        receipt = self.plan.get("assumption_guard")
+        if request:
+            if receipt is not None:
+                try:
+                    try:
+                        from tools import assumption_guard
+                    except ModuleNotFoundError:
+                        import assumption_guard  # type: ignore
+                    assumption_guard.validate_receipt(self.root, request, receipt)
+                except Exception as exc:
+                    raise RunnerError(
+                        f"Assumption Guard receipt is invalid: {exc}") from exc
+            if receipt is None and self.contract is None:
+                raise RunnerError(
+                    "A new development plan requires an Assumption Guard receipt "
+                    "or an approved requirements contract")
+        if self.contract_error is not None:
+            raise RunnerError(
+                f"Requirements contract could not be loaded: {self.contract_error}")
+        if self.contract is None:
+            return
+        try:
+            validate_contract_state(self.root, self.contract)
+            current = load_current(self.root)
+            if (current is not None
+                    and current.get("contract_id") == self.contract.get("contract_id")
+                    and current.get("contract_version")
+                    != self.contract.get("contract_version")):
+                raise ContractError("a newer version of this contract exists")
+        except (ContractError, MemoryError, OSError, ValueError) as exc:
+            raise RunnerError(f"Requirements contract is stale: {exc}") from exc
+        if self.contract.get("status") != "confirmed":
+            raise RunnerError("Requirements contract is not confirmed")
+        if self.contract.get("blockers"):
+            raise RunnerError("Requirements contract still has blocking items")
+        if self.memory.project_id != self.contract.get("project_id"):
+            raise RunnerError("Requirements contract belongs to another project")
+        for item in self.contract.get("confirmed_decisions", []):
+            row = self.memory.conn.execute(
+                "SELECT status,decision FROM decisions WHERE project_id=? "
+                "AND decision_id=?",
+                (self.memory.project_id, item["decision_ref"])).fetchone()
+            if row is None or row["status"] != "confirmed":
+                raise RunnerError(
+                    "Requirements contract references a decision that is no longer confirmed")
+            if row["decision"] != item["decision"]:
+                raise RunnerError(
+                    "Requirements contract decision changed; start a new interview")
+        if contract_blocking_requirements(self.memory, self.contract):
+            raise RunnerError("Unresolved blocking requirements prevent dispatch")
+
     # -- worktrees -------------------------------------------------------
     def _worktree_for(self, task: dict) -> tuple[Path, dict | None]:
         if task["role"] != "implementer" or task.get("phase", "build") not in ("build", "repair"):
@@ -501,6 +606,12 @@ class TeamworkRunner:
             path = _safe_relative(path)
             if path == ".auto-orchestrator" or path.startswith(".auto-orchestrator/"):
                 # Local project identity, memory and run state are not task output.
+                continue
+            parts = set(path.split("/"))
+            if (parts & {"__pycache__", ".pytest_cache", ".mypy_cache",
+                         ".ruff_cache", "node_modules", ".venv", "venv"}
+                    or path.endswith((".pyc", ".pyo"))):
+                # Generated caches are not agent-authored task output.
                 continue
             changed.append(path)
         return sorted(set(changed))
@@ -1267,6 +1378,7 @@ class TeamworkRunner:
         self._wait_for_owner_record()
         self._start_heartbeat()
         self._ensure_plan_artifact()
+        self._contract_state_check()
         try:
             self.engine.init(self.plan)
         except TeamworkError as exc:
@@ -1437,19 +1549,51 @@ class TeamworkRunner:
 
     def finalize(self, state: dict, error: str | None = None,
                  forced_status: str | None = None) -> dict:
-        # Record handoffs for newly passed milestones.
-        handoffs = []
-        for milestone in state["milestones"]:
-            if milestone["status"] == "passed":
-                try:
-                    handoff = self.engine.record_handoff(self.run_id, milestone["id"])
-                    handoffs.append(handoff)
-                except TeamworkError:
-                    pass
         state = self.engine.status(self.run_id)
         status = forced_status or state["status"]
         if error and status not in ("passed", "failed", "cancelled"):
             status = "failed"
+        contract_result = None
+        if self.contract is not None:
+            tests = []
+            for milestone in state["milestones"]:
+                for task in milestone.get("tasks", []):
+                    result = task.get("result") if isinstance(task, dict) else None
+                    for item in (result or {}).get("tests", []) if isinstance(result, dict) else []:
+                        if isinstance(item, dict):
+                            tests.append({
+                                "command": str(item.get("name") or ""),
+                                "exit_code": item.get("exit_code"),
+                                "status": item.get("status"),
+                            })
+            try:
+                contract_result = verify_contract(
+                    self.root, self.contract, test_results=tests)
+            except (ContractError, MemoryError, OSError, ValueError) as exc:
+                contract_result = {
+                    "ok": False, "status": "failed", "checks": [],
+                    "reasons": [str(exc)[:500]],
+                    "contract_id": self.contract["contract_id"],
+                    "contract_version": self.contract["contract_version"],
+                }
+            if not contract_result.get("ok") and status == "passed":
+                status = "failed"
+                error = ((error + "; ") if error else "") + (
+                    "Verified requirements contract failed: "
+                    + "; ".join(str(item) for item in contract_result.get("reasons", []))[:1500]
+                )
+            self._write_evidence("contract-verification", 0, contract_result)
+        # Record handoffs only when the contract gate did not reject the run.
+        handoffs = []
+        if status != "failed":
+            for milestone in state["milestones"]:
+                if milestone["status"] == "passed":
+                    try:
+                        handoff = self.engine.record_handoff(self.run_id, milestone["id"])
+                        handoffs.append(handoff)
+                    except TeamworkError:
+                        pass
+            state = self.engine.status(self.run_id)
         summary = {
             "run_id": self.run_id, "status": status,
             "work_mode": state.get("work_mode"),
@@ -1461,6 +1605,9 @@ class TeamworkRunner:
             "managed_sessions": state.get("managed_sessions", []),
             "timings": self.timings,
             "handoffs": handoffs,
+            "requirements_contract": contract_result,
+            "quality_gate": ({"contract": contract_result}
+                             if contract_result is not None else None),
             "error": error,
         }
         summary["recovered_orphans"] = list(self._recovered)

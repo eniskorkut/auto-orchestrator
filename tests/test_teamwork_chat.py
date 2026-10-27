@@ -130,6 +130,8 @@ class ChatBridgeTests(unittest.TestCase):
         self.assertEqual(result["status"], "resumed")
         self.assertFalse(cancel.exists())
         self.assertTrue(calls[0]["recover"])
+        self.assertIsNone(result["requirements_contract"])
+        self.assertEqual(result["contract_status"], "absent")
 
     def test_status_with_explicit_run_does_not_leak_other_active_owner(self):
         from tools.run_owner import read_process_identity
@@ -228,6 +230,11 @@ class ChatSecurityTests(unittest.TestCase):
             "run_id": "secure-run",
             "model": "fake-model",
             "max_seconds": 30,
+            "origin_platform": "opencode",
+            "provider": "opencode",
+            "interview_id": None,
+            "grill_mode": "auto",
+            "guard_receipt": None,
         }
         values.update(overrides)
         return argparse.Namespace(**values)
@@ -268,7 +275,7 @@ class ChatSecurityTests(unittest.TestCase):
     def test_stdin_request_preserves_unicode_and_json(self):
         import io
         import sys
-        request = '{"task": "öğrenci — login", "note": "```json\\n{}\n```; $(noop)"}'
+        request = '{"task": "öğrenci — parser", "note": "```json\\n{}\n```; $(noop)"}'
         original = sys.stdin
         sys.stdin = io.StringIO(request)
         try:
@@ -407,3 +414,122 @@ class ChatSecurityTests(unittest.TestCase):
                                                  run_id=None))
         self.assertEqual(resumed["status"], "already_running")
         self.assertTrue(resumed["heartbeat_stale"])
+
+    def test_guard_refuses_direct_chat_before_writing_artifacts(self):
+        with self.assertRaises(chat.ChatError) as raised:
+            chat.start(self._start_args(
+                request="Dosya paylaşım sistemi ekle"))
+        error = raised.exception
+        self.assertEqual(error.question["question_key"], "file_access")
+        self.assertTrue(error.interview_id.startswith("iv_"))
+        self.assertEqual(self.spawn_calls, [])
+        self.assertFalse((self.root / ".auto-orchestrator" / "plans").exists())
+        self.assertFalse((self.root / ".auto-orchestrator" / "teamwork" /
+                          "active.json").exists())
+
+    def test_approved_interview_attaches_contract_and_guard_receipt(self):
+        from tools.grill_me import GrillMeEngine
+
+        request = "Kullanıcı giriş sistemini geliştir"
+        with GrillMeEngine(self.root) as engine:
+            started = engine.start(request, origin_platform="opencode",
+                                   mode="auto")
+            nxt = engine.answer(started["question"]["question_id"],
+                                option="jwt")["next"]
+            engine.answer(nxt["question_id"], option="refresh")
+            approved = engine.approve()
+        result = chat.start(self._start_args(
+            request=request, run_id="approved-run",
+            interview_id=approved["interview_id"]))
+        self.assertEqual(result["status"], "started")
+        self.assertEqual(result["contract_status"], "confirmed")
+        self.assertEqual(result["requirements_contract"]["contract_id"],
+                         approved["requirements_contract"]["contract_id"])
+        plan = json.loads(Path(result["plan"]).read_text(encoding="utf-8"))
+        self.assertEqual(plan["assumption_guard"]["status"], "allowed")
+        self.assertEqual(plan["assumption_guard"]["interview_id"],
+                         approved["interview_id"])
+        self.assertEqual(plan["guard_receipt"],
+                         plan["assumption_guard"])
+        self.assertEqual(plan["requirements_contract"]["sha256"],
+                         approved["requirements_contract"]["sha256"])
+
+    def test_start_reuses_an_approved_contract_by_request_hash(self):
+        from tools.grill_me import GrillMeEngine
+
+        request = "Kullanıcı giriş sistemini geliştir"
+        with GrillMeEngine(self.root) as engine:
+            started = engine.start(request, origin_platform="opencode",
+                                   mode="auto")
+            nxt = engine.answer(started["question"]["question_id"],
+                                option="jwt")["next"]
+            engine.answer(nxt["question_id"], option="refresh")
+            approved = engine.approve()
+        result = chat.start(self._start_args(
+            request=request, run_id="auto-contract-run", interview_id=None))
+        self.assertEqual(result["contract_status"], "confirmed")
+        self.assertEqual(result["requirements_contract"]["contract_id"],
+                         approved["requirements_contract"]["contract_id"])
+
+    def test_approved_interview_rejects_a_different_request(self):
+        from tools.grill_me import GrillMeEngine
+
+        request = "Kullanıcı giriş sistemini geliştir"
+        with GrillMeEngine(self.root) as engine:
+            started = engine.start(request, origin_platform="opencode",
+                                   mode="auto")
+            nxt = engine.answer(started["question"]["question_id"],
+                                option="jwt")["next"]
+            engine.answer(nxt["question_id"], option="refresh")
+            approved = engine.approve()
+        with self.assertRaises(chat.ChatError):
+            chat.start(self._start_args(
+                request="Başka bir görev", run_id="wrong-request",
+                interview_id=approved["interview_id"]))
+        self.assertEqual(self.spawn_calls, [])
+        self.assertFalse((self.root / ".auto-orchestrator" / "plans"
+                          / "wrong-request.json").exists())
+
+    def test_resume_refuses_a_stale_contract(self):
+        from tools.grill_me import GrillMeEngine
+
+        request = "Kullanıcı giriş sistemini geliştir"
+        with GrillMeEngine(self.root) as engine:
+            started = engine.start(request, origin_platform="opencode",
+                                   mode="auto")
+            nxt = engine.answer(started["question"]["question_id"],
+                                option="jwt")["next"]
+            engine.answer(nxt["question_id"], option="refresh")
+            approved = engine.approve()
+        plan = minimal_plan("secure-run")
+        plan["requirements_contract"] = {
+            key: approved["requirements_contract"][key]
+            for key in ("contract_id", "contract_version", "sha256",
+                        "interview_id", "source", "status")}
+        plan_path = self.root / ".auto-orchestrator" / "plans" / "secure-run.json"
+        plan_path.parent.mkdir(parents=True, exist_ok=True)
+        plan_path.write_text(json.dumps(plan), encoding="utf-8")
+        engine = TeamworkEngine(self.root)
+        try:
+            engine.init(minimal_plan("secure-run"))
+        finally:
+            engine.close()
+        active = {
+            "version": 2, "run_id": "secure-run", "mode": "fast",
+            "plan": str(plan_path), "log": "log", "model": None,
+            "owner": {"pid": 999999, "start_token": "dead", "uid": None,
+                      "host": "test"},
+            "pid": 999999, "heartbeat_at": 0,
+        }
+        active_path = self.root / ".auto-orchestrator" / "teamwork" / "active.json"
+        active_path.write_text(json.dumps(active), encoding="utf-8")
+        contract_path = (self.root / ".auto-orchestrator" / "contracts" /
+                         f"{approved['requirements_contract']['contract_id']}"
+                         f"-v{approved['requirements_contract']['contract_version']}.json")
+        contract = json.loads(contract_path.read_text(encoding="utf-8"))
+        contract["status"] = "superseded"
+        contract_path.write_text(json.dumps(contract), encoding="utf-8")
+        with self.assertRaises(chat.ChatError) as raised:
+            chat.resume(argparse.Namespace(root=str(self.root), run_id=None))
+        self.assertIn("contract", str(raised.exception))
+        self.assertEqual(self.spawn_calls, [])

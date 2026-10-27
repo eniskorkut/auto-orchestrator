@@ -317,6 +317,24 @@ class RunnerExecutionTests(unittest.TestCase):
         self.assertTrue(any(item.get("tool_count") == 1
                             for item in state["managed_sessions"]))
 
+    def test_generated_caches_are_not_scoped_as_agent_changes(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            git(root, "init")
+            git(root, "config", "user.email", "t@example.invalid")
+            git(root, "config", "user.name", "T")
+            (root / "README.md").write_text("base\n", encoding="utf-8")
+            git(root, "add", ".")
+            git(root, "commit", "-m", "base")
+            (root / "__pycache__").mkdir()
+            (root / "__pycache__" / "x.cpython-311.pyc").write_bytes(b"x")
+            runner = TeamworkRunner(root, plan(run_id="cache-test"),
+                                    adapter=FakeAdapter(), max_seconds=10)
+            try:
+                self.assertEqual(runner._changed_files(root), [])
+            finally:
+                runner.close()
+
     def test_out_of_scope_edit_fails_without_completing(self):
         adapter = FakeAdapter(outside_scope=True)
         runner = TeamworkRunner(self.root, plan(run_id="scope-test"), adapter=adapter,

@@ -1575,63 +1575,103 @@ class Catalog:
         runs["demo"] = False
         return runs
 
+    @staticmethod
+    def _empty_memory(project_id: str, summary: str, **extra) -> dict:
+        return {
+            "available": False, "project_id": project_id, "summary": summary,
+            "decisions": [], "confirmed_decisions": [],
+            "derived_decisions": [], "requirements": [], "blockers": [],
+            "approved_requirements": {"requirements": [], "contract": None,
+                                      "contract_ref": None, "contract_id": None,
+                                      "contract_version": None, "version": None},
+            "contract_ref": None, "contract_id": None,
+            "contract_version": None,
+            "active_interview": None, "question": None, "interviews": [],
+            "handoff": None, "last_ide": None, "last_milestone": None,
+            "stale": {"is_stale": False, "reasons": []},
+            "verification": None, "context": None, "state": {}, **extra,
+        }
+
     def memory(self, project_id: str) -> dict:
         entry = self._entry(project_id)
         if entry.store.demo:
-            return {
-                "available": False, "demo": True, "project_id": project_id,
-                "summary": "Demo project memory is not generated.",
-                "decisions": [], "requirements": [], "handoff": None,
-                "state": {"last_platform": "demo", "stale": False},
-            }
+            return self._empty_memory(
+                project_id, "Demo project memory is not generated.",
+                demo=True, state={"last_platform": "demo", "stale": False},
+                last_ide="demo")
         root = Path(entry.store.root)
         if ProjectMemory is None or not (
                 root / ".auto-orchestrator" / "memory.sqlite3").is_file():
-            return {"available": False, "project_id": project_id,
-                    "summary": "No project memory has been recorded yet.",
-                    "decisions": [], "requirements": [], "handoff": None,
-                    "state": {}}
+            return self._empty_memory(project_id,
+                                      "No project memory has been recorded yet.")
         identity = read_project_identity(root) if read_project_identity else None
         if identity is None:
-            return {"available": False, "project_id": project_id,
-                    "summary": "No portable project identity was found.",
-                    "decisions": [], "requirements": [], "handoff": None,
-                    "state": {}}
+            return self._empty_memory(project_id,
+                                      "No portable project identity was found.")
         try:
             with ProjectMemory(root, identity=identity) as memory:
+                state = memory.context_state()
+                bundle = memory.context_bundle(limit=8)
+                decisions = memory.list_decisions(limit=50)
+                requirements = memory.list_requirements(limit=100)
+                blockers = [item for item in requirements
+                            if item.get("status") == "unresolved_blocking"]
+                approved = [item for item in requirements
+                            if item.get("status") in ("confirmed",
+                                                      "doc_constraint")]
+                contract = memory.contract_ref()
+                active = memory.active_interview()
+                handoff = memory.handoff_view(memory.latest_handoff())
                 interviews = []
                 for row in memory.conn.execute(
                         "SELECT interview_id,origin_platform,status,request_summary,"
                         "mode,updated_at FROM interviews WHERE project_id=? "
                         "ORDER BY updated_at DESC LIMIT 5", (memory.project_id,)):
                     interviews.append(dict(row))
-                question = None
-                row = memory.conn.execute(
-                    "SELECT q.* FROM interview_questions q JOIN interviews i "
-                    "ON i.interview_id=q.interview_id WHERE i.project_id=? "
-                    "AND q.status='open' ORDER BY q.ordinal LIMIT 1",
-                    (memory.project_id,)).fetchone()
-                if row is not None:
-                    question = dict(row)
-                    try:
-                        question["options"] = json.loads(question.get("options") or "[]")
-                    except ValueError:
-                        question["options"] = []
+                question = active.get("question") if active else None
+                approved_requirements = {
+                    "requirements": approved,
+                    "contract": contract,
+                    "contract_ref": contract,
+                    "contract_id": (contract or {}).get("contract_id"),
+                    "contract_version": (contract or {}).get("contract_version"),
+                    "version": (contract or {}).get("contract_version"),
+                }
                 return {
                     "available": True, "project_id": memory.project_id,
                     "summary": memory.context_summary(limit=2400),
-                    "state": memory.context_state(),
-                    "decisions": memory.list_decisions(limit=50),
-                    "requirements": memory.list_requirements(limit=50),
-                    "handoff": memory.latest_handoff(),
+                    "state": state,
+                    "decisions": decisions,
+                    "confirmed_decisions": [
+                        item for item in decisions
+                        if item.get("status") == "confirmed"],
+                    "derived_decisions": [
+                        item for item in decisions
+                        if item.get("status") == "code_derived"],
+                    "requirements": requirements,
+                    "blockers": blockers,
+                    "approved_requirements": approved_requirements,
+                    "active_interview": active,
                     "interviews": interviews,
                     "question": question,
+                    "handoff": handoff,
+                    "last_ide": (state.get("last_platform")
+                                 or (handoff or {}).get("platform")),
+                    "last_milestone": (state.get("last_milestone")
+                                       or bundle.get("last_milestone")),
+                    "stale": {"is_stale": bool(state.get("stale")),
+                              "reasons": list(state.get("stale_reasons") or [])},
+                    "verification": bundle.get("verification"),
+                    "contract": contract,
+                    "contract_ref": contract,
+                    "contract_id": (contract or {}).get("contract_id"),
+                    "contract_version": (contract or {}).get("contract_version"),
+                    "context": bundle,
                 }
         except (OSError, ValueError, sqlite3.Error) as exc:
-            return {"available": False, "project_id": project_id,
-                    "summary": "Project memory could not be read.",
-                    "error": str(exc)[:300], "decisions": [],
-                    "requirements": [], "handoff": None, "state": {}}
+            return self._empty_memory(
+                project_id, "Project memory could not be read.",
+                error=str(exc)[:300])
 
     def milestones(self, project_id: str, run_id: str | None = None) -> dict:
         entry = self._entry(project_id)

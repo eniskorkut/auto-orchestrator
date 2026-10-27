@@ -25,8 +25,19 @@ import time
 from pathlib import Path
 
 try:
+    from tools import assumption_guard
     from tools.project_identity import ensure_project_identity
+    from tools.project_memory import MemoryError, ProjectMemory
     from tools.repo_profile import RepoProfileError, profile_repository
+    from tools.requirements_contract import (
+        ContractError as RequirementsContractError,
+        build_from_interview,
+        load_contract,
+        load_current,
+        contract_blocking_requirements,
+        validate_contract,
+        validate_contract_state,
+    )
     from tools.run_owner import (
         OwnershipError,
         atomic_write_json,
@@ -45,8 +56,19 @@ try:
     from tools.teamwork import TeamworkEngine, TeamworkError
     from tools.teamwork_planner import TeamworkPlannerError, plan_request
 except ModuleNotFoundError:  # python tools/teamwork_chat.py
+    import assumption_guard  # type: ignore
     from project_identity import ensure_project_identity  # type: ignore
+    from project_memory import MemoryError, ProjectMemory  # type: ignore
     from repo_profile import RepoProfileError, profile_repository  # type: ignore
+    from requirements_contract import (  # type: ignore
+        ContractError as RequirementsContractError,
+        build_from_interview,
+        load_contract,
+        load_current,
+        contract_blocking_requirements,
+        validate_contract,
+        validate_contract_state,
+    )
     from run_owner import (  # type: ignore
         OwnershipError,
         atomic_write_json,
@@ -351,6 +373,168 @@ def request_path(args) -> dict:
     }
 
 
+def _contract_ref(contract: dict) -> dict:
+    return {
+        "contract_id": contract["contract_id"],
+        "contract_version": contract["contract_version"],
+        "sha256": contract["sha256"],
+        "interview_id": contract.get("interview_id"),
+        "source": contract.get("source"),
+        "status": contract.get("status"),
+    }
+
+
+def _guard(root: Path, request: str, args) -> dict:
+    try:
+        return assumption_guard.evaluate(
+            root, request,
+            platform=getattr(args, "origin_platform", "unknown") or "unknown",
+            mode=getattr(args, "grill_mode", "auto") or "auto",
+            interview_id=getattr(args, "interview_id", None))
+    except assumption_guard.AssumptionGuardError as exc:
+        raise ChatError(str(exc)) from exc
+
+
+def _start_contract(root: Path, interview_id: str) -> dict:
+    try:
+        current = load_current(root)
+        if (current is not None
+                and current.get("interview_id") == interview_id
+                and current.get("status") == "confirmed"):
+            return current
+        try:
+            return build_from_interview(root, interview_id)
+        except RequirementsContractError:
+            return assumption_guard.build_requirements_contract(
+                root, interview_id)
+    except (RequirementsContractError, KeyError, TypeError, ValueError) as exc:
+        raise ChatError(f"requirements contract is invalid: {exc}") from exc
+
+
+def _approved_interview_for_request(root, request):
+    """Find an approved interview whose request hash matches this exact text."""
+    digest = hashlib.sha256(request.encode("utf-8")).hexdigest()
+    try:
+        with ProjectMemory(root) as memory:
+            row = memory.conn.execute(
+                "SELECT interview_id FROM interviews WHERE project_id=? AND "
+                "request_hash=? AND status='approved' ORDER BY updated_at DESC "
+                "LIMIT 1", (memory.project_id, digest)).fetchone()
+            return row["interview_id"] if row is not None else None
+    except (MemoryError, OSError, ValueError):
+        return None
+
+
+def _plan_with_contract(request: str, *, contract: dict | None, **kwargs) -> dict:
+    """Pass the contract to the planner when it supports it, then attach a ref."""
+    import inspect
+
+    parameters = {}
+    try:
+        parameters = inspect.signature(plan_request).parameters
+    except (TypeError, ValueError):
+        parameters = {}
+    accepts = ("requirements_contract" in parameters
+               or any(parameter.kind is inspect.Parameter.VAR_KEYWORD
+                      for parameter in parameters.values()))
+    if contract is not None and accepts:
+        kwargs["requirements_contract"] = contract
+    plan = plan_request(request, **kwargs)
+    attached = plan.get("requirements_contract")
+    if contract is not None:
+        if not (isinstance(attached, dict)
+                and "confirmed_decisions" in attached):
+            plan["requirements_contract"] = _contract_ref(contract)
+    else:
+        plan.setdefault("requirements_contract", None)
+    return plan
+
+
+def _plan_contract(root: Path, plan: dict) -> dict | None:
+    """Load and verify a plan's contract; reject stale or invalid contracts."""
+    reference = plan.get("requirements_contract")
+    if not reference:
+        if plan.get("request"):
+            receipt = plan.get("assumption_guard")
+            if not receipt:
+                raise ChatError(
+                    "legacy plan has no Assumption Guard receipt; start a new run")
+            try:
+                assumption_guard.validate_receipt(
+                    root, plan["request"], receipt)
+            except assumption_guard.AssumptionGuardError as exc:
+                raise ChatError(
+                    f"plan Assumption Guard receipt is stale: {exc}") from exc
+        return None
+    if not isinstance(reference, dict):
+        raise ChatError("plan requirements contract reference is invalid")
+    try:
+        if "confirmed_decisions" in reference:
+            contract = validate_contract(reference)
+        else:
+            contract = load_contract(
+                root, str(reference.get("contract_id")),
+                int(reference.get("contract_version")))
+        contract = validate_contract(contract)
+    except (RequirementsContractError, KeyError, TypeError, ValueError) as exc:
+        raise ChatError(
+            "plan requirements contract is missing, stale or invalid") from exc
+    if contract.get("status") != "confirmed":
+        raise ChatError("plan requirements contract is stale or invalid")
+    if reference.get("status") not in (None, "confirmed"):
+        raise ChatError("plan requirements contract reference is stale")
+    if contract.get("blockers"):
+        raise ChatError("plan requirements contract has unresolved blockers")
+    expected = reference.get("sha256")
+    if expected is not None and contract.get("sha256") != expected:
+        raise ChatError("plan requirements contract digest does not match")
+    if (reference.get("interview_id") is not None
+            and contract.get("interview_id") != reference.get("interview_id")):
+        raise ChatError("plan requirements contract belongs to another interview")
+    identity = ensure_project_identity(root)
+    if contract.get("project_id") != identity["project_id"]:
+        raise ChatError("plan requirements contract belongs to another project")
+    try:
+        current = load_current(root)
+    except RequirementsContractError as exc:
+        raise ChatError(
+            "plan requirements contract pointer is invalid or stale") from exc
+    if current is not None and current.get("contract_id") == contract.get("contract_id"):
+        # A newer version of *this* contract supersedes the plan. A contract
+        # for a different interview/feature does not invalidate this run.
+        if current.get("contract_version") != contract.get("contract_version"):
+            raise ChatError("plan requirements contract has been superseded")
+    try:
+        with ProjectMemory(root) as memory:
+            if contract.get("interview_id"):
+                interview = memory.conn.execute(
+                    "SELECT status FROM interviews WHERE project_id=? "
+                    "AND interview_id=?",
+                    (memory.project_id, contract["interview_id"])).fetchone()
+                if interview is None or interview["status"] != "approved":
+                    raise ChatError(
+                        "plan requirements contract is stale: its interview "
+                        "is no longer approved")
+            decisions = {item["decision_id"]: item
+                         for item in memory.list_decisions(limit=500)}
+            for decision in contract.get("confirmed_decisions", []):
+                live = decisions.get(decision["decision_ref"])
+                if (live is None or live.get("status") != "confirmed"
+                        or live.get("decision") != decision.get("decision")):
+                    raise ChatError(
+                        "plan requirements contract is stale: a confirmed "
+                        "decision changed or was superseded")
+            if contract_blocking_requirements(memory, contract):
+                raise ChatError(
+                    "plan requirements contract is stale: unresolved blocking "
+                    "requirements exist")
+    except ChatError:
+        raise
+    except (MemoryError, ValueError) as exc:
+        raise ChatError("plan requirements contract could not be verified") from exc
+    return contract
+
+
 def start(args) -> dict:
     root = _root(args.root)
     _require_repository(root)
@@ -385,7 +569,32 @@ def start(args) -> dict:
                     "use resume instead of starting a duplicate"
                 )
         provider = getattr(args, "provider", None)
+        codex_sandbox = getattr(args, "codex_sandbox", "read-only")
         platform = getattr(args, "origin_platform", "unknown") or "unknown"
+        request = _request_text(root, args)
+        guard = _guard(root, request, args)
+        if guard["status"] != "allowed":
+            question = guard.get("question") or {}
+            reasons = "; ".join(guard.get("reasons") or [])
+            detail = question.get("question") or reasons or "critical ambiguity"
+            error = ChatError(
+                "assumption guard requires an approved Grill-Me interview "
+                f"before a plan can be written: {detail} "
+                f"(interview_id={guard.get('interview_id')})")
+            error.guard = guard
+            error.interview = guard.get("interview")
+            error.question = guard.get("question")
+            error.reasons = guard.get("reasons") or []
+            error.interview_id = guard.get("interview_id")
+            raise error
+        received_receipt = getattr(args, "guard_receipt", None)
+        receipt = (received_receipt
+                   if isinstance(received_receipt, dict)
+                   and received_receipt.get("request_hash") == guard["request_hash"]
+                   and received_receipt.get("status") == "allowed"
+                   else guard["receipt"])
+        if codex_sandbox not in ("read-only", "workspace-write"):
+            raise ChatError("codex_sandbox must be read-only or workspace-write")
         if provider is None:
             if platform in ("codex", "cursor", "antigravity"):
                 raise ChatError(
@@ -396,21 +605,30 @@ def start(args) -> dict:
             provider = "opencode"
         if provider not in ("opencode", "codex"):
             raise ChatError("provider must be opencode or codex")
-        request = _request_text(root, args)
         plan_path = _plan_path(root, run_id)
         if plan_path.exists():
             raise ChatError("run id already exists; choose another --run-id")
+        interview_id = getattr(args, "interview_id", None)
+        if not interview_id:
+            interview_id = _approved_interview_for_request(root, request)
+        contract = _start_contract(root, interview_id) if interview_id else None
         identity = ensure_project_identity(root)
         profile = profile_repository(root)
         try:
-            plan = plan_request(request, run_id=run_id, model=model,
-                                mode=mode, repo_profile=profile,
-                                project_id=identity["project_id"],
-                                provider=provider)
+            plan = _plan_with_contract(
+                request, contract=contract, run_id=run_id, model=model,
+                mode=mode, repo_profile=profile,
+                project_id=identity["project_id"], provider=provider,
+                codex_sandbox=codex_sandbox)
         except (TeamworkPlannerError, ValueError) as exc:
             raise ChatError(str(exc)) from exc
         plan["origin_platform"] = platform
         plan["execution_provider"] = provider
+        plan["assumption_guard"] = receipt
+        plan["guard_receipt"] = receipt
+        plan_only = getattr(args, "grill_mode", "auto") == "plan-only"
+        if plan_only:
+            plan["plan_only"] = True
         plan_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         _write_json(plan_path, plan)
         engine = TeamworkEngine(root)
@@ -418,6 +636,16 @@ def start(args) -> dict:
             engine.init(plan)
         finally:
             engine.close()
+        if plan_only:
+            return {
+                "status": "planned", "run_id": run_id,
+                "mode": plan["work_mode"], "plan": str(plan_path),
+                "plan_only": True, "execution_provider": provider,
+                "platform": platform,
+                "assumption_guard": receipt,
+                "requirements_contract": plan.get("requirements_contract"),
+                "note": "plan-only produced a verified plan but started no agent code.",
+            }
         log = _state_path(root, f"{run_id}.log")
         process = _spawn(root, log, plan_path, recover=False,
                          owner_token=token, model=model,
@@ -438,6 +666,10 @@ def start(args) -> dict:
         "risk_assessment": plan.get("risk_assessment"),
         "child_sessions": f"separate managed {provider} sessions",
         "execution_provider": provider,
+        "assumption_guard": receipt,
+        "requirements_contract": plan.get("requirements_contract"),
+        "contract_status": ("confirmed" if plan.get("requirements_contract")
+                            else "absent"),
         "note": "Use status/agents/milestones; cancel is a local signal only.",
     }
 
@@ -633,6 +865,7 @@ def resume(args) -> dict:
             return {"run_id": run_id, "status": "already_terminal",
                     "run_status": state.get("status"),
                     "note": "successful or cancelled runs are not restarted"}
+        contract = _plan_contract(root, plan)
         try:
             _state_path(root, f"cancel-{run_id}.json").unlink()
         except FileNotFoundError:
@@ -659,6 +892,11 @@ def resume(args) -> dict:
             "pid": updated["owner"]["pid"], "owner_verified": True,
             "log": str(log), "recover": True,
             "recovery_state": "resuming",
+            "assumption_guard": plan.get("assumption_guard"),
+            "requirements_contract": (_contract_ref(contract)
+                                      if contract is not None else None),
+            "contract_status": ("confirmed" if contract is not None
+                                else "absent"),
             "native_cancel_ack": False, "local_signal_only": True}
 
 
@@ -676,6 +914,12 @@ def main(argv=None) -> int:
     start_p.add_argument("--run-id")
     start_p.add_argument("--model", default=DEFAULT_MODEL)
     start_p.add_argument("--provider", choices=["opencode", "codex"])
+    start_p.add_argument("--codex-sandbox",
+                         choices=["read-only", "workspace-write"],
+                         default="read-only")
+    start_p.add_argument("--interview-id")
+    start_p.add_argument("--grill-mode", default="auto",
+                         choices=["off", "auto", "required", "plan-only"])
     start_p.add_argument("--max-seconds", type=float, default=7200)
     sub.add_parser("request-path")
     for name in ("status", "agents", "milestones", "cancel", "resume"):

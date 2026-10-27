@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -58,6 +59,8 @@ class UniversalTeamworkTests(unittest.TestCase):
         def fake_start(args):
             captured["request"] = args.request
             captured["provider"] = args.provider
+            captured["interview_id"] = args.interview_id
+            captured["guard_receipt"] = args.guard_receipt
             return {"status": "started", "run_id": "fake"}
         with mock.patch.object(universal.teamwork_chat, "start", fake_start):
             result = universal.start(self._args(
@@ -68,6 +71,10 @@ class UniversalTeamworkTests(unittest.TestCase):
         self.assertEqual(result["status"], "started")
         self.assertEqual(captured["request"], request)
         self.assertEqual(captured["provider"], "opencode")
+        self.assertEqual(captured["interview_id"], approved["interview_id"])
+        self.assertEqual(captured["guard_receipt"]["status"], "allowed")
+        self.assertEqual(captured["guard_receipt"]["interview_id"],
+                         approved["interview_id"])
 
     def test_approved_interview_rejects_a_different_request(self):
         from tools.grill_me import GrillMeEngine
@@ -84,11 +91,100 @@ class UniversalTeamworkTests(unittest.TestCase):
                 max_seconds=10, grill=False, grill_mode="auto",
                 provider="opencode", interview_id=approved["interview_id"]))
 
+    def test_ambiguous_start_returns_interview_without_starting_code(self):
+        (self.root / ".git").mkdir()
+        with mock.patch.object(universal.teamwork_chat, "start") as start:
+            result = universal.start(self._args(
+                request="Çok kullanıcılı dosya paylaşım sistemi ekle",
+                request_file=None, request_stdin=False, mode="auto",
+                run_id=None, model=None, max_seconds=10, grill=False,
+                grill_mode="auto", provider=None, interview_id=None))
+        start.assert_not_called()
+        self.assertEqual(result["status"], "interview_required")
+        self.assertEqual(result["question"]["question_key"], "file_access")
+        self.assertTrue(result["interview"]["interview_id"].startswith("iv_"))
+        self.assertEqual(result["assumption_guard"]["status"],
+                         "interview_required")
+        self.assertFalse((self.root / ".auto-orchestrator" / "plans").exists())
+        self.assertFalse((self.root / ".auto-orchestrator" / "teamwork" /
+                          "active.json").exists())
+
+    def test_clear_start_passes_guard_receipt_to_chat(self):
+        captured = {}
+
+        def fake_start(args):
+            captured["guard_receipt"] = args.guard_receipt
+            captured["interview_id"] = args.interview_id
+            return {"status": "started", "run_id": "fake"}
+
+        with mock.patch.object(universal.teamwork_chat, "start", fake_start):
+            result = universal.start(self._args(
+                request="Küçük bir metin düzeltmesi yap", request_file=None,
+                request_stdin=False, mode="auto", run_id=None, model=None,
+                max_seconds=10, grill=False, grill_mode="auto",
+                provider="opencode", interview_id=None))
+        self.assertEqual(result["status"], "started")
+        self.assertEqual(captured["guard_receipt"]["status"], "allowed")
+        self.assertIsNone(captured["interview_id"])
+
+    def test_off_mode_still_returns_a_critical_interview(self):
+        with mock.patch.object(universal.teamwork_chat, "start") as start:
+            result = universal.start(self._args(
+                request="Add login", request_file=None, request_stdin=False,
+                mode="auto", run_id=None, model=None, max_seconds=10,
+                grill=False, grill_mode="off", provider="opencode",
+                interview_id=None))
+        start.assert_not_called()
+        self.assertEqual(result["status"], "interview_required")
+        self.assertEqual(result["interview"]["mode"], "off")
+        self.assertEqual(result["question"]["question_key"], "auth_session")
+
     def test_pause_rejects_path_traversal_run_id(self):
         victim = self.root.parent / "victim.json"
         with self.assertRaises(teamwork_chat.ChatError):
             universal.pause(self._args(run_id="../../victim"))
         self.assertFalse(victim.exists())
+
+    def test_global_platform_is_preserved_for_grill_subcommands(self):
+        import io
+        from contextlib import redirect_stdout
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            code = universal.main([
+                "--root", str(self.root), "--platform", "codex",
+                "grill", "start", "--request",
+                "Kullanıcı giriş sistemini geliştir"])
+        self.assertEqual(code, 0)
+        payload = json.loads(buffer.getvalue())
+        self.assertEqual(payload["interview"]["origin_platform"], "codex")
+
+    def test_codex_workspace_write_is_explicit_and_planned(self):
+        (self.root / ".git").mkdir()
+        result = universal.start(self._args(
+            request="Küçük bir değişiklik yap", request_file=None,
+            request_stdin=False, mode="auto", run_id="codex-write-plan",
+            model="gpt-6.1-sol", max_seconds=10, grill=False,
+            grill_mode="plan-only", interview_id=None, provider="codex",
+            platform="codex", codex_sandbox="workspace-write"))
+        self.assertEqual(result["status"], "planned")
+        plan = json.loads(Path(result["plan"]).read_text(encoding="utf-8"))
+        for task in plan["tasks"]:
+            self.assertEqual(task["provider"], "codex")
+            self.assertEqual(task["sandbox"], "workspace-write")
+            self.assertEqual(task["approval_policy"], "never")
+
+    def test_plan_only_creates_a_plan_without_spawning_a_runner(self):
+        (self.root / ".git").mkdir()
+        result = universal.start(self._args(
+            request="Küçük bir değişiklik yap", request_file=None,
+            request_stdin=False, mode="auto", run_id="plan-only-test",
+            model="fake", max_seconds=10, grill=False, grill_mode="plan-only",
+            interview_id=None, provider="opencode"))
+        self.assertEqual(result["status"], "planned")
+        self.assertTrue(result["plan_only"])
+        self.assertTrue(Path(result["plan"]).is_file())
+        self.assertFalse((self.root / ".auto-orchestrator" / "teamwork"
+                          / "active.json").exists())
 
     def test_codex_start_requires_explicit_provider(self):
         (self.root / ".git").mkdir()
