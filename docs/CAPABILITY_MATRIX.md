@@ -183,3 +183,48 @@ writing concurrently; ordinary memory writes are serialized by SQLite.
 
 The guard/contract layer is shared by every platform. Platform execution
 adapters remain separate; no silent cross-IDE process launch is performed.
+
+## V7.7 — Native Teamwork 2.0 entry points and binding limits
+
+`teamwork_entry` is a separate machine-readable section in
+`python tools/capabilities.py show --json`. It describes the shipped entry
+surface, not a live session. Statuses are `native-skill`, `native-slash`,
+`plugin-command` and `contract-only`.
+
+| Platform | Entry status | Shipped surface | Binding limit |
+|---|---|---|---|
+| Codex | `native-skill` | `.codex/skills/teamwork/SKILL.md`, `.codex/agents/*.toml`; no `/teamwork` slash file | Trusted matching hook start+stop only; parent session owns sandbox/approval |
+| OpenCode V2 | `plugin-command` | `/teamwork`, `/grill-me`, V2 plugin | Foreground subagent tool-call only; background dispatch is not completion |
+| Antigravity | `native-slash` | Native `/teamwork-preview` and native `/grill-me`; `ao-grill-me` for memory/contracts | Unsupported per-child binding; no second supervisor |
+| Cursor | `contract-only` | `.cursor/agents/*`, shared skill, universal CLI | Start ID only; matching stop required, no invented command file |
+
+The JSON entry for every platform contains:
+
+- `status` — one of the four statuses above;
+- `entry_points` / `slash_commands` — exactly what is shipped or native;
+- `native_or_managed` — what evidence exists, without a blanket claim;
+- `parent_session_boundary` — who owns dispatch, sandbox and approval;
+- `binding_limits` — `external_spawn: false`, `native_cancel_ack: false`,
+  `native_session_resume: false`, `native_session_claimed: false` and the
+  platform-specific start/stop condition.
+
+A skill file, command file, plan or handoff is not proof that a native session
+was spawned, bound, cancelled or resumed. Codex no longer claims a per-agent
+`sandbox_mode`; the parent session controls it. Antigravity's portable
+interview is installed as `ao-grill-me` so it cannot shadow native `/grill-me`.
+No platform advertises `/teamwork` unless a supported file or native surface
+actually exists.
+
+
+## V7.7 — verified completion and native entry points
+
+| Platform | Teamwork entry | Binding limit |
+|---|---|---|
+| OpenCode V2 | `/teamwork`, `/grill-me`, skill, plugin lifecycle | managed OpenCode adapter; plugin native tool spans only, no authoritative child completion |
+| Codex | native Teamwork skill, custom agents, app-server adapter | parent session owns sandbox/approval; workspace-write explicit; approval bridge absent |
+| Cursor | `.cursor/agents`, shared skill/CLI | contract-only; no managed adapter or live local run |
+| Antigravity | native `/teamwork-preview`, native `/grill-me`, `ao-grill-me` bridge | native Teamwork authoritative; our layer stores state only; no duplicate supervisor |
+
+Completion engine separates milestone pass from requirements verification.
+Only real test/subprocess evidence can verify behavioral criteria; missing tests
+or independent review remain `needs_review`/`not_verified`.

@@ -2085,9 +2085,24 @@ body.inspector-open .office-stage { height: min(760px, calc(100vh - 180px)); }
 .mode-chip[data-mode="fast"] { color: var(--ok); border-color: color-mix(in oklab, var(--ok) 35%, var(--line)); }
 .mode-chip[data-mode="balanced"] { color: var(--accent); border-color: color-mix(in oklab, var(--accent) 35%, var(--line)); }
 .mode-chip[data-mode="rigorous"] { color: var(--warn); border-color: color-mix(in oklab, var(--warn) 35%, var(--line)); }
-.scheduler-chip { color: var(--faint); }
-.repair-chip { color: var(--warn); border-color: color-mix(in oklab, var(--warn) 35%, var(--line)); }
-.cost-chip { color: var(--faint); }
+.mode-chip[data-mode="solo"] { color: var(--ok); border-color: color-mix(in oklab, var(--ok) 35%, var(--line)); }
+.mode-chip[data-mode="auto"] { color: var(--accent); border-color: color-mix(in oklab, var(--accent) 35%, var(--line)); }
+.execution-chip, .token-chip, .contract-chip, .provider-cost-chip {
+  padding: 3px 6px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font: 600 8px/1 var(--mono);
+  letter-spacing: .04em;
+  color: var(--muted);
+  background: var(--panel-2);
+}
+.execution-chip[data-kind="managed"] { color: var(--ok); border-color: color-mix(in oklab, var(--ok) 35%, var(--line)); }
+.execution-chip[data-kind="unknown"], .execution-chip[data-kind="plan-only"] { color: var(--warn); border-color: color-mix(in oklab, var(--warn) 35%, var(--line)); }
+.execution-chip[data-kind="native-planned"] { color: var(--warn); border-color: color-mix(in oklab, var(--warn) 35%, var(--line)); }
+.contract-chip[data-status="verified"] { color: var(--ok); border-color: color-mix(in oklab, var(--ok) 35%, var(--line)); }
+.contract-chip[data-status="partially_verified"], .contract-chip.warning { color: var(--warn); border-color: color-mix(in oklab, var(--warn) 35%, var(--line)); }
+.contract-chip[data-status="failed"], .contract-chip[data-status="invalidated"] { color: var(--bad); border-color: color-mix(in oklab, var(--bad) 35%, var(--line)); }
+.cost-chip[data-measured="false"], .token-chip[data-measured="false"] { color: var(--warn); }
 .office-milestone-label + .mode-chip { flex: 0 0 auto; }
 
 /* V7.4 — bounded execution timeline, separate from the office map */
@@ -2156,6 +2171,19 @@ body.inspector-open .office-stage { height: min(760px, calc(100vh - 180px)); }
 .memory-handoff-state.verified { border-color: color-mix(in oklab, #67c38e 55%, var(--line)); color: #67c38e; }
 .memory-handoff-state.unverified { border-color: color-mix(in oklab, #e0a458 55%, var(--line)); color: #e0a458; }
 .memory-handoff p { margin: 4px 0 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.memory-handoff-history { margin: 8px 0 10px; }
+.memory-handoff-history ul { margin: 0; padding-left: 14px; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.memory-handoff-history li.verified::marker { color: #67c38e; }
+.memory-handoff-history li.unverified::marker { color: #e0a458; }
+.memory-interview-meta { display: block; margin: 2px 0 4px; color: var(--faint); font: 9px/1.3 var(--mono); }
+.inspector-contract { margin-top: 10px; padding: 8px; border: 1px solid var(--line); background: var(--panel-2); }
+.inspector-contract strong { display: block; margin: 3px 0; font-size: 10px; }
+.inspector-contract .contract-state { display: inline-block; margin-right: 8px; padding: 1px 5px; border: 1px solid var(--line); font: 600 8px/1.2 var(--mono); text-transform: uppercase; }
+.inspector-contract .contract-state.verified { color: #67c38e; }
+.inspector-contract .contract-state.partially_verified { color: #e0a458; }
+.inspector-contract .contract-state.failed,
+.inspector-contract .contract-state.invalidated { color: var(--bad); }
+.inspector-contract ul { margin: 4px 0 0; padding-left: 14px; color: var(--muted); font-size: 9px; line-height: 1.4; }
 .memory-interview-summary { display: block; margin: 2px 0 4px; color: var(--muted); font-size: 9px; }
 .memory-verification { margin: 8px 0 10px; padding: 7px 8px; border: 1px solid var(--line); background: var(--panel-2); }
 .memory-verification p { margin: 3px 0 0; color: var(--muted); font-size: 10px; line-height: 1.4; overflow-wrap: anywhere; }

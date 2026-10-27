@@ -1,3 +1,5 @@
+import hashlib
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -64,13 +66,17 @@ class GlobalInstallTests(unittest.TestCase):
         txt=(self.home/'.config/opencode/plugins/auto_orchestrator.js').read_text()
         self.assertIn('AutoOrchestratorPlugin',txt)
 
-    def test_antigravity_cli_grill_skill_and_v761_modules(self):
+    def test_antigravity_cli_ao_grill_skill_and_v761_modules(self):
         source = Path(__file__).resolve().parents[1]
         self.run_install()
-        cli_skill = (self.home/'.gemini/antigravity-cli/skills/grill-me/SKILL.md')
+        cli_skill = (self.home/'.gemini/antigravity-cli/skills/ao-grill-me/SKILL.md')
         self.assertTrue(cli_skill.is_file(), str(cli_skill))
         self.assertEqual(cli_skill.read_bytes(),
-                         (source/'.agents/skills/grill-me/SKILL.md').read_bytes())
+                         (source/'.agents/skills/ao-grill-me/SKILL.md').read_bytes())
+        self.assertFalse((self.home/'.gemini/antigravity-cli/skills/grill-me').exists())
+        self.assertFalse((self.home/'.gemini/config/skills/grill-me').exists())
+        self.assertTrue((self.home/'.codex/skills/teamwork/SKILL.md').is_file())
+        self.assertTrue((self.home/'.config/opencode/skills/teamwork/SKILL.md').is_file())
         tools = {
             'codex': self.home/'.codex/auto-orchestrator/tools',
             'opencode': self.home/'.config/opencode/auto-orchestrator/tools',
@@ -82,6 +88,47 @@ class GlobalInstallTests(unittest.TestCase):
             if (source/'tools/assumption_guard.py').is_file():
                 self.assertTrue((base/'assumption_guard.py').is_file())
 
+
+    def test_global_antigravity_upgrade_prunes_old_grill_me_managed_copy(self):
+        self.run_install()
+        old = self.home/'.gemini/antigravity-cli/skills/grill-me/SKILL.md'
+        old.parent.mkdir(parents=True)
+        old.write_text('old generated grill-me\n', encoding='utf-8')
+        manifest_path = self.home/'.auto-orchestrator/auto-orchestrator-global-manifest.json'
+        manifest = json.loads(manifest_path.read_text())
+        manifest['files'][str(old.resolve())] = hashlib.sha256(
+            old.read_bytes()).hexdigest()
+        manifest_path.write_text(json.dumps(manifest), encoding='utf-8')
+        notes = self.run_install()
+        self.assertFalse(old.exists())
+        self.assertIn('pruned obsolete managed integration', '\n'.join(notes))
+        self.assertTrue((self.home/'.gemini/antigravity-cli/skills/ao-grill-me/SKILL.md').is_file())
+
+    def test_managed_skill_upgrade_backs_up_and_prunes_obsolete_integration(self):
+        self.run_install()
+        manifest_path = self.home/'.auto-orchestrator/auto-orchestrator-global-manifest.json'
+        manifest = json.loads(manifest_path.read_text())
+        skill = self.home/'.codex/skills/auto-orchestrator/SKILL.md'
+        old = skill.read_text(encoding='utf-8') + '\nold generated revision\n'
+        skill.write_text(old, encoding='utf-8')
+        manifest['files'][str(skill.resolve())] = hashlib.sha256(old.encode()).hexdigest()
+        obsolete = self.home/'.codex/skills/old-generated/SKILL.md'
+        obsolete.parent.mkdir(parents=True)
+        obsolete.write_text('obsolete integration\n', encoding='utf-8')
+        manifest['files'][str(obsolete.resolve())] = hashlib.sha256(
+            obsolete.read_bytes()).hexdigest()
+        manifest_path.write_text(json.dumps(manifest), encoding='utf-8')
+        notes = self.run_install()
+        self.assertEqual(skill.read_text(encoding='utf-8'),
+                         (Path(__file__).resolve().parents[1] /
+                          '.agents/skills/auto-orchestrator/SKILL.md').read_text(encoding='utf-8'))
+        backup = skill.with_name(skill.name + '.bak')
+        self.assertTrue(backup.is_file())
+        self.assertEqual(backup.read_text(encoding='utf-8'), old)
+        self.assertFalse(obsolete.exists())
+        self.assertIn('pruned obsolete managed integration', '\n'.join(notes))
+        updated = json.loads(manifest_path.read_text())
+        self.assertNotIn(str(obsolete.resolve()), updated['files'])
 
     def test_global_codex_antigravity_hooks_point_at_installed_bridge(self):
         import json

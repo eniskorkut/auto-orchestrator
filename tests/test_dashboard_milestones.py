@@ -132,6 +132,26 @@ class MilestoneDashboardTests(unittest.TestCase):
                 "path": "rc_" + "c" * 16 + "-v3.json",
                 "updated_at": now,
             }), encoding="utf-8")
+            evidence = (self.root / ".auto-orchestrator" / "evidence" / "run-1")
+            evidence.mkdir(parents=True)
+            (evidence / "teamwork-summary-0.json").write_text(json.dumps({
+                "requirements_contract": {
+                    "contract_id": "rc_" + "c" * 16,
+                    "contract_version": 3,
+                    "status": "partially_verified",
+                    "ok": True,
+                    "fully_verified": False,
+                    "passed": 1,
+                    "not_verified": 2,
+                    "checks": [
+                        {"criterion_id": "ac_one", "kind": "code_evidence",
+                         "status": "passed", "evidence": "code evidence: auth=true"},
+                        {"criterion_id": "ac_two", "kind": "not_automated",
+                         "status": "not_verified", "evidence": "manual"},
+                    ],
+                    "reasons": [],
+                },
+            }), encoding="utf-8")
             memory.write_context_files()
         payload = self.catalog.memory(self.project_id)
         self.assertTrue(payload["available"])
@@ -141,6 +161,8 @@ class MilestoneDashboardTests(unittest.TestCase):
                          interview_id)
         self.assertEqual(payload["active_interview"]["question"]["question"],
                          "How should sessions work?")
+        self.assertIsNotNone(payload["active_interview"]["age_seconds"])
+        self.assertGreaterEqual(payload["active_interview"]["age_seconds"], 0)
         self.assertEqual(payload["question"]["question_id"], question_id)
         self.assertEqual(len(payload["confirmed_decisions"]), 1)
         self.assertEqual(len(payload["derived_decisions"]), 1)
@@ -149,6 +171,12 @@ class MilestoneDashboardTests(unittest.TestCase):
         self.assertEqual(payload["approved_requirements"]["contract_version"], 3)
         self.assertEqual(payload["approved_requirements"]["contract_id"],
                          "rc_" + "c" * 16)
+        self.assertEqual(payload["contract_status"], "partially_verified")
+        self.assertFalse(payload["contract_fully_verified"])
+        self.assertEqual(payload["contract_not_verified"], 2)
+        self.assertEqual(payload["contract_verification"]["status"],
+                         "partially_verified")
+        self.assertEqual(len(payload["handoffs"]), 1)
         self.assertTrue(payload["handoff"]["verified"])
         self.assertTrue(payload["stale"]["is_stale"])
         self.assertIn("missing_head", payload["stale"]["reasons"])
@@ -202,6 +230,98 @@ class MilestoneDashboardTests(unittest.TestCase):
         self.assertEqual(session["session_hash"], __import__("hashlib").sha256(
             b"ses_secret_should_not_leak").hexdigest()[:12])
         self.assertNotIn("events_path", session)
+
+    def test_milestone_execution_identity_mode_usage_and_contract_status(self):
+        value = plan(self.project_id)
+        value.update({
+            "origin_platform": "codex",
+            "execution_provider": "codex",
+            "work_mode": "auto",
+        })
+        path = self.root / ".auto-orchestrator" / "plans" / "team-milestone.json"
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps({**value, "version": 1}), encoding="utf-8")
+        engine = TeamworkEngine(self.root)
+        try:
+            engine.init(value)
+            engine.record_managed_session(
+                "team-milestone", "discover", attempt=1, provider="codex",
+                session_id="ses_provider", status="completed", model="demo-model",
+                cost=0.25, tokens={"input": 10, "output": 4},
+            )
+            engine.status("team-milestone")
+        finally:
+            engine.close()
+        evidence = self.root / ".auto-orchestrator" / "evidence" / "team-milestone"
+        evidence.mkdir(parents=True)
+        (evidence / "teamwork-summary-0.json").write_text(json.dumps({
+            "requirements_contract": {
+                "contract_id": "rc_" + "e" * 16,
+                "contract_version": 2,
+                "status": "partially_verified",
+                "ok": True,
+                "fully_verified": False,
+                "passed": 2,
+                "not_verified": 1,
+                "checks": [],
+                "reasons": [],
+            },
+        }), encoding="utf-8")
+        run = self.catalog.milestones(self.project_id)["runs"][0]
+        self.assertEqual(run["mode_label"], "auto")
+        self.assertEqual(run["execution"]["provider"], "codex")
+        self.assertEqual(run["execution"]["origin_platform"], "codex")
+        self.assertEqual(run["execution"]["native_or_managed"], "managed")
+        self.assertEqual(run["execution_provider"], "codex")
+        self.assertEqual(run["origin_platform"], "codex")
+        self.assertEqual(run["native_or_managed"], "managed")
+        self.assertFalse(run["execution"]["native_session_claimed"])
+        self.assertFalse(run["execution"]["cross_ide_spawn"])
+        self.assertEqual(run["contract_status"], "partially_verified")
+        self.assertFalse(run["contract_fully_verified"])
+        self.assertEqual(run["contract_not_verified"], 1)
+        self.assertTrue(run["usage"]["cost_measured"])
+        self.assertEqual(run["usage"]["cost_total_usd"], 0.25)
+        self.assertTrue(run["usage"]["tokens_measured"])
+        self.assertEqual(run["usage"]["tokens"]["input"], 10)
+        self.assertEqual(run["usage"]["by_provider"][0]["provider"], "codex")
+        self.assertEqual(run["usage"]["by_provider"][0]["cost_total_usd"], 0.25)
+
+    def test_milestone_usage_keeps_unknown_distinct_from_zero(self):
+        value = plan(self.project_id)
+        path = self.root / ".auto-orchestrator" / "plans" / "team-milestone.json"
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps({**value, "version": 1}), encoding="utf-8")
+        engine = TeamworkEngine(self.root)
+        try:
+            engine.init(value)
+            engine.status("team-milestone")
+        finally:
+            engine.close()
+        run = self.catalog.milestones(self.project_id)["runs"][0]
+        self.assertIsNone(run["usage"]["cost_total_usd"])
+        self.assertFalse(run["usage"]["cost_measured"])
+        self.assertTrue(run["usage"]["cost_unknown"])
+        self.assertIsNone(run["usage"]["tokens"]["input"])
+        self.assertFalse(run["usage"]["tokens_measured"])
+        self.assertTrue(run["usage"]["tokens_unknown"])
+        self.assertEqual(run["usage"]["by_provider"], [])
+        self.assertEqual(run["contract_status"], "not_run")
+        self.assertIsNone(run["contract_fully_verified"])
+
+    def test_demo_milestones_label_unknown_usage_and_demo_execution(self):
+        demo = Catalog.from_store(Store(self.root, demo=True))
+        try:
+            payload = demo.milestones(demo.default_id)
+        finally:
+            demo.close()
+        run = payload["runs"][0]
+        self.assertTrue(run["demo"])
+        self.assertEqual(run["execution"]["native_or_managed"], "demo")
+        self.assertTrue(run["usage"]["cost_unknown"])
+        self.assertTrue(run["usage"]["tokens_unknown"])
+        self.assertIsNone(run["usage"]["cost_total_usd"])
+        self.assertEqual(run["mode_label"], "balanced")
 
     def test_http_route_returns_project_scoped_milestones(self):
         self._seed()

@@ -1,4 +1,4 @@
 name = "auto_explorer"
 description = "Read-only investigator that maps relevant code paths and gathers evidence."
-sandbox_mode = "read-only"
+# Sandbox and approval are controlled by the parent Codex session; no per-agent sandbox_mode is claimed.
 developer_instructions = """Trace call paths, risks, and dependencies. Do not modify files. Return concrete file references and suggested tests."""

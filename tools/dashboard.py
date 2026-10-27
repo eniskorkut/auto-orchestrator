@@ -1152,6 +1152,186 @@ def _project_id_for(root: Path) -> str:
     return "p_" + digest[:16]
 
 
+WORK_MODES = ("solo", "fast", "balanced", "rigorous", "auto")
+CONTRACT_RUN_STATUSES = (
+    "verified", "partially_verified", "not_verified", "failed",
+    "invalidated", "not_run",
+)
+
+
+def _mode_label(value) -> str:
+    """Display mode for the UI. Unknown/legacy is explicit AUTO, never SOLO."""
+    if isinstance(value, str) and value.lower() in WORK_MODES:
+        return value.lower()
+    if isinstance(value, str) and value.lower() in ("legacy", "unknown", ""):
+        return "auto"
+    return "auto"
+
+
+def _read_bounded_json(path: Path, *, limit: int = 131072):
+    try:
+        if path.is_symlink() or not path.is_file() or path.stat().st_size > limit:
+            return None
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def _public_contract_verification(value) -> dict | None:
+    """Bounded contract verification evidence; never upgrades unknown to pass."""
+    if not isinstance(value, dict):
+        return None
+    status = value.get("status")
+    if status not in CONTRACT_RUN_STATUSES:
+        status = "not_run"
+    checks = []
+    for item in (value.get("checks") or [])[:40]:
+        if not isinstance(item, dict):
+            continue
+        checks.append({
+            "criterion_id": item.get("criterion_id"),
+            "kind": item.get("kind"),
+            "status": item.get("status") if item.get("status") in (
+                "passed", "failed", "not_verified") else "not_verified",
+            "evidence": (str(item.get("evidence"))[:300]
+                         if item.get("evidence") is not None else None),
+        })
+    reasons = [str(item)[:300] for item in (value.get("reasons") or [])[:10]]
+    not_verified = value.get("not_verified")
+    passed = value.get("passed")
+    return {
+        "contract_id": value.get("contract_id"),
+        "contract_version": value.get("contract_version"),
+        "sha256": value.get("sha256"),
+        "status": status,
+        "ok": bool(value.get("ok")) if "ok" in value else None,
+        "fully_verified": (bool(value.get("fully_verified"))
+                           if "fully_verified" in value else None),
+        "passed": int(passed) if isinstance(passed, int) else None,
+        "not_verified": (int(not_verified)
+                         if isinstance(not_verified, int) else None),
+        "checks": checks,
+        "reasons": reasons,
+    }
+
+
+def _run_contract_verification(root: Path, run_id: str) -> dict | None:
+    if not isinstance(run_id, str) or not ID.fullmatch(run_id):
+        return None
+    summary = _read_bounded_json(
+        Path(root) / ".auto-orchestrator" / "evidence" / run_id
+        / "teamwork-summary-0.json")
+    if not isinstance(summary, dict):
+        return None
+    value = summary.get("requirements_contract")
+    if value is None and isinstance(summary.get("quality_gate"), dict):
+        value = summary["quality_gate"].get("contract")
+    return _public_contract_verification(value)
+
+
+def _safe_mtime(path: Path) -> float:
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+def _run_requirements_verification(root: Path, run_id: str) -> dict | None:
+    summary = _read_bounded_json(
+        Path(root) / ".auto-orchestrator" / "evidence" / run_id
+        / "teamwork-summary-0.json")
+    if not isinstance(summary, dict):
+        return None
+    value = summary.get("requirements")
+    if value is None and isinstance(summary.get("quality_gate"), dict):
+        value = summary["quality_gate"].get("completion")
+    if not isinstance(value, dict):
+        return None
+    criteria = []
+    for item in (value.get("criteria") or [])[:20]:
+        if not isinstance(item, dict):
+            continue
+        criteria.append({
+            "criterion_id": item.get("criterion_id"),
+            "state": item.get("state"),
+            "critical": bool(item.get("critical")),
+            "behavioral": item.get("behavioral_status"),
+            "conformance": item.get("conformance_status"),
+            "missing_test_ids": list(item.get("missing_test_ids") or [])[:12],
+        })
+    return {
+        "status": value.get("status"),
+        "fully_verified": bool(value.get("fully_verified")),
+        "verified_completion": bool(value.get("verified_completion")),
+        "critical_unverified": len(value.get("critical_unverified") or []),
+        "criteria": criteria,
+        "reasons": [str(item)[:300] for item in (value.get("reasons") or [])][:8],
+    }
+
+
+def _latest_contract_verification(root: Path, contract: dict | None) -> dict | None:
+    """Find evidence for this exact contract id/version, newest first, bounded."""
+    if not isinstance(contract, dict):
+        return None
+    contract_id = contract.get("contract_id")
+    version = contract.get("contract_version")
+    evidence = Path(root) / ".auto-orchestrator" / "evidence"
+    if not contract_id or not evidence.is_dir():
+        return None
+    directories = sorted(
+        (path for path in evidence.iterdir()
+         if path.is_dir() and not path.is_symlink() and ID.fullmatch(path.name)),
+        key=lambda path: _safe_mtime(path),
+        reverse=True,
+    )[:20]
+    for directory in directories:
+        value = _run_contract_verification(root, directory.name)
+        if value and value.get("contract_id") == contract_id \
+                and value.get("contract_version") == version:
+            return value
+    return None
+
+
+def _usage_with_providers(usage: dict | None, sessions: list[dict]) -> dict:
+    """Keep provider totals explicit; absent measurements never become zero."""
+    base = dict(usage) if isinstance(usage, dict) else {}
+    base.setdefault("cost_total_usd", None)
+    base.setdefault("cost_measured", False)
+    base.setdefault("tool_count_total", None)
+    base.setdefault("tokens", {"input": None, "output": None, "cache_read": None})
+    base.setdefault("tokens_measured", False)
+    by_provider: dict[str, dict] = {}
+    for session in sessions:
+        if not isinstance(session, dict):
+            continue
+        provider = session.get("provider")
+        if not isinstance(provider, str) or not ID.fullmatch(provider):
+            continue
+        row = by_provider.setdefault(provider, {
+            "provider": provider, "cost_total_usd": None,
+            "cost_measured": False, "tokens": {"input": None, "output": None,
+                                              "cache_read": None},
+            "tokens_measured": False,
+        })
+        cost = session.get("cost")
+        if isinstance(cost, (int, float)) and not isinstance(cost, bool):
+            row["cost_total_usd"] = round(
+                float(row["cost_total_usd"] or 0.0) + float(cost), 9)
+            row["cost_measured"] = True
+        tokens = session.get("tokens")
+        if isinstance(tokens, dict):
+            row["tokens_measured"] = True
+            for key in ("input", "output", "cache_read"):
+                value = tokens.get(key)
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    row["tokens"][key] = int(row["tokens"][key] or 0) + int(value)
+    base["by_provider"] = sorted(by_provider.values(),
+                                 key=lambda item: item["provider"])
+    base["cost_unknown"] = not bool(base.get("cost_measured"))
+    base["tokens_unknown"] = not bool(base.get("tokens_measured"))
+    return base
+
+
 @dataclass
 class CatalogProject:
     project: dict
@@ -1480,12 +1660,27 @@ class Catalog:
             raise DashboardError(entry.error)
         state = self.project_state(project_id)
         try:
-            return office_model.build_inspector(
+            payload = office_model.build_inspector(
                 entry.project, agent_definition_id, state,
                 bindings=self.bindings(project_id),
                 detail_provider=entry.store.detail)
         except office_model.OfficeModelError as exc:
             raise DashboardError(str(exc)) from exc
+        # Task and evidence already come from the office model. Add the
+        # bounded contract pointer/verification so the inspector can show it
+        # without claiming that the agent itself was bound to a contract.
+        try:
+            memory = self.memory(project_id)
+            payload["contract"] = {
+                "contract": memory.get("contract"),
+                "verification": memory.get("contract_verification"),
+                "status": memory.get("contract_status", "not_run"),
+                "fully_verified": memory.get("contract_fully_verified"),
+                "not_verified": memory.get("contract_not_verified"),
+            }
+        except Exception:
+            payload["contract"] = None
+        return payload
 
     # -- teamwork milestones -------------------------------------------
     @staticmethod
@@ -1576,6 +1771,52 @@ class Catalog:
         return runs
 
     @staticmethod
+    def _attach_plan_metadata(root: Path, run: dict, plan: dict) -> dict:
+        """Attach origin/provider/mode/contract evidence without inventing it."""
+        run = dict(run)
+        work_mode = run.get("work_mode", plan.get("work_mode"))
+        run["mode_label"] = _mode_label(plan.get("work_mode") or work_mode)
+        provider = plan.get("execution_provider")
+        origin = plan.get("origin_platform") or "unknown"
+        plan_only = bool(plan.get("plan_only"))
+        if plan_only:
+            kind = "plan-only"
+        elif provider in ("opencode", "codex"):
+            kind = "managed"
+        elif origin in ("codex", "opencode", "cursor", "antigravity"):
+            # A native plan is not proof that a native agent ran. Show a
+            # native-planned badge without claiming an observed session.
+            kind = "native-planned"
+        else:
+            kind = "unknown"
+        run["execution"] = {
+            "provider": provider,
+            "origin_platform": origin,
+            "native_or_managed": kind,
+            "native_session_claimed": False,
+            "cross_ide_spawn": False,
+            "plan_only": plan_only,
+        }
+        # Flat aliases keep the CLI/plan vocabulary available to clients that
+        # already read origin_platform/execution_provider.
+        run["origin_platform"] = origin
+        run["execution_provider"] = provider
+        run["native_or_managed"] = kind
+        requirements = _run_requirements_verification(root, run.get("run_id"))
+        run["requirements"] = requirements
+        run["requirements_status"] = (requirements or {}).get("status", "not_run")
+        run["verified_completion"] = bool(
+            (requirements or {}).get("verified_completion"))
+        contract = _run_contract_verification(root, run.get("run_id"))
+        run["contract_verification"] = contract
+        run["contract_status"] = (contract or {}).get("status", "not_run")
+        run["contract_fully_verified"] = (contract or {}).get("fully_verified")
+        run["contract_not_verified"] = (contract or {}).get("not_verified")
+        sessions = run.get("managed_sessions") or []
+        run["usage"] = _usage_with_providers(run.get("usage"), sessions)
+        return run
+
+    @staticmethod
     def _empty_memory(project_id: str, summary: str, **extra) -> dict:
         return {
             "available": False, "project_id": project_id, "summary": summary,
@@ -1585,9 +1826,12 @@ class Catalog:
                                       "contract_ref": None, "contract_id": None,
                                       "contract_version": None, "version": None},
             "contract_ref": None, "contract_id": None,
-            "contract_version": None,
+            "contract_version": None, "contract_status": "not_run",
+            "contract_verification": None, "contract_fully_verified": None,
+            "contract_not_verified": None,
             "active_interview": None, "question": None, "interviews": [],
-            "handoff": None, "last_ide": None, "last_milestone": None,
+            "handoff": None, "handoffs": [], "last_ide": None,
+            "last_milestone": None,
             "stale": {"is_stale": False, "reasons": []},
             "verification": None, "context": None, "state": {}, **extra,
         }
@@ -1621,7 +1865,18 @@ class Catalog:
                                                       "doc_constraint")]
                 contract = memory.contract_ref()
                 active = memory.active_interview()
+                if active is not None:
+                    active = dict(active)
+                    updated = active.get("updated_at")
+                    active["age_seconds"] = (
+                        max(0, int(time.time() - float(updated)))
+                        if isinstance(updated, (int, float))
+                        and not isinstance(updated, bool) else None)
                 handoff = memory.handoff_view(memory.latest_handoff())
+                handoffs = [memory.handoff_view(item, bounded=True)
+                            for item in memory.list_handoffs(limit=5)]
+                contract_verification = _latest_contract_verification(
+                    root, contract)
                 interviews = []
                 for row in memory.conn.execute(
                         "SELECT interview_id,origin_platform,status,request_summary,"
@@ -1655,6 +1910,7 @@ class Catalog:
                     "interviews": interviews,
                     "question": question,
                     "handoff": handoff,
+                    "handoffs": handoffs,
                     "last_ide": (state.get("last_platform")
                                  or (handoff or {}).get("platform")),
                     "last_milestone": (state.get("last_milestone")
@@ -1666,6 +1922,13 @@ class Catalog:
                     "contract_ref": contract,
                     "contract_id": (contract or {}).get("contract_id"),
                     "contract_version": (contract or {}).get("contract_version"),
+                    "contract_status": (contract_verification or {}).get(
+                        "status", "not_run"),
+                    "contract_verification": contract_verification,
+                    "contract_fully_verified": (contract_verification or {}).get(
+                        "fully_verified"),
+                    "contract_not_verified": (contract_verification or {}).get(
+                        "not_verified"),
                     "context": bundle,
                 }
         except (OSError, ValueError, sqlite3.Error) as exc:
@@ -1714,8 +1977,9 @@ class Catalog:
                     if engine is None:
                         engine = TeamworkEngine(root)
                     try:
+                        public = self._public_milestones(engine.status(current_run))
                         rows.append(self._attach_recovery(
-                            root, self._public_milestones(engine.status(current_run))))
+                            root, self._attach_plan_metadata(root, public, plan)))
                     except (TeamworkError, OSError, ValueError):
                         continue
             finally:
@@ -1824,7 +2088,17 @@ def _demo_milestones(project_id: str, theme: str = "ai") -> dict:
         "version": 1, "project_id": project_id, "demo": True,
         "runs": [{
             "run_id": run_id, "pattern": "distributed_coding",
-            "work_mode": "balanced", "risk_assessment": {
+            "work_mode": "balanced", "mode_label": "balanced",
+            "execution": {
+                "provider": "demo", "origin_platform": "demo",
+                "native_or_managed": "demo", "native_session_claimed": False,
+                "cross_ide_spawn": False, "plan_only": False,
+            },
+            "origin_platform": "demo", "execution_provider": "demo",
+            "native_or_managed": "demo",
+            "contract_verification": None, "contract_status": "not_run",
+            "contract_fully_verified": None, "contract_not_verified": None,
+            "risk_assessment": {
                 "mode": "balanced", "score": 26, "confidence": "low",
                 "reason": "demo default safe budget",
                 "factors": {"profile_available": False},
@@ -1847,9 +2121,10 @@ def _demo_milestones(project_id: str, theme: str = "ai") -> dict:
             },
             "orphaned_managed_sessions": 0,
             "usage": {"cost_total_usd": None, "cost_measured": False,
-                      "tool_count_total": None,
+                      "cost_unknown": True, "tool_count_total": None,
                       "tokens": {"input": None, "output": None, "cache_read": None},
-                      "tokens_measured": False},
+                      "tokens_measured": False, "tokens_unknown": True,
+                      "by_provider": []},
         }],
         "current_run_id": run_id,
         "progress": {"passed": passed, "total": 3, "verified": passed, "denominator": 3},

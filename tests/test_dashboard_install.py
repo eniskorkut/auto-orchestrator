@@ -37,6 +37,10 @@ RUNTIME_MODULES = (
     "universal_teamwork.py",
     "requirements_contract.py",
     "git_memory_hook.py",
+    "completion_engine.py",
+    "context_selector.py",
+    "grill_llm.py",
+    "grill_benchmark.py",
 )
 OPTIONAL_RUNTIME_MODULES = ("assumption_guard.py",)
 PLATFORM_TOOLS = {
@@ -87,14 +91,19 @@ class ProjectDashboardInstallTests(unittest.TestCase):
         skill = self.target / ".agents" / "skills" / "grill-me" / "SKILL.md"
         self.assertTrue(skill.is_file())
         self.assertIn("one question", skill.read_text(encoding="utf-8").lower())
+        self.assertTrue(
+            (self.target / ".opencode" / "skills" / "teamwork" / "SKILL.md").is_file())
 
-    def test_project_antigravity_install_copies_grill_skill_to_cli(self):
+    def test_project_antigravity_install_copies_ao_grill_skill_to_cli(self):
         install(self.target, "antigravity", "inherit", False, False)
         skill = (self.target / ".gemini" / "antigravity-cli" / "skills" /
-                 "grill-me" / "SKILL.md")
+                 "ao-grill-me" / "SKILL.md")
         self.assertTrue(skill.is_file(), str(skill))
         self.assertEqual(skill.read_bytes(),
-                         source_bytes(".agents/skills/grill-me/SKILL.md"))
+                         source_bytes(".agents/skills/ao-grill-me/SKILL.md"))
+        self.assertFalse(
+            (self.target / ".gemini" / "antigravity-cli" / "skills" /
+             "grill-me").exists())
 
     def test_project_dry_run_writes_nothing(self):
         results = dict(install(self.target, "opencode", "inherit", True, False))
@@ -151,13 +160,17 @@ class GlobalDashboardInstallTests(unittest.TestCase):
             with self.subTest(platform=platform):
                 assert_runtime(self, self.home / relative)
 
-    def test_global_antigravity_cli_gets_grill_skill(self):
+    def test_global_antigravity_cli_gets_ao_grill_skill(self):
         execute(self.home, {"antigravity"})
         skill = (self.home / ".gemini" / "antigravity-cli" / "skills" /
-                 "grill-me" / "SKILL.md")
+                 "ao-grill-me" / "SKILL.md")
         self.assertTrue(skill.is_file(), str(skill))
         self.assertEqual(skill.read_bytes(),
-                         source_bytes(".agents/skills/grill-me/SKILL.md"))
+                         source_bytes(".agents/skills/ao-grill-me/SKILL.md"))
+        self.assertFalse(
+            (self.home / ".gemini" / "antigravity-cli" / "skills" / "grill-me").exists())
+        self.assertFalse(
+            (self.home / ".gemini" / "config" / "skills" / "grill-me").exists())
 
     def test_global_manifest_records_v71_modules(self):
         execute(self.home, set(PLATFORM_TOOLS))
@@ -202,7 +215,7 @@ class GlobalDashboardInstallTests(unittest.TestCase):
             for name in RUNTIME_MODULES + OPTIONAL_RUNTIME_MODULES:
                 self.assertFalse((tools / name).exists(), str(tools / name))
         cli_skill = (self.home / ".gemini" / "antigravity-cli" / "skills" /
-                     "grill-me" / "SKILL.md")
+                     "ao-grill-me" / "SKILL.md")
         self.assertFalse(cli_skill.exists())
 
     def test_global_uninstall_preserves_modified_dashboard_asset(self):

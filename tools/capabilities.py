@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Evidence-based native capability matrix (stdlib only, no network).
+"""Evidence-based native capability and Teamwork-entry matrix (stdlib only).
 
 The matrix answers only questions that this repository can support with its
 shipped adapters, documented native contracts and deterministic tests. It is
 deliberately narrower than vendor marketing: a mark that a native client can
 spawn an agent does **not** mean an external orchestrator can spawn one, and a
-tool-call completion is not a child stop.
+tool-call completion is not a child stop. The `teamwork_entry` section describes
+shipped entry files and native surfaces; it is not proof that a client loaded
+them or that a session was bound.
 
 Run ``python tools/capabilities.py show`` for a human-readable view or
 ``python tools/capabilities.py show --json`` for the exact machine-readable
@@ -62,6 +64,199 @@ STATUS_VALUES = (
     "hook-callbacks",
     "plugin-events",
     "unknown",
+)
+
+# How a native IDE actually exposes Teamwork. These are entry-point contracts,
+# not execution claims: a skill file or slash command does not prove that the
+# client loaded it or that an agent session was spawned or bound.
+TEAMWORK_ENTRY_STATUSES = (
+    "native-skill",
+    "native-slash",
+    "plugin-command",
+    "contract-only",
+)
+
+TEAMWORK_ENTRY_DESCRIPTIONS = {
+    "native-skill": (
+        "The client discovers a shipped skill/agent instruction file natively. "
+        "No slash command and no external dispatch are claimed."
+    ),
+    "native-slash": (
+        "The client owns the slash command or preview surface. This repository "
+        "documents that native entry point and does not shadow it."
+    ),
+    "plugin-command": (
+        "A project/plugin command file is shipped and loaded by the client. It "
+        "is a command bridge, not proof of a native subagent session."
+    ),
+    "contract-only": (
+        "Only shared skills, agent files and the universal CLI contract are "
+        "shipped. No client-specific command or managed adapter is claimed."
+    ),
+}
+
+TEAMWORK_ENTRY = {
+    "codex": {
+        "status": "native-skill",
+        "authoritative_source": (
+            "Codex-native skill and agent files. No /teamwork slash command "
+            "file is shipped for Codex."
+        ),
+        "entry_points": [
+            ".codex/skills/teamwork/SKILL.md",
+            ".codex/agents/*.toml",
+            "universal_teamwork.py",
+        ],
+        "slash_commands": [],
+        "native_or_managed": (
+            "Native Codex subagents by default. Managed execution requires an "
+            "explicit --provider codex and remains read-only unless the parent "
+            "session opts into workspace-write."
+        ),
+        "parent_session_boundary": (
+            "Sandbox and approval are controlled by the parent Codex session. "
+            "Per-agent sandbox_mode keys are not relied on and are removed from "
+            "the shipped agent files."
+        ),
+        "binding_limits": {
+            "status": "trusted-hook-pair-only",
+            "native_id_required": True,
+            "requires_observed_start": True,
+            "requires_matching_stop": True,
+            "background_authoritative": False,
+            "external_spawn": False,
+            "native_cancel_ack": False,
+            "native_session_resume": False,
+            "native_session_claimed": False,
+            "note": (
+                "A Supervisor task may be bound only after a real native ID is "
+                "observed and a matching SubagentStop is received from trusted "
+                "hooks. The file does not prove that a session exists."
+            ),
+        },
+    },
+    "opencode": {
+        "status": "plugin-command",
+        "authoritative_source": (
+            "Project command files /teamwork and /grill-me plus the V2 plugin."
+        ),
+        "entry_points": [
+            ".opencode/commands/teamwork.md",
+            ".opencode/commands/grill-me.md",
+            "adapters/opencode-v2/auto_orchestrator.js",
+        ],
+        "slash_commands": ["/teamwork", "/grill-me"],
+        "native_or_managed": (
+            "Managed OpenCode sessions with an observed plugin event stream and "
+            "a foreground-only native subagent span. TUI click-through is not "
+            "automated."
+        ),
+        "parent_session_boundary": (
+            "The parent OpenCode session owns native subagent dispatch. The "
+            "plugin observes in-process events; it does not spawn children."
+        ),
+        "binding_limits": {
+            "status": "foreground-tool-call-only",
+            "native_id_required": True,
+            "requires_observed_start": True,
+            "requires_matching_stop": True,
+            "background_authoritative": False,
+            "external_spawn": False,
+            "native_cancel_ack": False,
+            "native_session_resume": False,
+            "native_session_claimed": False,
+            "note": (
+                "Only a foreground subagent tool-call ID may be matched. A "
+                "background dispatch return is not child completion and cannot "
+                "release a supervised task."
+            ),
+        },
+    },
+    "antigravity": {
+        "status": "native-slash",
+        "authoritative_source": (
+            "Antigravity-native /teamwork-preview and /grill-me are "
+            "authoritative. Our layer stores memory, contracts and handoffs."
+        ),
+        "entry_points": [
+            "native /teamwork-preview",
+            "native /grill-me",
+            ".agents/skills/ao-grill-me/SKILL.md",
+            "universal_teamwork.py",
+        ],
+        "slash_commands": ["/teamwork-preview", "/grill-me"],
+        "native_or_managed": (
+            "Native Antigravity agents. No managed adapter is implemented; the "
+            "non-native interview is shipped as ao-grill-me so it cannot shadow "
+            "the native /grill-me surface."
+        ),
+        "parent_session_boundary": (
+            "The native parent session controls subagent dispatch, sandbox and "
+            "approval. No second supervisor and no cross-IDE spawn are started."
+        ),
+        "binding_limits": {
+            "status": "unsupported",
+            "native_id_required": False,
+            "requires_observed_start": False,
+            "requires_matching_stop": False,
+            "background_authoritative": False,
+            "external_spawn": False,
+            "native_cancel_ack": False,
+            "native_session_resume": False,
+            "native_session_claimed": False,
+            "note": (
+                "Session hooks identify a conversation, not an individual "
+                "child. invoke_subagent dispatch is not child completion, so no "
+                "native-supervised binding is claimed."
+            ),
+        },
+    },
+    "cursor": {
+        "status": "contract-only",
+        "authoritative_source": (
+            "Shared skills plus .cursor/agents. No supported client-specific "
+            "command format is claimed without local evidence."
+        ),
+        "entry_points": [
+            ".cursor/agents/auto_planner.md",
+            ".cursor/agents/auto_implementer.md",
+            ".cursor/agents/auto_tester.md",
+            ".cursor/agents/auto_reviewer.md",
+            ".agents/skills/auto-orchestrator/SKILL.md",
+            "universal_teamwork.py",
+        ],
+        "slash_commands": [],
+        "native_or_managed": (
+            "Native Cursor subagents when the client exposes them; otherwise a "
+            "CLI contract. No managed adapter or live Cursor run is claimed."
+        ),
+        "parent_session_boundary": (
+            "The Cursor parent owns dispatch and permissions. Project-local "
+            "hooks observe start; a stop without a matching ID is not completion."
+        ),
+        "binding_limits": {
+            "status": "start-id-only",
+            "native_id_required": True,
+            "requires_observed_start": True,
+            "requires_matching_stop": True,
+            "background_authoritative": False,
+            "external_spawn": False,
+            "native_cancel_ack": False,
+            "native_session_resume": False,
+            "native_session_claimed": False,
+            "note": (
+                "subagentStart documents an ID; subagentStop may omit it. Only "
+                "an exact matching stop may release a task, and background "
+                "stop is never inferred."
+            ),
+        },
+    },
+}
+
+TEAMWORK_ENTRY_DISCLAIMER = (
+    "Teamwork entry statuses describe shipped files and documented native "
+    "surfaces. They do not prove that a client loaded the entry point, spawned "
+    "an agent, bound a native session, cancelled it or resumed it."
 )
 
 FIELD_DESCRIPTIONS = {
@@ -475,6 +670,11 @@ def matrix(platform: str | None = None) -> dict:
     can be compared byte-for-byte across runs.
     """
     keys = [_validated_platform(platform)] if platform is not None else list(PLATFORM_ORDER)
+    platforms = []
+    for key in keys:
+        record = copy.deepcopy(_PLATFORMS[key])
+        record["teamwork_entry"] = copy.deepcopy(TEAMWORK_ENTRY[key])
+        platforms.append(record)
     return {
         "schema_version": SCHEMA_VERSION,
         "disclaimer": DISCLAIMER,
@@ -483,7 +683,10 @@ def matrix(platform: str | None = None) -> dict:
         "scoped_fields": list(SCOPED_CAPABILITY_FIELDS),
         "field_descriptions": dict(FIELD_DESCRIPTIONS),
         "status_values": list(STATUS_VALUES),
-        "platforms": [copy.deepcopy(_PLATFORMS[key]) for key in keys],
+        "teamwork_entry_statuses": list(TEAMWORK_ENTRY_STATUSES),
+        "teamwork_entry_descriptions": dict(TEAMWORK_ENTRY_DESCRIPTIONS),
+        "teamwork_entry_disclaimer": TEAMWORK_ENTRY_DISCLAIMER,
+        "platforms": platforms,
         "managed_execution": {
             **copy.deepcopy(MANAGED_EXECUTION),
             "platforms": {
@@ -526,6 +729,16 @@ def render_text(platform: str | None = None) -> str:
     for key in [record["platform"] for record in document["platforms"]]:
         managed = document["managed_execution"]["platforms"][key]
         lines.append(f"  {key}: {managed['status']} (live={str(managed['live_smoke_tested']).lower()})")
+    lines.append("")
+    lines.append("Teamwork entry points (files, not session proof):")
+    for record in document["platforms"]:
+        entry = record["teamwork_entry"]
+        limits = entry["binding_limits"]
+        lines.append(
+            f"  {record['platform']}: {entry['status']} "
+            f"(binding={limits['status']}, native_session_claimed="
+            f"{str(limits['native_session_claimed']).lower()})"
+        )
     lines.append("")
     for record in document["platforms"]:
         lines.append(record["label"] + " (" + record["platform"] + ")")

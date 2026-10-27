@@ -24,7 +24,8 @@ If an active run exists and the user did not explicitly ask for a new one, use
 ## Start a run
 
 1. Read an optional leading `--mode fast|balanced|rigorous|auto` (default
-   `auto`) and optional `--grill` from the arguments.
+   `auto`; also `solo`, `fast`, `balanced` or `rigorous`) and optional `--grill`
+   from the arguments.
 2. Run exactly one shell command to obtain a generated request path:
 
    `python3.11 tools/teamwork_chat.py --root . request-path`
@@ -49,9 +50,14 @@ If an active run exists and the user did not explicitly ask for a new one, use
    start code. Record answers with `/grill-me`; after approval start with
    `--interview-id <id> --request-file <relative_path>` using the original
    request file. The engine verifies its hash, refuses a different request and
-   attaches the approved versioned requirements contract to the plan.
+   attaches the approved versioned requirements contract to the plan. Report
+   milestone status and requirements/completion status separately; missing
+   tests or independent review stay `needs_review`, never verified.
 
-5. Report the run id, platform, mode, risk assessment, current milestone,
-   active/queued sessions, recovery state and verified progress. Child sessions
-   are separate managed sessions; cancellation is local-signal-only unless a
+5. Report the run id, origin platform, execution provider, mode, current
+   milestone, active/queued sessions, recovery state and verified progress.
+   State whether execution is `managed` or `native`, using `unknown` when the
+   evidence does not establish it. Report measured token/cost values or explicit
+   `unknown`; never turn a missing measurement into zero. Child sessions are
+   separate managed sessions; cancellation is local-signal-only unless a
    native ACK is explicitly present.

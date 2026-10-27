@@ -140,3 +140,51 @@ Use `memory capture` when no managed Git hook is installed. The opt-in hook is
 installed with `memory install-hook` and preserves existing hooks. Cross-IDE
 context includes decisions, open blockers, active interview, contract version,
 last milestone, stale reasons and verified handoff status.
+
+## V7.7 — Native Teamwork 2.0 entry points
+
+The IDE remains the parent of its own agents. The universal CLI shares memory,
+interviews, contracts and handoffs; it does not launch another IDE's process.
+
+### Role contract
+
+Every non-trivial plan may use these four roles. Choose only the roles that add
+independent value; they are not a mandatory roster.
+
+- **planner** — dependency graph, file ownership, acceptance checks and risks.
+  Planning only; never edits files or claims a spawn.
+- **implementer** — one bounded, non-overlapping write scope. Reports changed
+  files and targeted test outcomes.
+- **tester** — runs the approved checks and records real exit codes. A
+  self-report or tool-return is not a pass.
+- **reviewer** — independent correctness/regression/security review. Review
+  attestation is recorded; reviewer independence is not fabricated.
+
+At most three concurrent subagents by default. Serialize shared files and
+contracts. The parent session verifies the integrated result.
+
+### Platform entry points
+
+- **OpenCode:** `/teamwork` and `/grill-me` command files plus the V2 plugin.
+  Report `origin_platform`, `execution_provider` and `native_or_managed`.
+  Foreground tool-call spans are native evidence; managed sessions are separate
+  managed evidence. Background dispatch is not child completion.
+- **Codex:** the `teamwork` skill and `.codex/agents/*.toml`. Use Codex-native
+  subagent delegation. Sandbox and approval are parent-session settings; the
+  shipped agent files do not claim per-agent `sandbox_mode`. No `/teamwork`
+  slash command is shipped for Codex.
+- **Cursor:** `.cursor/agents/*` plus this shared skill. Planner, implementer,
+  tester and reviewer roles are file contracts; no managed adapter or live
+  Cursor run is claimed. Use the universal CLI for durable state.
+- **Antigravity:** native `/teamwork-preview` and native `/grill-me` are
+  authoritative. The non-native interview is installed as `ao-grill-me` so it
+  cannot shadow the native command. Our layer stores memory, contracts and
+  handoffs; it does not create a second supervisor.
+
+### Reporting
+
+Report the mode as SOLO, FAST, BALANCED, RIGOROUS or AUTO. Report contract
+status (`verified`, `partially_verified`, `not_verified`, `failed`, `absent`),
+verified vs estimated progress, measured tokens/cost or explicit `unknown`,
+recovery state and stale reasons. A missing measurement is never zero. A plan,
+skill file or handoff is not proof of a native session, cancel ACK or resume.
