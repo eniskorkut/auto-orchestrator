@@ -66,8 +66,10 @@ test('missing, escaping and symlinked helpers fail closed', () => {
     assert.equal(resolveHelperScript({ pluginPath: plugin, projectDirectory: project, name: 'router.py' }), null);
 
     mkdirSync(tools, { recursive: true });
-    symlinkSync(outside, join(tools, 'router.py'));
-    assert.equal(resolveHelperScript({ pluginPath: plugin, projectDirectory: project, name: 'router.py' }), null);
+    if (process.platform !== 'win32') {
+      symlinkSync(outside, join(tools, 'router.py'));
+      assert.equal(resolveHelperScript({ pluginPath: plugin, projectDirectory: project, name: 'router.py' }), null);
+    }
 
     assert.deepEqual(
       helperCandidates({ pluginPath: plugin, projectDirectory: project, name: '../escape.py' }),
