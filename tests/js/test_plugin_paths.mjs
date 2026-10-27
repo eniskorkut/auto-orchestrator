@@ -11,6 +11,16 @@ const touch = (path, text = '') => {
   mkdirSync(join(path, '..'), { recursive: true });
   writeFileSync(path, text);
 };
+const samePath = (left, right) => {
+  const norm = (value) => {
+    let result = realpathSync(value);
+    if (process.platform === 'win32') {
+      result = result.replace(/^\\\\\?\\/, '').toLowerCase();
+    }
+    return result;
+  };
+  return norm(left) === norm(right);
+};
 
 test('project-local plugin resolves helpers from project tools', () => {
   const root = mkdtempSync(join(tmpdir(), 'ao-project-helper-'));
@@ -27,7 +37,8 @@ test('project-local plugin resolves helpers from project tools', () => {
         helper,
       ],
     );
-    assert.equal(resolveHelperScript({ pluginPath: plugin, projectDirectory: project, name: 'router.py' }), realpathSync(helper));
+    const projectResolved = resolveHelperScript({ pluginPath: plugin, projectDirectory: project, name: 'router.py' });
+    assert.ok(projectResolved && samePath(projectResolved, helper));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -48,7 +59,8 @@ test('global plugin uses its installed helper and never project-owned tools', ()
       helperCandidates({ pluginPath: plugin, projectDirectory: project, name: 'supervisor.py' }),
       [installed],
     );
-    assert.equal(resolveHelperScript({ pluginPath: plugin, projectDirectory: project, name: 'supervisor.py' }), realpathSync(installed));
+    const globalResolved = resolveHelperScript({ pluginPath: plugin, projectDirectory: project, name: 'supervisor.py' });
+    assert.ok(globalResolved && samePath(globalResolved, installed));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
