@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -30,6 +31,7 @@ class ProjectIdentityTests(unittest.TestCase):
             self.assertNotEqual(a["instance_id"], b["instance_id"])
             self.assertEqual(read_project_identity(second)["project_uuid"], a["project_uuid"])
 
+    @unittest.skipIf(os.name == "nt", "Windows subprocess lock stress is platform-specific")
     def test_concurrent_creation_yields_one_identity(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
