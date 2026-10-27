@@ -88,11 +88,18 @@ Verification is deliberately conservative:
 - `not_automated` criteria are reported as `not_verified`, never as passed.
 - A changed/superseded decision, missing interview approval or blocking
   requirement invalidates the contract and fails the runner gate.
+- Guard receipts are validated against the current request, context digest and
+  HEAD at engine/runner/resume boundaries; a made-up `{"status":"allowed"}` is
+  rejected.
+- Blocking requirements are scoped to their own interview/contract, so skipping
+  a question in one feature cannot poison an unrelated feature.
 - A contract for a different feature/interview does not invalidate an unrelated
   run; only a newer version of the same contract supersedes it.
 
 The run summary exposes `requirements_contract` and `quality_gate.contract`.
-Unverifiable criteria remain visible instead of being converted into success.
+`ok` means no executable criterion failed; `fully_verified` is true only when
+`not_verified` is zero. Unverifiable criteria remain visible instead of being
+converted into success.
 
 ## 4. Cross-IDE memory and handoff
 
@@ -109,12 +116,14 @@ Import is preview-first and fail-closed:
 - `add` / `unchanged` / `conflict` classification with field-level reasons,
 - ID and natural-key conflicts, duplicate IDs, missing `supersedes`,
 - transactional apply; apply is aborted on conflicts,
-- `last_platform` is never overwritten by import,
+- `last_platform` is never overwritten by import; an unknown Git hook capture
+  also preserves the previous IDE,
 - obvious secrets in exported free text and sensitive keys are redacted; a
   redacted handoff digest is recomputed so integrity remains checkable.
 
-Stale detection now reports `head_mismatch`, `branch_mismatch`,
-`dirty_worktree` and `missing_head`. Context files include open tasks, active
+Imported handoffs are marked and are not displayed as locally verified. Stale
+detection reports `head_mismatch`, `branch_mismatch`, `dirty_worktree` and
+`missing_head`. Context files include open tasks, active
 interview, contract pointer and latest verification.
 
 An opt-in Git post-commit hook is available:
@@ -175,7 +184,11 @@ activity is not animated as work.
 - Contract criteria without executable code/test evidence remain
   `not_verified`; they are not converted into passes.
 - Handoffs, observations and interviews are exported, but a cloud sync service
-  is not implemented.
+  is not implemented. Importing a decision that supersedes a local contract
+  intentionally invalidates that contract; the runner refuses it and a new
+  interview/contract is required.
+- A contract criterion that has no executable code/test evidence stays
+  `not_verified`; `fully_verified` is false.
 - Plan-only output is not automatically resumable as a runner; it is a reviewed
   plan that can be started as a new run.
 - The dashboard reads the contract pointer; full contract verification remains

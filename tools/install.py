@@ -51,7 +51,7 @@ def shell_arg(value:Path)->str:
     return subprocess.list2cmdline([value]) if os.name=='nt' else shlex.quote(value)
 
 def rendered(source:Path, target:Path)->str:
-    content=source.read_text(encoding='utf-8')
+    content=source.read_bytes().decode('utf-8')
     if source in (ROOT/'.codex/hooks.json', ROOT/'.agents/hooks.json', ROOT/'.cursor/hooks.json'):
         command=shell_arg(Path(sys.executable))+' '+shell_arg((target/'tools/hook_bridge.py').resolve())
         content=content.replace('python tools/hook_bridge.py',json.dumps(command)[1:-1])
@@ -62,9 +62,11 @@ def write_file(dest: Path, text: str, dry_run: bool, force: bool = False,
                managed: bool = False) -> str:
     existed = dest.is_file()
     if existed:
-        old = dest.read_text(encoding='utf-8')
-        if old == text:
+        old_bytes = dest.read_bytes()
+        new_bytes = text.encode('utf-8')
+        if old_bytes == new_bytes:
             return 'unchanged'
+        old = old_bytes.decode('utf-8', errors='replace')
         if not force and not managed:
             raise Conflict(f'Existing file differs: {dest}. No overwrite (use --force-generated for generated profiles).')
         if not dry_run:
@@ -272,7 +274,7 @@ def install(target: Path, platform: str, codex_model: str, dry_run: bool, force_
         if grill.is_file():
             outputs.append((
                 target/'.gemini/antigravity-cli/skills/grill-me/SKILL.md',
-                grill.read_text(encoding='utf-8')))
+                grill.read_bytes().decode('utf-8')))
 
     manifest_path = _manifest_path(target)
     manifest = _load_manifest(target)
@@ -457,10 +459,12 @@ def uninstall(target: Path, dry_run: bool = False) -> list[tuple[str, str]]:
                     dest.unlink()
                 results.append((gitignore['path'],
                                 'would-remove' if dry_run else 'removed'))
-    if not dry_run:
+    preserved = any(state == 'preserved' for _, state in results)
+    if not dry_run and not preserved:
         manifest_path.unlink()
     results.append((MANIFEST_RELATIVE.as_posix(),
-                    'would-remove' if dry_run else 'removed'))
+                    ('preserved' if preserved else
+                     ('would-remove' if dry_run else 'removed'))))
     return results
 
 

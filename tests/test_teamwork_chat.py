@@ -454,6 +454,23 @@ class ChatSecurityTests(unittest.TestCase):
         self.assertEqual(plan["requirements_contract"]["sha256"],
                          approved["requirements_contract"]["sha256"])
 
+    def test_start_reuses_an_approved_contract_by_request_hash(self):
+        from tools.grill_me import GrillMeEngine
+
+        request = "Kullanıcı giriş sistemini geliştir"
+        with GrillMeEngine(self.root) as engine:
+            started = engine.start(request, origin_platform="opencode",
+                                   mode="auto")
+            nxt = engine.answer(started["question"]["question_id"],
+                                option="jwt")["next"]
+            engine.answer(nxt["question_id"], option="refresh")
+            approved = engine.approve()
+        result = chat.start(self._start_args(
+            request=request, run_id="auto-contract-run", interview_id=None))
+        self.assertEqual(result["contract_status"], "confirmed")
+        self.assertEqual(result["requirements_contract"]["contract_id"],
+                         approved["requirements_contract"]["contract_id"])
+
     def test_approved_interview_rejects_a_different_request(self):
         from tools.grill_me import GrillMeEngine
 

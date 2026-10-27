@@ -189,6 +189,19 @@ class AssumptionGuardTests(unittest.TestCase):
             self.assertIn(result["question"]["question_key"],
                           (key, "file_access", "roles"), request)
 
+    def test_admin_accounts_email_and_response_shape_are_critical(self):
+        for request in ("Add an admin panel", "Remove user accounts",
+                        "Send welcome emails",
+                        "Change the /api/users response shape"):
+            result = assumption_guard.evaluate(self.root, request,
+                                               platform="codex")
+            self.assertEqual(result["status"], "interview_required", request)
+
+    def test_json_schema_validator_is_not_a_database_choice(self):
+        result = assumption_guard.evaluate(
+            self.root, "Add a JSON schema validator", platform="codex")
+        self.assertEqual(result["status"], "allowed")
+
     def test_receipt_is_deterministic_for_the_same_context(self):
         first = assumption_guard.evaluate(
             self.root, "Fix a typo in README", platform="codex")

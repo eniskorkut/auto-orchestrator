@@ -295,12 +295,14 @@ class PlannerTests(unittest.TestCase):
     def test_full_plan_validates_and_initializes(self):
         plan = plan_request("Build a backend API and a frontend UI",
                             run_id="plan-init")
-        plan["assumption_guard"] = {
-            "status": "allowed", "request_hash": "test-receipt"}
         validate_teamwork_plan(plan)
         rich = validate_rich_plan(plan)
         self.assertEqual(len(rich["tasks"]), 8)
         with tempfile.TemporaryDirectory() as temp:
+            from tools.assumption_guard import evaluate
+            guard = evaluate(Path(temp), plan["request"],
+                             platform="opencode", mode="auto")
+            plan["assumption_guard"] = guard["receipt"]
             engine = TeamworkEngine(Path(temp))
             try:
                 state = engine.init(plan)

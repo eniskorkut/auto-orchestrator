@@ -30,7 +30,10 @@ TEXT_SUFFIXES = CODE_SUFFIXES | DOC_SUFFIXES
 TEST_DIRS = {"test", "tests", "spec", "specs", "__tests__", "e2e"}
 KEYWORDS = {
     "jwt": ("jwt", "jsonwebtoken", "pyjwt", "access_token", "refresh_token"),
-    "session": ("session", "httpOnly", "cookie", "express-session", "flask-session"),
+    "session": ("session cookie", "session_cookie", "httponly",
+                "express-session", "flask-session", "django.contrib.sessions",
+                "sessionmiddleware", "req.session", "request.session",
+                "sessionid"),
     "postgres": ("postgres", "postgresql", "psycopg", "pg8000"),
     "sqlite": ("sqlite", "sqlite3"),
     "mysql": ("mysql", "mariadb"),

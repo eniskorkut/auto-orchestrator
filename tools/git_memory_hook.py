@@ -76,7 +76,8 @@ def install(root, *, dry_run=False) -> dict:
     path = hook_path(root)
     if path.is_symlink():
         raise HookError("post-commit hook must not be a symlink")
-    existing = path.read_text(encoding="utf-8") if path.is_file() else ""
+    existing = (path.read_text(encoding="utf-8", errors="replace")
+                if path.is_file() else "")
     if BEGIN in existing or END in existing:
         if existing.count(BEGIN) != 1 or existing.count(END) != 1:
             raise HookError("managed hook markers are inconsistent")
@@ -125,9 +126,10 @@ def uninstall(root, *, dry_run=False) -> dict:
         raise HookError("managed hook markers are inconsistent")
     updated = re.sub(
         r"\n?" + re.escape(BEGIN) + r".*?" + re.escape(END) + r"\n?",
-        "\n", text, flags=re.DOTALL).strip()
+        "\n", text, flags=re.DOTALL)
+    empty = updated.strip() in ("", "#!/bin/sh", "#!/usr/bin/env sh")
     if not dry_run:
-        if updated in ("", "#!/bin/sh", "#!/usr/bin/env sh"):
+        if empty:
             path.unlink()
         else:
             if not updated.endswith("\n"):
@@ -135,7 +137,6 @@ def uninstall(root, *, dry_run=False) -> dict:
             path.write_text(updated, encoding="utf-8")
     return {"path": str(path),
             "state": ("would-remove" if dry_run else "removed")
-            if updated in ("", "#!/bin/sh", "#!/usr/bin/env sh")
-            else ("would-update" if dry_run else "updated"),
-            "installed": updated not in ("", "#!/bin/sh", "#!/usr/bin/env sh"),
+            if empty else ("would-update" if dry_run else "updated"),
+            "installed": not empty,
             "managed": False}

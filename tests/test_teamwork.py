@@ -280,6 +280,18 @@ class TeamworkEngineTests(TeamworkTestCase):
         with self.assertRaises(TeamworkError):
             self.engine.init(value)
 
+    def test_forged_guard_receipt_is_rejected(self):
+        value = sample_plan("forged-guard")
+        value["request"] = "Add a new feature"
+        value["assumption_guard"] = {
+            "version": 1, "status": "allowed",
+            "request_hash": hashlib.sha256(b"Add a new feature").hexdigest(),
+            "mode": "auto", "platform": "opencode",
+            "head_sha": "0" * 40, "context_digest": "0" * 64,
+        }
+        with self.assertRaises(TeamworkError):
+            self.engine.init(value)
+
     def test_interrupted_sqlite_transaction_rolls_back(self):
         self.init_sample()
         before = self.milestone("team-run", "M1")["status"]

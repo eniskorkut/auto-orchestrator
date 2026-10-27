@@ -176,6 +176,13 @@ class RequirementsContractStorageTests(unittest.TestCase):
         identical = save_contract(self.root, contract(1))
         self.assertEqual(identical["contract_version"], 1)
 
+    def test_republishing_an_old_version_does_not_roll_back_current_pointer(self):
+        save_contract(self.root, contract(1))
+        save_contract(self.root, contract(2))
+        save_contract(self.root, contract(1))
+        current = load_current(self.root)
+        self.assertEqual(current["contract_version"], 2)
+
     def test_live_ledger_change_invalidates_a_contract(self):
         from tools.project_memory import ProjectMemory
         from tools.requirements_contract import validate_contract_state

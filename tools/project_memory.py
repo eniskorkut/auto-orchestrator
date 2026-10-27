@@ -308,6 +308,15 @@ class ProjectMemory:
         CREATE INDEX IF NOT EXISTS questions_open
           ON interview_questions(interview_id,status,ordinal);
         """)
+        try:
+            columns = {row[1] for row in self.conn.execute(
+                "PRAGMA table_info(project_handoffs)")}
+            if "imported" not in columns:
+                self.conn.execute(
+                    "ALTER TABLE project_handoffs ADD COLUMN imported "
+                    "INTEGER NOT NULL DEFAULT 0")
+        except sqlite3.Error:
+            pass
         self.conn.commit()
 
     def _transaction(self, fn):
@@ -646,9 +655,10 @@ class ProjectMemory:
         observation = self.record_observation(
             kind="git_commit", commit_sha=head.stdout.strip(),
             branch=branch.stdout.strip(), files=files[:200], platform=platform)
-        self.update_meta(head_sha=head.stdout.strip(),
-                         branch=branch.stdout.strip(),
-                         last_platform=platform)
+        self.update_meta(
+            head_sha=head.stdout.strip(), branch=branch.stdout.strip(),
+            last_platform=(platform if platform not in (None, "", "unknown")
+                           else None))
         return observation
 
     # -- context ---------------------------------------------------------
@@ -789,7 +799,8 @@ class ProjectMemory:
         value["payload"] = payload
         verified_tests = payload.get("verified_tests")
         value["verified"] = bool(
-            isinstance(verified_tests, list) and verified_tests)
+            isinstance(verified_tests, list) and verified_tests
+            and not value.get("imported"))
         if bounded:
             keep = ("milestone_id", "next_milestone", "context_summary")
             compact = {key: payload[key] for key in keep if key in payload}
@@ -977,10 +988,13 @@ class ProjectMemory:
             return value
         import re as _re
         patterns = (
-            (r"(?i)\b(api[_-]?key|secret|token|password|passwd|authorization)\b"
-             r"\s*[:=]\s*([^\s,;]{4,})", r"\1=[redacted]"),
             (r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{8,}", "Bearer [redacted]"),
-            (r"\b(?:sk|ghp|gho|github_pat)_[A-Za-z0-9_]{10,}", "[redacted]"),
+            (r"(?i)\b(api[_-]?key|api-key|client[_-]?secret|db[_-]?password|"
+             r"secret|token|password|passwd|authorization|credential|"
+             r"credentials)\b[\"']?\s*[:=]\s*[\"']?"
+             r"([^\"'\s,;]{4,})", r"\1=[redacted]"),
+            (r"\b(?:sk|ghp|gho|github_pat)[-_][A-Za-z0-9_-]{10,}",
+             "[redacted]"),
         )
         for pattern, replacement in patterns:
             value = _re.sub(pattern, replacement, value)
@@ -994,8 +1008,9 @@ class ProjectMemory:
             return [cls._redact_export_value(item) for item in value]
         if isinstance(value, dict):
             sensitive = {"token", "access_token", "refresh_token", "password",
-                         "passwd", "secret", "api_key", "apikey",
-                         "authorization", "credential", "credentials"}
+                         "passwd", "secret", "api_key", "api-key", "apikey",
+                         "client_secret", "db_password", "authorization",
+                         "credential", "credentials"}
             result = {}
             for key, item in value.items():
                 if (isinstance(item, str) and item
@@ -1928,8 +1943,8 @@ class ProjectMemory:
         elif kind == "handoff":
             self.conn.execute("""
               INSERT INTO project_handoffs(handoff_id,project_id,run_id,
-                milestone_id,version,platform,payload,sha256,created_at)
-              VALUES (?,?,?,?,?,?,?,?,?)
+                milestone_id,version,platform,payload,sha256,created_at,imported)
+              VALUES (?,?,?,?,?,?,?,?,?,1)
             """, (value["handoff_id"], self.project_id, value["run_id"],
                   value["milestone_id"], value["version"], value["platform"],
                   value["canonical"], value["sha256"], value["created_at"]))

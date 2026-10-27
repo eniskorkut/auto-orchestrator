@@ -585,12 +585,34 @@ class TeamworkEngine:
     # -- initialization --------------------------------------------------
     def init(self, plan):
         normalized = validate_teamwork_plan(plan)
-        if (normalized.get("request")
-                and not normalized.get("assumption_guard")
-                and not normalized.get("requirements_contract")):
-            raise TeamworkError(
-                "A new development plan requires an Assumption Guard receipt "
-                "or an approved requirements contract")
+        request = normalized.get("request")
+        receipt = normalized.get("assumption_guard")
+        contract = normalized.get("requirements_contract")
+        if request:
+            if receipt is not None:
+                try:
+                    try:
+                        from tools import assumption_guard
+                    except ModuleNotFoundError:
+                        import assumption_guard  # type: ignore
+                    assumption_guard.validate_receipt(self.root, request, receipt)
+                except Exception as exc:
+                    raise TeamworkError(
+                        f"Assumption Guard receipt is invalid: {exc}") from exc
+            if contract is not None:
+                try:
+                    try:
+                        from tools import requirements_contract
+                    except ModuleNotFoundError:
+                        import requirements_contract  # type: ignore
+                    requirements_contract.validate_contract(contract)
+                except Exception as exc:
+                    raise TeamworkError(
+                        f"Requirements contract is invalid: {exc}") from exc
+            if receipt is None and contract is None:
+                raise TeamworkError(
+                    "A new development plan requires an Assumption Guard receipt "
+                    "or an approved requirements contract")
         run_id = normalized["run_id"]
         snapshot = self._snapshot(normalized)
         canonical = _canonical(snapshot)

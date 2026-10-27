@@ -466,10 +466,10 @@ def save_contract(root, contract: dict) -> dict:
     version = normalized["contract_version"]
     if version <= highest:
         existing = load_contract(root, contract_id, version)
-        if (existing["sha256"] == normalized["sha256"]
-                and existing["status"] == "confirmed"):
+        if existing["sha256"] == normalized["sha256"]:
             path = _contract_path(root, normalized)
-            _write_pointer(root, normalized, path)
+            if version == highest and existing["status"] == "confirmed":
+                _write_pointer(root, normalized, path)
             return {**existing, "path": str(path)}
         raise ContractError("contract version must increase")
     expected = highest + 1
@@ -503,6 +503,27 @@ def _read_contract_file(path: Path) -> dict:
     except (OSError, ValueError) as exc:
         raise ContractError("contract file is invalid") from exc
     return validate_contract(value)
+
+
+def latest_for_interview(root, interview_id: str) -> dict | None:
+    """Newest stored contract for an interview, independent of current.json."""
+    if not isinstance(interview_id, str) or not INTERVIEW_ID.fullmatch(interview_id):
+        raise ContractError("interview id is invalid")
+    directory = contracts_dir(root)
+    if directory.is_symlink() or not directory.is_dir():
+        return None
+    candidates = []
+    for path in directory.glob("rc_*-v*.json"):
+        if path.is_symlink() or not path.is_file():
+            continue
+        try:
+            value = _read_contract_file(path)
+        except ContractError:
+            continue
+        if value.get("interview_id") == interview_id:
+            candidates.append(value)
+    return max(candidates, key=lambda item: item["contract_version"],
+               default=None)
 
 
 def load_contract(root, contract_id: str, version: int) -> dict:
@@ -624,8 +645,11 @@ def build_from_interview(root, interview_id: str, *, version: int | None = None)
                     "blocking": True,
                 })
         requirements = memory.list_requirements(limit=500)
+        question_refs = {f"question:{item['question_id']}" for item in questions}
+        interview_ref = f"interview:{interview_id}"
         for item in requirements:
-            if item["status"] == "unresolved_blocking":
+            if (item["status"] == "unresolved_blocking"
+                    and item.get("source_ref") in question_refs | {interview_ref}):
                 open_blockers.append({
                     "id": str(item["requirement_id"]),
                     "text": str(item["text"]), "blocking": True,
@@ -706,6 +730,22 @@ def build_from_interview(root, interview_id: str, *, version: int | None = None)
         return save_contract(root, contract)
 
 
+def contract_blocking_requirements(memory, contract: dict) -> list[dict]:
+    """Return only blockers owned by this contract/interview, not other features."""
+    refs = set()
+    if contract.get("interview_id"):
+        refs.add(f"interview:{contract['interview_id']}")
+    for item in contract.get("confirmed_decisions", []):
+        row = memory.conn.execute(
+            "SELECT source_ref FROM decisions WHERE project_id=? AND decision_id=?",
+            (memory.project_id, item.get("decision_ref"))).fetchone()
+        if row is not None and isinstance(row["source_ref"], str):
+            refs.add(row["source_ref"])
+    return [item for item in memory.list_requirements(
+                status="unresolved_blocking", limit=500)
+            if item.get("source_ref") in refs]
+
+
 def validate_contract_state(root, contract: dict) -> dict:
     """Validate a contract against the live ledger before planning/execution."""
     root = Path(root).resolve()
@@ -735,7 +775,7 @@ def validate_contract_state(root, contract: dict) -> dict:
                     "requirements contract references a superseded decision")
             if live["decision"] != item["decision"]:
                 raise ContractError("requirements contract decision changed")
-        if memory.list_requirements(status="unresolved_blocking", limit=1):
+        if contract_blocking_requirements(memory, normalized):
             raise ContractError(
                 "requirements contract has unresolved blocking requirements")
     return normalized
@@ -815,7 +855,11 @@ def verify_contract(root, contract: dict, *, test_results=None) -> dict:
     else:
         status = "verified"
     return {
+        # ok means no executable criterion failed and the ledger is current.
+        # It does NOT mean every semantic decision was machine-verified;
+        # callers must inspect status/fully_verified/not_verified.
         "ok": not reasons and not failed,
+        "fully_verified": status == "verified",
         "status": status,
         "contract_id": normalized["contract_id"],
         "contract_version": normalized["contract_version"],

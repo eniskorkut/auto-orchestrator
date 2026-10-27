@@ -104,6 +104,24 @@ class GrillMeTests(unittest.TestCase):
             with self.assertRaises(GrillError):
                 engine.answer(second["question_id"], option="refresh")
 
+    def test_skipped_question_does_not_block_an_unrelated_interview(self):
+        with GrillMeEngine(self.root) as engine:
+            first = engine.start("Kullanıcı giriş sistemini geliştir",
+                                 origin_platform="codex", mode="auto")
+            engine.skip(first["question"]["question_id"])
+            engine.cancel()
+        with GrillMeEngine(self.root) as engine:
+            second = engine.start("Veritabanı migrasyonu ekle",
+                                  origin_platform="opencode", mode="auto")
+            question = second["question"]
+            answered = engine.answer(question["question_id"], option="sqlite")
+            if answered["next"] is not None:
+                engine.answer(answered["next"]["question_id"], option="forward")
+            approved = engine.approve()
+            self.assertTrue(approved["approved"])
+            self.assertEqual(approved["requirements_contract"]["status"],
+                             "confirmed")
+
     def test_new_request_does_not_silently_reuse_open_interview(self):
         with GrillMeEngine(self.root) as engine:
             engine.start("Kullanıcı giriş sistemini geliştir",

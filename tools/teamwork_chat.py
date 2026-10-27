@@ -34,6 +34,7 @@ try:
         build_from_interview,
         load_contract,
         load_current,
+        contract_blocking_requirements,
         validate_contract,
         validate_contract_state,
     )
@@ -64,6 +65,7 @@ except ModuleNotFoundError:  # python tools/teamwork_chat.py
         build_from_interview,
         load_contract,
         load_current,
+        contract_blocking_requirements,
         validate_contract,
         validate_contract_state,
     )
@@ -409,6 +411,20 @@ def _start_contract(root: Path, interview_id: str) -> dict:
         raise ChatError(f"requirements contract is invalid: {exc}") from exc
 
 
+def _approved_interview_for_request(root, request):
+    """Find an approved interview whose request hash matches this exact text."""
+    digest = hashlib.sha256(request.encode("utf-8")).hexdigest()
+    try:
+        with ProjectMemory(root) as memory:
+            row = memory.conn.execute(
+                "SELECT interview_id FROM interviews WHERE project_id=? AND "
+                "request_hash=? AND status='approved' ORDER BY updated_at DESC "
+                "LIMIT 1", (memory.project_id, digest)).fetchone()
+            return row["interview_id"] if row is not None else None
+    except (MemoryError, OSError, ValueError):
+        return None
+
+
 def _plan_with_contract(request: str, *, contract: dict | None, **kwargs) -> dict:
     """Pass the contract to the planner when it supports it, then attach a ref."""
     import inspect
@@ -438,9 +454,17 @@ def _plan_contract(root: Path, plan: dict) -> dict | None:
     """Load and verify a plan's contract; reject stale or invalid contracts."""
     reference = plan.get("requirements_contract")
     if not reference:
-        if plan.get("request") and not plan.get("assumption_guard"):
-            raise ChatError(
-                "legacy plan has no Assumption Guard receipt; start a new run")
+        if plan.get("request"):
+            receipt = plan.get("assumption_guard")
+            if not receipt:
+                raise ChatError(
+                    "legacy plan has no Assumption Guard receipt; start a new run")
+            try:
+                assumption_guard.validate_receipt(
+                    root, plan["request"], receipt)
+            except assumption_guard.AssumptionGuardError as exc:
+                raise ChatError(
+                    f"plan Assumption Guard receipt is stale: {exc}") from exc
         return None
     if not isinstance(reference, dict):
         raise ChatError("plan requirements contract reference is invalid")
@@ -500,7 +524,7 @@ def _plan_contract(root: Path, plan: dict) -> dict | None:
                     raise ChatError(
                         "plan requirements contract is stale: a confirmed "
                         "decision changed or was superseded")
-            if memory.list_requirements(status="unresolved_blocking", limit=1):
+            if contract_blocking_requirements(memory, contract):
                 raise ChatError(
                     "plan requirements contract is stale: unresolved blocking "
                     "requirements exist")
@@ -585,6 +609,8 @@ def start(args) -> dict:
         if plan_path.exists():
             raise ChatError("run id already exists; choose another --run-id")
         interview_id = getattr(args, "interview_id", None)
+        if not interview_id:
+            interview_id = _approved_interview_for_request(root, request)
         contract = _start_contract(root, interview_id) if interview_id else None
         identity = ensure_project_identity(root)
         profile = profile_repository(root)

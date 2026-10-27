@@ -124,6 +124,8 @@ class ProjectMemoryTests(unittest.TestCase):
         detected = scan_repository(self.root)
         self.assertTrue(detected["detected"]["jwt"])
         self.assertTrue(detected["detected"]["auth"])
+        (self.root / "cache.py").write_text("session = load()\n", encoding="utf-8")
+        self.assertFalse(scan_repository(self.root)["code_detected"]["session"])
 
     def test_export_redacts_obvious_secrets(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -131,7 +133,8 @@ class ProjectMemoryTests(unittest.TestCase):
             with ProjectMemory(root) as memory:
                 memory.add_decision(
                     topic="auth", decision="JWT",
-                    rationale="api_key=supersecretvalue and Bearer abcdefghijklmnop",
+                    rationale=("api_key=supersecretvalue and Bearer abcdefghijklmnop "
+                               "client_secret=clientvalue sk-proj-abcdefghijklmnop"),
                     status="code_derived", source="code")
                 memory.record_handoff(
                     run_id="r1", milestone_id="M1", platform="codex",
@@ -141,6 +144,7 @@ class ProjectMemoryTests(unittest.TestCase):
             text = target.read_text(encoding="utf-8")
             self.assertNotIn("supersecretvalue", text)
             self.assertNotIn("abcdefghijklmnop", text)
+            self.assertNotIn("clientvalue", text)
             self.assertIn("[redacted]", text)
             payload = json.loads(text)
             handoff = payload["handoffs"][0]
@@ -149,6 +153,23 @@ class ProjectMemoryTests(unittest.TestCase):
             import hashlib
             self.assertEqual(handoff["sha256"],
                              hashlib.sha256(canonical.encode()).hexdigest())
+
+    def test_unknown_git_capture_does_not_overwrite_last_platform(self):
+        root = Path(self.temp.name)
+        subprocess.run(["git", "-C", str(root), "init"], capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(root), "config", "user.email", "a@b.c"], check=True)
+        subprocess.run(["git", "-C", str(root), "config", "user.name", "A"], check=True)
+        (root / "a.txt").write_text("one\n")
+        subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+        subprocess.run(["git", "-C", str(root), "commit", "-m", "one"],
+                       capture_output=True, check=True)
+        memory = ProjectMemory(root)
+        try:
+            memory.update_meta(last_platform="codex")
+            memory.capture_git_observation(platform="unknown")
+            self.assertEqual(memory.get_meta()["last_platform"], "codex")
+        finally:
+            memory.close()
 
     def test_export_import_conflict_requires_review(self):
         decision = self.memory.add_decision(topic="auth", decision="JWT",
@@ -438,6 +459,11 @@ class ProjectMemoryTests(unittest.TestCase):
         self.assertEqual(len(bundle["confirmed_decisions"]), 1)
         self.assertEqual(len(bundle["blocking_requirements"]), 1)
         self.assertTrue(bundle["handoff"]["verified"])
+        imported = ProjectMemory.handoff_view({
+            "imported": 1,
+            "payload": {"verified_tests": ["test_login"]},
+        })
+        self.assertFalse(imported["verified"])
         self.assertEqual(bundle["contract"]["contract_version"], 2)
         self.assertEqual(bundle["active_interview"]["interview_id"],
                          "iv_" + "a" * 16)

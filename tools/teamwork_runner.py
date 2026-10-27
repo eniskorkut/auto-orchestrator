@@ -38,8 +38,11 @@ try:
     from tools.project_planner import load_plan, write_plan
     from tools.requirements_contract import (
         ContractError,
+        contract_blocking_requirements,
         load_contract,
+        load_current,
         validate_contract,
+        validate_contract_state,
         verify_contract,
     )
     from tools.run_owner import (
@@ -68,8 +71,11 @@ except ModuleNotFoundError:  # python tools/teamwork_runner.py
     from project_planner import load_plan, write_plan  # type: ignore
     from requirements_contract import (  # type: ignore
         ContractError,
+        contract_blocking_requirements,
         load_contract,
+        load_current,
         validate_contract,
+        validate_contract_state,
         verify_contract,
     )
     from run_owner import (  # type: ignore
@@ -511,17 +517,38 @@ class TeamworkRunner:
 
     def _contract_state_check(self) -> None:
         """Fail closed if approved decisions changed before dispatch."""
-        if (self.plan.get("request")
-                and not self.plan.get("assumption_guard")
-                and self.contract is None):
-            raise RunnerError(
-                "A new development plan requires an Assumption Guard receipt "
-                "or an approved requirements contract")
+        request = self.plan.get("request")
+        receipt = self.plan.get("assumption_guard")
+        if request:
+            if receipt is not None:
+                try:
+                    try:
+                        from tools import assumption_guard
+                    except ModuleNotFoundError:
+                        import assumption_guard  # type: ignore
+                    assumption_guard.validate_receipt(self.root, request, receipt)
+                except Exception as exc:
+                    raise RunnerError(
+                        f"Assumption Guard receipt is invalid: {exc}") from exc
+            if receipt is None and self.contract is None:
+                raise RunnerError(
+                    "A new development plan requires an Assumption Guard receipt "
+                    "or an approved requirements contract")
         if self.contract_error is not None:
             raise RunnerError(
                 f"Requirements contract could not be loaded: {self.contract_error}")
         if self.contract is None:
             return
+        try:
+            validate_contract_state(self.root, self.contract)
+            current = load_current(self.root)
+            if (current is not None
+                    and current.get("contract_id") == self.contract.get("contract_id")
+                    and current.get("contract_version")
+                    != self.contract.get("contract_version")):
+                raise ContractError("a newer version of this contract exists")
+        except (ContractError, MemoryError, OSError, ValueError) as exc:
+            raise RunnerError(f"Requirements contract is stale: {exc}") from exc
         if self.contract.get("status") != "confirmed":
             raise RunnerError("Requirements contract is not confirmed")
         if self.contract.get("blockers"):
@@ -539,7 +566,7 @@ class TeamworkRunner:
             if row["decision"] != item["decision"]:
                 raise RunnerError(
                     "Requirements contract decision changed; start a new interview")
-        if self.memory.list_requirements(status="unresolved_blocking"):
+        if contract_blocking_requirements(self.memory, self.contract):
             raise RunnerError("Unresolved blocking requirements prevent dispatch")
 
     # -- worktrees -------------------------------------------------------

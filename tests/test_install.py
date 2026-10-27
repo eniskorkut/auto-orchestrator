@@ -104,7 +104,9 @@ class InstallerTests(unittest.TestCase):
         self.assertNotIn(START, guidance.read_text())
         self.assertIn('.env', gitignore.read_text())
         self.assertNotIn('.auto-orchestrator/*', gitignore.read_text())
-        self.assertFalse((self.dest/MANIFEST_RELATIVE).exists())
+        # A preserved user-modified generated file keeps the manifest so the
+        # user can repair or explicitly remove it later.
+        self.assertTrue((self.dest/MANIFEST_RELATIVE).exists())
 
     def test_project_uninstall_without_manifest_removes_nothing(self):
         user_file = self.dest/'notes.txt'
@@ -119,7 +121,7 @@ class InstallerTests(unittest.TestCase):
         manifest_path = self.dest/MANIFEST_RELATIVE
         manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
         manifest['files']['tools/requirements_contract.py'] = hashlib.sha256(
-            b'old generated module').hexdigest()
+            module.read_bytes()).hexdigest()
         manifest_path.write_text(json.dumps(manifest), encoding='utf-8')
         results = dict(self.call('opencode'))
         self.assertEqual(results['tools/requirements_contract.py'], 'updated')

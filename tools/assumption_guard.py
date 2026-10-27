@@ -150,7 +150,9 @@ RULES = {
         "terms": (
             "role", "roles", "rbac", "role-based", "role based",
             "authorization model", "permission", "permissions",
-            "permission model", "rol", "roller", "rol tabanlı", "yetki",
+            "permission model", "admin", "administrator", "account",
+            "accounts", "user account", "kullanıcı hesabı", "kullanici hesabi",
+            "hesap", "hesaplar", "rol", "roller", "rol tabanlı", "yetki",
             "yetkiler", "yetkileri", "yetki modeli",
             "yetkilendirme modeli", "izin", "izin modeli",
         ),
@@ -166,6 +168,8 @@ RULES = {
     "data_retention": {
         "terms": (
             "delete", "deletion", "purge", "erase", "wipe", "drop table",
+            "delete account", "account deletion", "remove user", "remove users",
+            "kullanıcı sil", "kullanici sil", "hesap sil", "hesap silme",
             "retention", "data retention", "gdpr", "kvkk", "soft delete",
             "hard delete", "sil", "silme", "kalıcı sil", "kalici sil",
             "saklama", "veri saklama", "geri dönüşü olmayan", "yok et",
@@ -187,6 +191,8 @@ RULES = {
             "third parties", "third-party api", "external service",
             "export data",
             "export user data", "user data export", "send data",
+            "send email", "email service", "welcome email", "e-posta gönder",
+            "eposta gonder", "e-posta servisi",
             "transfer data", "data transfer", "webhook", "analytics",
             "cloud sync",
             "dış servis", "dis servis", "dışa veri aktarımı",
@@ -208,7 +214,9 @@ RULES = {
         "terms": (
             "breaking", "breaking change", "backwards incompatible",
             "backward incompatible", "api version", "api versioning",
-            "deprecate", "deprecation", "bozucu", "geriye dönük uyumsuz",
+            "response shape", "response schema", "api response",
+            "endpoint change", "deprecate", "deprecation", "bozucu",
+            "geriye dönük uyumsuz",
             "geriye donuk uyumsuz", "api sürümü", "api surumu", "kaldırma",
         ),
         "question": ("Breaking API değişikliği nasıl yönetilsin? / "
@@ -259,7 +267,7 @@ RULES = {
     "database": {
         "terms": (
             "database", "databases", "db", "migration", "migrations",
-            "schema", "postgres", "postgresql", "sqlite", "mysql", "mongo",
+            "database schema", "postgres", "postgresql", "sqlite", "mysql", "mongo",
             "mongodb", "sql", "veritabanı", "veritabani", "migrasyon",
             "şema", "sema", "göç", "goc",
         ),
@@ -745,6 +753,46 @@ def _receipt(request_hash: str, head_sha, context_digest: str, status: str,
     }
 
 
+def validate_receipt(root, request, receipt) -> dict:
+    """Validate a guard receipt against the current request/context.
+
+    Local files can always be edited by the operator, but an accidental or
+    fabricated receipt with the wrong status/hash/context is rejected before a
+    plan or runner is accepted.
+    """
+    if not isinstance(receipt, dict):
+        raise AssumptionGuardError("assumption guard receipt is missing")
+    if receipt.get("version") != GUARD_VERSION:
+        raise AssumptionGuardError("assumption guard receipt version is invalid")
+    if receipt.get("status") != "allowed":
+        raise AssumptionGuardError("assumption guard receipt is not allowed")
+    if receipt.get("mode") not in MODES:
+        raise AssumptionGuardError("assumption guard receipt mode is invalid")
+    if not isinstance(receipt.get("platform"), str):
+        raise AssumptionGuardError("assumption guard receipt platform is invalid")
+    request = _bounded_request(request)
+    expected_hash = hashlib.sha256(request.encode("utf-8")).hexdigest()
+    if receipt.get("request_hash") != expected_hash:
+        raise AssumptionGuardError("assumption guard receipt request hash mismatch")
+    context = _load_context(root, request)
+    facts = scan_repository(root)
+    expected_digest = _canonical_digest({
+        "head": context["head_sha"],
+        "decisions": context["decisions"],
+        "requirements": context["requirements"],
+        "code_detected": facts.get("code_detected"),
+        "code_evidence": facts.get("code_evidence"),
+    })
+    if receipt.get("context_digest") != expected_digest:
+        raise AssumptionGuardError("assumption guard receipt context is stale")
+    if receipt.get("head_sha") != context["head_sha"]:
+        raise AssumptionGuardError("assumption guard receipt head is stale")
+    digest = receipt.get("context_digest")
+    if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+        raise AssumptionGuardError("assumption guard receipt digest is invalid")
+    return receipt
+
+
 def _approved_interview(root: Path, request: str, interview_id: str,
                         identity: dict) -> dict:
     try:
@@ -792,6 +840,12 @@ def _ensure_interview(root: Path, request: str, *, platform: str, mode: str,
     try:
         with GrillMeEngine(root, identity=identity) as engine:
             existing = engine.open_interview()
+            if (existing is not None
+                    and existing["status"] == "cancelled"):
+                result = engine.start(request, origin_platform=platform,
+                                      mode=mode, allow_new=True)
+                return (result["interview"],
+                        _public_question(result["question"]), False)
             if (existing is not None
                     and existing["status"] not in ("approved", "cancelled")):
                 if engine.verify_request(existing["interview_id"], request):
