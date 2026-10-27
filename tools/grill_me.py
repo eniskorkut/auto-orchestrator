@@ -23,6 +23,10 @@ try:
         build_from_interview,
         load_current,
     )
+    try:
+        from tools import grill_llm
+    except ModuleNotFoundError:  # older flat installation
+        grill_llm = None  # type: ignore
 except ModuleNotFoundError:
     import assumption_guard  # type: ignore
     from project_memory import MemoryError, ProjectMemory  # type: ignore
@@ -32,8 +36,13 @@ except ModuleNotFoundError:
         build_from_interview,
         load_current,
     )
+    try:
+        import grill_llm  # type: ignore
+    except ModuleNotFoundError:  # older flat installation
+        grill_llm = None  # type: ignore
 
 MODES = ("off", "auto", "required", "plan-only")
+INTERVIEW_SCHEMA_VERSION = 2
 INTERVIEW_ID = re.compile(r"^iv_[0-9a-f]{16}$")
 QUESTION_ID = re.compile(r"^q_[0-9a-f]{16}$")
 
@@ -52,11 +61,21 @@ def _text(value, field, limit=4000):
 
 
 class GrillMeEngine:
-    def __init__(self, root, *, identity=None):
+    def __init__(self, root, *, identity=None, llm=None):
         self.root = Path(root).resolve()
         self.memory = ProjectMemory(self.root, identity=identity)
         self.project_id = self.memory.project_id
         self.conn = self.memory.conn
+        # Optional proposal seam. None (the default) is fully deterministic and
+        # performs no provider call. A raw callable/command is wrapped so the
+        # strict schema validator is always applied.
+        if llm is not None and not hasattr(llm, "propose"):
+            if grill_llm is None:
+                raise GrillError(
+                    "optional LLM support is not installed; pass a configured "
+                    "provider object or omit llm")
+            llm = grill_llm.GrillLLM(llm, enabled=True)
+        self.llm = llm
 
     def close(self):
         self.memory.close()
@@ -92,10 +111,12 @@ class GrillMeEngine:
             status = "blocked"
         self.conn.execute("""
           INSERT INTO interviews(interview_id,project_id,origin_platform,
-            request_hash,request_summary,mode,status,created_at,updated_at)
-          VALUES (?,?,?,?,?,?,?,?,?)
+            request_hash,request_summary,mode,status,created_at,updated_at,
+            schema_version)
+          VALUES (?,?,?,?,?,?,?,?,?,?)
         """, (interview_id, self.project_id, _text(origin_platform, "platform",
-              limit=40), digest, summary, mode, status, now, now))
+              limit=40), digest, summary, mode, status, now, now,
+              INTERVIEW_SCHEMA_VERSION))
         self._insert_questions(interview_id, questions, now)
         self.conn.commit()
         self._record_code_facts(facts, request)
@@ -174,8 +195,32 @@ class GrillMeEngine:
                 if item["status"] in ("confirmed", "code_derived")]
 
     def _build_questions(self, request: str, facts: dict, mode: str = "auto") -> list[dict]:
-        return assumption_guard.critical_questions(
+        questions = assumption_guard.critical_questions(
             request, self._active_decisions(), facts, mode=mode)
+        if self.llm is None or grill_llm is None or not questions:
+            return questions
+        try:
+            result = self.llm.propose(
+                request, decisions=self._active_decisions(), facts=facts,
+                topics=[item["key"] for item in questions])
+        except Exception as exc:  # fail closed to deterministic questions
+            result = {"status": "error", "topics": [],
+                      "rejected": [{"topic": None,
+                                    "reason": str(exc)[:300]}],
+                      "error": "provider_exception"}
+        if not isinstance(result, dict):
+            result = {"status": "error", "topics": [],
+                      "rejected": [{"topic": None,
+                                    "reason": "provider result is invalid"}],
+                      "error": "provider_result_invalid"}
+        if result.get("status") == "ok":
+            questions = grill_llm.enrich_questions(
+                questions, result.get("topics") or [])
+        if result.get("status") not in ("disabled", "ok"):
+            grill_llm.record_rejected(self.memory, result)
+        elif result.get("rejected"):
+            grill_llm.record_rejected(self.memory, result)
+        return questions
 
     @staticmethod
     def _make_question(key, text, options, *, critical, depends_on=None):
@@ -204,30 +249,42 @@ class GrillMeEngine:
             ordinal = int(row[0] or 0)
         for question in questions:
             exists = existing_rows.get(question["key"])
+            metadata = (
+                question.get("why"), question.get("rationale"),
+                json.dumps(question.get("alternatives") or [],
+                           ensure_ascii=False),
+                json.dumps(question.get("affected_requirements") or [],
+                           ensure_ascii=False),
+                question.get("dependency"),
+                1 if question.get("critical", True) else 0)
             if exists is not None:
                 if exists["status"] in ("invalidated", "superseded"):
                     self.conn.execute("""
                       UPDATE interview_questions SET status='open',
                         selected_option=NULL,answer_text=NULL,answer_source=NULL,
                         answered_at=NULL,question=?,options=?,recommended_option=?,
-                        depends_on=? WHERE interview_id=? AND question_id=?
+                        depends_on=?,why=?,rationale=?,alternatives=?,
+                        affected_requirements=?,dependency=?,critical=?
+                      WHERE interview_id=? AND question_id=?
                     """, (question["text"],
                           json.dumps(question["options"], ensure_ascii=False),
                           question["recommended_option"],
                           json.dumps(question["depends_on"], ensure_ascii=False),
-                          interview_id, exists["question_id"]))
+                          *metadata, interview_id, exists["question_id"]))
                 continue
             ordinal += 1
             self.conn.execute("""
               INSERT INTO interview_questions(interview_id,question_id,ordinal,
                 question_key,question,options,recommended_option,status,
-                depends_on,created_at)
-              VALUES (?,?,?,?,?,?,?,'open',?,?)
+                depends_on,created_at,why,rationale,alternatives,
+                affected_requirements,dependency,critical)
+              VALUES (?,?,?,?,?,?,?,'open',?,?,?,?,?,?,?,?)
             """, (interview_id, "q_" + secrets.token_hex(8), ordinal,
                   question["key"], question["text"],
                   json.dumps(question["options"], ensure_ascii=False),
                   question["recommended_option"],
-                  json.dumps(question["depends_on"], ensure_ascii=False), now))
+                  json.dumps(question["depends_on"], ensure_ascii=False), now,
+                  *metadata))
 
     def _record_code_facts(self, facts, request):
         detected = facts.get("code_detected") or facts.get("detected") or {}
@@ -289,6 +346,13 @@ class GrillMeEngine:
         value = dict(row)
         value["options"] = json.loads(value.get("options") or "[]")
         value["depends_on"] = json.loads(value.get("depends_on") or "[]")
+        value["alternatives"] = json.loads(value.get("alternatives") or "[]")
+        value["affected_requirements"] = json.loads(
+            value.get("affected_requirements") or "[]")
+        value["why"] = value.get("why") or None
+        value["rationale"] = value.get("rationale") or None
+        value["dependency"] = value.get("dependency") or None
+        value["critical"] = bool(value.get("critical", True))
         return value
 
     def answer(self, question_id, *, option=None, text=None) -> dict:

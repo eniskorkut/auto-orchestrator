@@ -102,18 +102,44 @@ def _bounded_request(request) -> str:
     return value
 
 
-def make_question(key, text, options, *, critical=True, depends_on=None) -> dict:
+def make_question(key, text, options, *, critical=True, depends_on=None,
+                  why=None, rationale=None, alternatives=None,
+                  affected_requirements=None, dependency=None) -> dict:
+    options = list(options)
+    option_items = [{"id": option_id, "label": label,
+                     "recommended": bool(recommended)}
+                    for option_id, label, recommended in options]
+    recommended_option = next(
+        (option_id for option_id, _, recommended in options if recommended),
+        None)
+    recommended_label = next(
+        (label for option_id, label, _ in options
+         if option_id == recommended_option), None)
+    if alternatives is None:
+        alternatives = [label for option_id, label, _ in options
+                        if option_id != recommended_option]
+    if rationale is None:
+        rationale = (
+            f"Recommended option: {recommended_label}."
+            if recommended_label else "No recommendation is asserted.")
+    if why is None:
+        why = ("This decision changes behavior or risk and must be explicit "
+               "before a plan or runner is started.")
+    dependencies = list(depends_on or [])
+    if dependency is None and dependencies:
+        dependency = dependencies[0]
     return {
         "key": key,
         "text": text,
-        "options": [{"id": option_id, "label": label,
-                     "recommended": bool(recommended)}
-                    for option_id, label, recommended in options],
-        "recommended_option": next(
-            (option_id for option_id, _, recommended in options if recommended),
-            None),
-        "depends_on": list(depends_on or []),
+        "options": option_items,
+        "recommended_option": recommended_option,
+        "depends_on": dependencies,
         "critical": bool(critical),
+        "why": why,
+        "rationale": rationale,
+        "alternatives": list(alternatives),
+        "affected_requirements": list(affected_requirements or []),
+        "dependency": dependency,
     }
 
 
@@ -379,6 +405,130 @@ CHOICE_LABELS = {
               "single": "single user"},
 }
 
+# Deterministic question context. This is metadata only: it never changes the
+# guard's decision, its topic order or the recalculated receipt digest.
+QUESTION_CONTEXT = {
+    "payments": {
+        "why": ("Ödeme akışı para hareketi, iade ve uyum riski taşır; sağlayıcı "
+                "plan yazılmadan önce açık olmalı. / Payment handling moves "
+                "money and carries refund/compliance risk; the provider must be "
+                "explicit before planning."),
+        "rationale": ("Mevcut sağlayıcı, kullanıcı başka bir sağlayıcı demedikçe "
+                      "en güvenli varsayılandır. / The existing provider is the "
+                      "safest default unless another provider is confirmed."),
+        "requirements": ("payment provider", "refund and invoice behavior"),
+    },
+    "data_retention": {
+        "why": ("Silme ve saklama politikası geri dönüşü olmayan veri kaybı ve "
+                "KVKK/GDPR yükümlülüğü doğurur. / Deletion and retention can "
+                "cause irreversible data loss and legal obligations."),
+        "rationale": ("Geri alınabilir silme, onaylı kalıcı silmeden daha düşük "
+                      "veri kaybı riski taşır. / Recoverable deletion has lower "
+                      "data-loss risk than immediate hard deletion."),
+        "requirements": ("deletion policy", "retention window"),
+    },
+    "external_transfer": {
+        "why": ("Dışa veri aktarımı üçüncü taraf, onay ve veri yerleşimi "
+                "risklerini değiştirir. / External transfer changes third-party, "
+                "consent and data-residency risk."),
+        "rationale": ("Varsayılan olarak dış aktarım yoktur; yalnızca açıkça "
+                      "onaylanan aktarım eklenir. / No transfer is the default; "
+                      "only an explicitly approved transfer is added."),
+        "requirements": ("data transfer boundary", "third-party consent"),
+    },
+    "api_compat": {
+        "why": ("Breaking API değişikliği mevcut istemcileri ve sözleşmeleri "
+                "bozabilir. / A breaking API change can break existing clients "
+                "and contracts."),
+        "rationale": ("Yeni sürüm, eski istemcileri bozmadan geçiş sağlar. / A "
+                      "new API version preserves existing clients during migration."),
+        "requirements": ("API compatibility", "deprecation window"),
+    },
+    "auth_session": {
+        "why": ("Oturum ve kimlik doğrulama modeli güvenlik, yenileme ve çıkış "
+                "davranışını belirler. / Session and authentication choices "
+                "determine security, refresh and logout behavior."),
+        "rationale": ("HttpOnly güvenli oturum çerezi, tarayıcıda token "
+                      "saklamaya göre daha güvenli varsayılandır. / An HttpOnly "
+                      "secure session cookie is safer than browser token storage."),
+        "requirements": ("authentication model", "session expiry"),
+    },
+    "file_access": {
+        "why": ("Paylaşım erişim modeli yetkisiz dosya erişimi ve veri sızıntısı "
+                "riskini değiştirir. / The sharing access model changes "
+                "unauthorized-access and data-leak risk."),
+        "rationale": ("Sahip-only erişim en dar yetkiyle başlar ve sonra "
+                      "genişletilebilir. / Owner-only access starts from least "
+                      "privilege and can be expanded later."),
+        "requirements": ("file access model", "sharing permissions"),
+    },
+    "database": {
+        "why": ("Veritabanı seçimi migration, işlem ve operasyon modelini "
+                "belirler. / The database choice determines migrations, "
+                "transactions and operations."),
+        "rationale": ("PostgreSQL güçlü işlem ve migration desteğiyle güvenli "
+                      "varsayılandır. / PostgreSQL is the safe default with "
+                      "strong transactions and migration support."),
+        "requirements": ("database engine", "migration strategy"),
+    },
+    "file_storage": {
+        "why": ("Dosya depolama yeri kalıcılık, boyut ve erişim modelini "
+                "belirler. / File storage location determines durability, size "
+                "and access behavior."),
+        "rationale": ("Yerel dosya sistemi ek altyapı gerektirmeyen en basit "
+                      "varsayılandır. / The local filesystem is the simplest "
+                      "default without extra infrastructure."),
+        "requirements": ("file storage backend", "retention and deletion"),
+    },
+    "scope": {
+        "why": ("Zorunlu modda kapsam sınırı yazılmadan plan başlatılmaz. / "
+                "Required mode must record an explicit scope boundary."),
+        "rationale": ("Ek kapsam dışı madde yok varsayımı en dar başlangıçtır. / "
+                      "No extra out-of-scope item is the narrowest starting point."),
+        "requirements": ("scope boundary",),
+    },
+    "jwt_refresh": {
+        "why": ("JWT yenileme ve çıkış davranışı token ömrü ve iptal riskini "
+                "belirler. / JWT refresh/logout behavior determines token "
+                "lifetime and revocation risk."),
+        "rationale": ("Kısa access token ve refresh token, uzun ömürlü token'a "
+                      "göre daha güvenlidir. / A short access token plus refresh "
+                      "token is safer than a long-lived token."),
+        "requirements": ("token lifetime", "logout revocation"),
+    },
+    "session_expiry": {
+        "why": ("Oturum süresi paylaşılan cihaz ve çalınan çerez riskini "
+                "değiştirir. / Session expiry changes shared-device and stolen-"
+                "cookie risk."),
+        "rationale": ("30 dakikalık hareketsizlik sonlandırması güvenli "
+                      "varsayılandır. / A 30-minute idle expiry is the safe default."),
+        "requirements": ("session expiry", "remember-me policy"),
+    },
+    "db_rollback": {
+        "why": ("Migration geri alma stratejisi başarısız dağıtımda veri "
+                "kaybını önler. / Migration rollback strategy prevents data loss "
+                "during a failed deploy."),
+        "rationale": ("İleri-only migration ve yedek, geri dönüşü en "
+                      "öngörülebilir kılar. / Forward-only migrations plus backup "
+                      "make rollback predictable."),
+        "requirements": ("migration rollback", "backup policy"),
+    },
+    "api_deprecation": {
+        "why": ("Deprecation penceresi istemcilerin geçiş süresini belirler. / "
+                "The deprecation window determines client migration time."),
+        "rationale": ("En az iki sürüm önceden duyuru, ani kırılmayı önler. / "
+                      "Announcing two versions ahead prevents an abrupt break."),
+        "requirements": ("deprecation window", "client migration"),
+    },
+    "file_delete": {
+        "why": ("Dosya silme politikası yanlışlıkla kalıcı kaybı önler. / File "
+                "deletion policy prevents accidental permanent loss."),
+        "rationale": ("Soft delete geri alma sağlar. / Soft delete provides "
+                      "recovery."),
+        "requirements": ("file deletion", "recovery"),
+    },
+}
+
 
 def detect_topics(request: str) -> list[str]:
     return [topic for topic in TOPIC_ORDER
@@ -579,14 +729,38 @@ def critical_questions(request: str, decisions, facts: dict, *,
             recommended = next((option[0] for option in rule["options"]
                                 if option[2]), None)
             options = list(rule["options"])
+        context = QUESTION_CONTEXT.get(topic, {})
+        why = context.get("why")
+        rationale = context.get("rationale")
+        if contradiction is not None:
+            evidence_label = _choice_label(topic, recommended)
+            why = (f"{why or ''} "
+                   f"İstek ile kanıt çelişiyor: {contradiction['source']} "
+                   f"{evidence_label} gösteriyor. / The request conflicts with "
+                   f"existing {contradiction['source']} evidence for "
+                   f"{evidence_label}.").strip()
+            rationale = (
+                f"Recommended {evidence_label} because {contradiction['source']} "
+                f"is verified evidence; the conflicting request needs an "
+                f"explicit user confirmation before it can supersede it.")
         questions.append(make_question(
             topic, text, options, critical=True,
-            depends_on=depends_on))
+            depends_on=depends_on, why=why, rationale=rationale,
+            affected_requirements=context.get("requirements")))
         if recommended is not None:
             questions[-1]["recommended_option"] = recommended
             for option in questions[-1]["options"]:
                 option["recommended"] = option["id"] == recommended
+            questions[-1]["alternatives"] = [
+                option["label"] for option in questions[-1]["options"]
+                if option["id"] != recommended]
+            if contradiction is None:
+                label = _choice_label(topic, recommended)
+                questions[-1]["rationale"] = (
+                    f"{questions[-1]['rationale']} Deterministic recommendation: "
+                    f"{label}.")
     if not questions and mode == "required":
+        context = QUESTION_CONTEXT["scope"]
         questions.append(make_question(
             "scope",
             "Bu görevin kapsam dışında bırakılacak maddeleri neler? / "
@@ -594,7 +768,9 @@ def critical_questions(request: str, decisions, facts: dict, *,
             [
                 ("none", "Ek kapsam dışı madde yok", True),
                 ("other", "Diğer — kendim yazacağım", False),
-            ], critical=True))
+            ], critical=True, why=context["why"],
+            rationale=context["rationale"],
+            affected_requirements=context["requirements"]))
     return questions
 
 
@@ -658,9 +834,12 @@ def followup_questions(key: str, option: str | None) -> list[dict]:
     spec = FOLLOWUPS.get((key, option)) or FOLLOWUPS.get((key, "any"))
     if spec is None:
         return []
+    context = QUESTION_CONTEXT.get(spec["key"], {})
     return [make_question(
         spec["key"], spec["text"], spec["options"], critical=True,
-        depends_on=spec["depends_on"])]
+        depends_on=spec["depends_on"], why=context.get("why"),
+        rationale=context.get("rationale"),
+        affected_requirements=context.get("requirements"))]
 
 
 def _git_head(root: Path, context_state: dict) -> str | None:

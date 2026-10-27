@@ -21,6 +21,10 @@ try:
     from tools.project_identity import ensure_project_identity
     from tools.project_memory import MemoryError, ProjectMemory
     from tools.run_owner import atomic_write_json
+    try:
+        from tools import context_selector
+    except ModuleNotFoundError:  # older flat installation
+        context_selector = None  # type: ignore
 except ModuleNotFoundError:
     import assumption_guard  # type: ignore
     import git_memory_hook  # type: ignore
@@ -29,6 +33,10 @@ except ModuleNotFoundError:
     from project_identity import ensure_project_identity  # type: ignore
     from project_memory import MemoryError, ProjectMemory  # type: ignore
     from run_owner import atomic_write_json  # type: ignore
+    try:
+        import context_selector  # type: ignore
+    except ModuleNotFoundError:  # older flat installation
+        context_selector = None  # type: ignore
 
 DEFAULT_PLATFORM = os.environ.get("AO_PLATFORM", "unknown")
 
@@ -152,6 +160,15 @@ def context(args) -> dict:
     identity = ensure_project_identity(root)
     with ProjectMemory(root, identity=identity) as memory:
         bundle = memory.context_bundle(limit=8)
+        if context_selector is not None:
+            selection = context_selector.select_context(
+                memory, getattr(args, "request", None) or "",
+                budget_tokens=getattr(args, "selection_budget", 900) or 900,
+                modules=getattr(args, "module", None))
+        else:  # older flat installation without the selector module
+            selection = {"status": "unavailable", "items": [], "refs": [],
+                         "token_estimate": 0, "reason":
+                         "context selector module is not installed"}
         return {
             "platform": _platform(args),
             "identity": {k: identity.get(k) for k in
@@ -167,6 +184,8 @@ def context(args) -> dict:
             "requirements_contract": bundle.get("contract"),
             "contract_ref": bundle.get("contract_ref"),
             "verification": bundle.get("verification"),
+            "selection": selection,
+            "selected_context": selection,
             "open_tasks": {
                 "next_tasks": (bundle.get("handoff") or {}).get("payload", {}).get("next_tasks", []),
                 "next_milestone": (bundle.get("handoff") or {}).get("payload", {}).get("next_milestone"),
@@ -283,7 +302,7 @@ def main(argv=None) -> int:
     source.add_argument("--request-file")
     source.add_argument("--request-stdin", action="store_true")
     start_p.add_argument("--mode", default="auto",
-                         choices=["auto", "fast", "balanced", "rigorous"])
+                         choices=["solo", "auto", "fast", "balanced", "rigorous"])
     start_p.add_argument("--grill", action="store_true")
     start_p.add_argument("--grill-mode", default="auto",
                          choices=["off", "auto", "required", "plan-only"])
@@ -301,6 +320,9 @@ def main(argv=None) -> int:
 
     context_p = sub.add_parser("context")
     context_p.add_argument("--limit", type=int, default=2400)
+    context_p.add_argument("--request")
+    context_p.add_argument("--selection-budget", type=int, default=900)
+    context_p.add_argument("--module", action="append")
     handoff_p = sub.add_parser("handoff")
     handoff_p.add_argument("--limit", type=int, default=2400)
     pause_p = sub.add_parser("pause")

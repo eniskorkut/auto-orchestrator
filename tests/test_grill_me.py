@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -309,6 +310,76 @@ class GrillMeTests(unittest.TestCase):
         self.assertTrue(any(
             item.get("evidence", {}).get("expected") == "session"
             for item in contract["acceptance_criteria"]))
+
+
+    def test_question_metadata_is_persisted_and_readable_after_reopen(self):
+        with GrillMeEngine(self.root) as engine:
+            started = engine.start("Kullanıcı giriş sistemini geliştir",
+                                   origin_platform="codex", mode="auto")
+            question = started["question"]
+            self.assertEqual(started["interview"]["schema_version"], 2)
+            self.assertTrue(question["why"])
+            self.assertTrue(question["rationale"])
+            self.assertTrue(question["alternatives"])
+            self.assertTrue(question["affected_requirements"])
+            self.assertTrue(question["critical"])
+            self.assertIsNone(question["dependency"])
+            self.assertTrue(all(set(option) == {"id", "label", "recommended"}
+                                for option in question["options"]))
+        with GrillMeEngine(self.root) as engine:
+            resumed = engine.resume()
+            reopened = resumed["question"]
+            self.assertEqual(reopened["why"], question["why"])
+            self.assertEqual(reopened["rationale"], question["rationale"])
+            self.assertEqual(reopened["alternatives"], question["alternatives"])
+            self.assertEqual(reopened["affected_requirements"],
+                             question["affected_requirements"])
+
+    def test_dependent_question_persists_metadata_and_dependency(self):
+        with GrillMeEngine(self.root) as engine:
+            started = engine.start("Dosya paylaşımı ve depolama ekle",
+                                   origin_platform="codex", mode="auto")
+            interview_id = started["interview"]["interview_id"]
+            rows = {row["question_key"]: row for row in engine.conn.execute(
+                "SELECT * FROM interview_questions WHERE interview_id=?",
+                (interview_id,))}
+            storage = engine._question(rows["file_storage"]["question_id"])
+            self.assertEqual(storage["dependency"], "file_access")
+            self.assertEqual(storage["depends_on"], ["file_access"])
+            self.assertTrue(storage["why"])
+            self.assertTrue(storage["rationale"])
+            self.assertTrue(storage["affected_requirements"])
+
+    def test_contradiction_question_has_rationale_and_evidence(self):
+        (self.root / "backend").mkdir()
+        (self.root / "backend" / "auth.py").write_text(
+            "import jwt\n", encoding="utf-8")
+        with GrillMeEngine(self.root) as engine:
+            started = engine.start("Use session cookies for authentication",
+                                   origin_platform="codex", mode="auto")
+            question = started["question"]
+            self.assertEqual(question["recommended_option"], "jwt")
+            self.assertIn("verified evidence", question["rationale"])
+            self.assertIn("conflicts", question["why"])
+
+    def test_new_interview_schema_is_two_but_old_rows_still_readable(self):
+        with GrillMeEngine(self.root) as engine:
+            started = engine.start("Kullanıcı giriş sistemini geliştir",
+                                   origin_platform="codex", mode="auto")
+            self.assertEqual(started["interview"]["schema_version"], 2)
+            interview_id = started["interview"]["interview_id"]
+            now = time.time()
+            engine.conn.execute(
+                "INSERT INTO interview_questions(interview_id,question_id,"
+                "ordinal,question_key,question,options,recommended_option,"
+                "status,depends_on,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (interview_id, "q_" + "f" * 16, 100, "legacy_question",
+                 "Legacy question?", "[]", None, "open", "[]", now))
+            engine.conn.commit()
+            legacy = engine._question("q_" + "f" * 16)
+            self.assertIsNone(legacy["why"])
+            self.assertEqual(legacy["alternatives"], [])
+            self.assertEqual(legacy["affected_requirements"], [])
 
 
 if __name__ == "__main__":

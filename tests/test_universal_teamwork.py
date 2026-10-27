@@ -205,5 +205,29 @@ class UniversalTeamworkTests(unittest.TestCase):
                 grill=False, grill_mode="auto", interview_id=None))
 
 
+    def test_context_includes_bounded_selection_block(self):
+        with ProjectMemory(self.root) as memory:
+            memory.add_requirement(
+                "Resolve login session expiry",
+                category="unresolved_blocking",
+                status="unresolved_blocking", source="user")
+            memory.add_decision(
+                topic="auth_session", decision="JWT", rationale="login tokens",
+                source="user", status="confirmed", confirmed_by="user")
+        context = universal.context(self._args(
+            limit=1200, request="Fix login session", selection_budget=500,
+            module=None))
+        self.assertIn("selection", context)
+        selection = context["selection"]
+        self.assertEqual(selection, context["selected_context"])
+        self.assertTrue(any(ref.startswith("requirement:")
+                            for ref in selection["refs"]))
+        self.assertLessEqual(selection["token_estimate"],
+                             selection["budget_tokens"])
+        for item in selection["items"]:
+            self.assertTrue(item["provenance"])
+            self.assertTrue(item["ref"])
+
+
 if __name__ == "__main__":
     unittest.main()
