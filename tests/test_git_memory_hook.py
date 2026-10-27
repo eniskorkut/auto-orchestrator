@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import stat
 import subprocess
 import tempfile
@@ -26,7 +27,8 @@ class GitMemoryHookTests(unittest.TestCase):
         text = path.read_text(encoding="utf-8")
         self.assertIn("echo user-hook", text)
         self.assertIn(git_memory_hook.BEGIN, text)
-        self.assertTrue(path.stat().st_mode & stat.S_IXUSR)
+        if os.name != "nt":
+            self.assertTrue(path.stat().st_mode & stat.S_IXUSR)
         self.assertTrue(git_memory_hook.status(self.root)["managed"])
         removed = git_memory_hook.uninstall(self.root)
         self.assertEqual(removed["state"], "updated")
@@ -48,6 +50,7 @@ class GitMemoryHookTests(unittest.TestCase):
         self.assertEqual(path.read_text(encoding="utf-8").count(
             git_memory_hook.BEGIN), 1)
 
+    @unittest.skipIf(os.name == "nt", "Git hook shell execution is POSIX-covered")
     def test_commit_runs_the_managed_capture_hook(self):
         tools = self.root / "tools"
         tools.mkdir()
