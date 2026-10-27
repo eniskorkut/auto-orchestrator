@@ -64,7 +64,9 @@ def write_file(dest: Path, text: str, dry_run: bool, force: bool = False,
     if existed:
         old_bytes = dest.read_bytes()
         new_bytes = text.encode('utf-8')
-        if old_bytes == new_bytes:
+        if (old_bytes == new_bytes
+                or old_bytes.replace(b'\r\n', b'\n')
+                == new_bytes.replace(b'\r\n', b'\n')):
             return 'unchanged'
         old = old_bytes.decode('utf-8', errors='replace')
         if not force and not managed:
@@ -297,11 +299,14 @@ def install(target: Path, platform: str, codex_model: str, dry_run: bool, force_
             raise Conflict(f'Not a normal file: {dest}')
         if dest.is_file() and not force_generated:
             old = dest.read_text(encoding='utf-8')
+            # Line-ending differences are not user content changes.
+            old_normalized = old.replace('\r\n', '\n')
+            text_normalized = text.replace('\r\n', '\n')
             # Runtime modules and dashboard assets may upgrade in place only
             # when the manifest proves the file is still installer-generated.
             # Profiles, plugins and skill files keep the stricter opt-in rule.
             managed_update = relative.startswith('tools/') and managed(relative, dest)
-            if old != text and not managed_update:
+            if old_normalized != text_normalized and not managed_update:
                 raise Conflict(f'Existing file differs: {dest}; nothing changed.')
     conf = target/'.codex/config.toml'
     guard_dest(target,conf)

@@ -8,6 +8,7 @@ local working copies.
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -16,6 +17,15 @@ import secrets
 import time
 import uuid
 from pathlib import Path
+
+try:
+    import fcntl
+except ImportError:  # Windows
+    fcntl = None
+try:
+    import msvcrt
+except ImportError:  # POSIX
+    msvcrt = None
 
 try:
     from tools.run_owner import atomic_write_json, read_json
@@ -32,6 +42,41 @@ INSTANCE_VERSION = 1
 
 class ProjectIdentityError(ValueError):
     pass
+
+
+@contextlib.contextmanager
+def _identity_lock(root: Path):
+    path = Path(root) / ".auto-orchestrator" / "identity.lock"
+    if path.parent.is_symlink():
+        raise ProjectIdentityError("project state directory must not be a symlink")
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    handle = open(path, "a+b")
+    try:
+        handle.seek(0)
+        if handle.read(1) == b"":
+            handle.write(b"\0")
+            handle.flush()
+        while True:
+            try:
+                if fcntl is not None:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+                elif msvcrt is not None:
+                    handle.seek(0)
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                break
+            except (OSError, ValueError):
+                time.sleep(0.02)
+        yield
+    finally:
+        try:
+            if fcntl is not None:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            elif msvcrt is not None:
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        except (OSError, ValueError):
+            pass
+        handle.close()
 
 
 def identity_path(root: Path) -> Path:
@@ -115,39 +160,6 @@ def _ensure_local_instance(root: Path, manifest: dict) -> dict:
     return value
 
 
-def _create_manifest_exclusive(path: Path, value: dict) -> bool:
-    """Create the manifest only if absent, with complete content."""
-    text = json.dumps(value, indent=2, ensure_ascii=False) + "\n"
-    temporary = path.with_name(path.name + f".tmp-{os.getpid()}-{secrets.token_hex(4)}")
-    try:
-        temporary.write_text(text, encoding="utf-8")
-        try:
-            temporary.chmod(0o600)
-        except OSError:
-            pass
-        try:
-            os.link(temporary, path)
-            return True
-        except FileExistsError:
-            return False
-        except OSError:
-            # Filesystems without hard links: fall back to exclusive create.
-            try:
-                descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-            except FileExistsError:
-                return False
-            try:
-                os.write(descriptor, text.encode("utf-8"))
-            finally:
-                os.close(descriptor)
-            return True
-    finally:
-        try:
-            temporary.unlink()
-        except FileNotFoundError:
-            pass
-
-
 def ensure_project_identity(root, *, legacy_project_id: str | None = None) -> dict:
     """Return stable portable and local identities, creating them if needed.
 
@@ -181,18 +193,16 @@ def ensure_project_identity(root, *, legacy_project_id: str | None = None) -> di
         if path.parent.is_symlink():
             raise ProjectIdentityError("project state directory must not be a symlink")
         path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        if _create_manifest_exclusive(path, manifest):
-            migrated = True
-        else:
-            # Another process won the creation race. Use its identity.
-            for _ in range(20):
-                manifest = _load_manifest(root)
-                if manifest is not None:
-                    break
-                time.sleep(0.01)
+        candidate = manifest
+        with _identity_lock(root):
+            manifest = _load_manifest(root)
             if manifest is None:
-                raise ProjectIdentityError("project manifest could not be read")
-            migrated = False
+                atomic_write_json(path, candidate)
+                manifest = candidate
+                migrated = True
+            else:
+                # Another process won the creation race. Use its identity.
+                migrated = False
     instance = _ensure_local_instance(root, manifest)
     return {
         "version": MANIFEST_VERSION,
