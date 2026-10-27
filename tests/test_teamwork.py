@@ -719,6 +719,55 @@ class TeamworkEngineTests(TeamworkTestCase):
 
 
 class TeamworkGuardMetadataTests(TeamworkTestCase):
+    def test_status_exposes_requirements_without_changing_verified_progress(self):
+        from tools.completion_engine import CRITERION_STATES
+        from tools.requirements_contract import validate_contract
+
+        contract = validate_contract({
+            "contract_id": "rc_" + "a" * 16,
+            "contract_version": 1,
+            "schema_version": 2,
+            "status": "confirmed",
+            "project_id": "p_" + "a" * 16,
+            "interview_id": None,
+            "goal": "Expose requirements additively",
+            "source": {"kind": "user", "ref": "status-test"},
+            "confirmed_decisions": [],
+            "constraints": [],
+            "out_of_scope": [],
+            "acceptance_criteria": [{
+                "id": "ac_01_tests",
+                "text": "A behavioral test is required",
+                "applies_to": ["verify"],
+                "decision_ref": None,
+                "evidence": {"kind": "not_automated"},
+                "requirement_id": "req_01_tests",
+                "critical": False,
+                "review_required": False,
+                "implementation_files": [],
+                "test_cases": [{
+                    "test_id": "test_behavior",
+                    "expected_behavior": "The behavior is observed.",
+                    "negative": False,
+                    "required": True,
+                }],
+            }],
+            "verification_strategy": {"commands": [], "required_roles": []},
+            "blockers": [],
+            "tasks": [],
+            "created_at": 1.0,
+            "approved_at": 1.0,
+        })
+        plan = sample_plan("requirements-status")
+        plan["requirements_contract"] = contract
+        self.engine.init(plan)
+        state = self.engine.status("requirements-status")
+        self.assertIn("requirements", state)
+        self.assertEqual(state["verified_progress"], 0.0)
+        self.assertIsNone(state["estimated_progress"])
+        self.assertFalse(state["requirements"]["verified_completion"])
+        self.assertIn(state["requirements"]["status"], CRITERION_STATES)
+
     def test_contract_and_assumption_guard_survive_snapshot(self):
         contract = {
             "contract_id": "rc_" + "7" * 16,

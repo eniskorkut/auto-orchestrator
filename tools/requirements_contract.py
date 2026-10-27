@@ -37,15 +37,31 @@ PROJECT_ID = re.compile(r"^p_[0-9a-f]{16}$")
 INTERVIEW_ID = re.compile(r"^iv_[0-9a-f]{16}$")
 DECISION_ID = re.compile(r"^d_[0-9a-f]{16}$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
-CONTRACT_VERSION = 1
+REQUIREMENT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,79}$")
+TEST_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,119}$")
+CONTRACT_VERSION = 1  # legacy marker; new contracts use CONTRACT_SCHEMA_VERSION
+CONTRACT_SCHEMA_VERSION = 2
+SCHEMA_VERSION = CONTRACT_SCHEMA_VERSION
+DEFAULT_VERIFICATION_COMMAND = "python3 -m unittest discover -v"
 MAX_CONTRACT_VERSION = 10000
 MAX_CONTRACT_BYTES = 131072
 MAX_POINTER_BYTES = 8192
 MAX_ITEMS = 80
 MAX_TEXT = 1200
+MAX_TEST_CASES = 12
+MAX_IMPLEMENTATION_FILES = 20
 PHASES = ("build", "verify", "review", "audit")
 STATUSES = ("confirmed", "invalidated", "superseded")
 SOURCE_KINDS = ("grill-me", "user", "plan", "import")
+CRITICAL_TOPICS = frozenset({
+    "auth_session", "database", "file_access", "file_storage",
+    "payments", "data_retention", "api_compat",
+})
+# Fields that only exist in schema v2. Their presence infers v2 for callers
+# that build a contract without spelling out ``schema_version``.
+V2_CONTRACT_FIELDS = ("verification_command",)
+V2_CRITERION_FIELDS = ("requirement_id", "critical", "review_required",
+                       "implementation_files", "test_cases")
 # Metadata changes do not alter the contract body or its digest.
 METADATA_FIELDS = frozenset({
     "sha256", "created_at", "approved_at", "status", "supersedes",
@@ -118,6 +134,102 @@ def _phase_list(value):
     return result
 
 
+def contract_schema_version(contract: dict) -> int:
+    """Return 1 or 2 without changing v1 normalization.
+
+    Explicit ``schema_version`` wins. For backwards compatibility an omitted
+    version is v1 unless a field that only schema v2 defines is present, in
+    which case the contract is treated as v2.
+    """
+    if not isinstance(contract, dict):
+        raise ContractError("contract must be an object")
+    explicit = contract.get("schema_version")
+    if explicit is not None:
+        if type(explicit) is not int or explicit not in (1, 2):
+            raise ContractError("schema_version must be 1 or 2")
+        if explicit == 1 and any(
+                field in contract for field in V2_CONTRACT_FIELDS):
+            raise ContractError("schema v1 contract contains schema v2 fields")
+        if explicit == 1:
+            for item in contract.get("acceptance_criteria") or []:
+                if isinstance(item, dict) and any(
+                        field in item for field in V2_CRITERION_FIELDS):
+                    raise ContractError(
+                        "schema v1 criterion contains schema v2 fields")
+        return explicit
+    if any(field in contract for field in V2_CONTRACT_FIELDS):
+        return 2
+    for item in contract.get("acceptance_criteria") or []:
+        if isinstance(item, dict) and any(
+                field in item for field in V2_CRITERION_FIELDS):
+            return 2
+    return 1
+
+
+def _implementation_files(value) -> list[str]:
+    if value is None:
+        return []
+    if not isinstance(value, list) or len(value) > MAX_IMPLEMENTATION_FILES:
+        raise ContractError(
+            f"implementation_files must contain at most {MAX_IMPLEMENTATION_FILES} entries")
+    result = []
+    for item in value:
+        path = _text(item, "implementation file", limit=300).replace("\\", "/")
+        if path.startswith("/") or ".." in path.split("/") or path in (".", ""):
+            raise ContractError("implementation file must be repository-relative")
+        if path not in result:
+            result.append(path)
+    return result
+
+
+def _test_cases(value) -> list[dict]:
+    if value is None:
+        return []
+    if not isinstance(value, list) or len(value) > MAX_TEST_CASES:
+        raise ContractError(
+            f"test_cases must contain at most {MAX_TEST_CASES} entries")
+    result = []
+    seen = set()
+    for item in value:
+        if not isinstance(item, dict):
+            raise ContractError("test case must be an object")
+        test_id = item.get("test_id")
+        if not isinstance(test_id, str) or not TEST_ID.fullmatch(test_id):
+            raise ContractError("test case id is invalid")
+        if test_id in seen:
+            raise ContractError("test case id must be unique")
+        seen.add(test_id)
+        expected = _text(item.get("expected_behavior"), "expected_behavior",
+                         limit=500)
+        negative = item.get("negative", False)
+        required = item.get("required", True)
+        if not isinstance(negative, bool) or not isinstance(required, bool):
+            raise ContractError("test case flags must be booleans")
+        result.append({
+            "test_id": test_id,
+            "expected_behavior": expected,
+            "negative": negative,
+            "required": required,
+        })
+    return result
+
+
+def _verification_command(value) -> str:
+    if value is None:
+        return DEFAULT_VERIFICATION_COMMAND
+    command = _text(value, "verification_command", limit=500)
+    if any(char in command for char in (";", "|", "&", "$", "`", "\n", "\r")):
+        raise ContractError(
+            "verification_command contains shell metacharacters")
+    try:
+        argv = shlex.split(command)
+    except ValueError as exc:
+        raise ContractError("verification_command is not parseable") from exc
+    if not _allowed_command(argv):
+        raise ContractError("verification_command is not an allowed test command")
+    return command
+
+
 def canonical_digest(value) -> str:
     encoded = json.dumps(value, sort_keys=True, separators=(",", ":"),
                          ensure_ascii=False).encode("utf-8")
@@ -141,7 +253,8 @@ def compact_contract_ref(contract: dict) -> dict:
     }
 
 
-def _validate_criterion(item, decisions: set[str]) -> dict:
+def _validate_criterion(item, decisions: set[str],
+                        schema_version: int = 1) -> dict:
     if not isinstance(item, dict):
         raise ContractError("acceptance criterion must be an object")
     criterion_id = item.get("id")
@@ -183,6 +296,29 @@ def _validate_criterion(item, decisions: set[str]) -> dict:
         if not _allowed_command(argv):
             raise ContractError("criterion command is not an allowed test command")
         normalized["evidence"]["command"] = command
+    if schema_version >= 2:
+        requirement_id = item.get("requirement_id")
+        if requirement_id is None:
+            requirement_id = ("req_" + criterion_id[3:])[:66]
+        if (not isinstance(requirement_id, str)
+                or not REQUIREMENT_ID.fullmatch(requirement_id)):
+            raise ContractError("criterion requirement_id is invalid")
+        critical = item.get("critical", False)
+        review_required = item.get("review_required", critical)
+        if not isinstance(critical, bool) or not isinstance(review_required, bool):
+            raise ContractError("criterion critical/review flags must be booleans")
+        implementation_files = _implementation_files(
+            item.get("implementation_files"))
+        test_cases = _test_cases(item.get("test_cases"))
+        # Verification state is intentionally not part of an immutable
+        # contract. Any supplied status-like field is ignored, never stored.
+        normalized.update({
+            "requirement_id": requirement_id,
+            "critical": critical,
+            "review_required": review_required,
+            "implementation_files": implementation_files,
+            "test_cases": test_cases,
+        })
     return normalized
 
 
@@ -227,6 +363,7 @@ def _validate_version_ref(value, field):
 def validate_contract(contract: dict) -> dict:
     if not isinstance(contract, dict):
         raise ContractError("contract must be an object")
+    schema_version = contract_schema_version(contract)
     contract_id = contract.get("contract_id")
     if not isinstance(contract_id, str) or not CONTRACT_ID.fullmatch(contract_id):
         raise ContractError("contract id is invalid")
@@ -274,7 +411,8 @@ def validate_contract(contract: dict) -> dict:
     raw_criteria = contract.get("acceptance_criteria", [])
     if not isinstance(raw_criteria, list) or len(raw_criteria) > MAX_ITEMS:
         raise ContractError("acceptance_criteria must be a bounded array")
-    criteria = [_validate_criterion(item, decision_ids) for item in raw_criteria]
+    criteria = [_validate_criterion(item, decision_ids, schema_version)
+                for item in raw_criteria]
     if not criteria:
         raise ContractError("contract requires acceptance criteria")
     raw_blockers = contract.get("blockers", [])
@@ -320,6 +458,10 @@ def validate_contract(contract: dict) -> dict:
         "created_at": _timestamp(contract.get("created_at"), "created_at", 0.0),
         "approved_at": _timestamp(contract.get("approved_at"), "approved_at", 0.0),
     }
+    if schema_version == 2:
+        normalized["schema_version"] = 2
+        normalized["verification_command"] = _verification_command(
+            contract.get("verification_command"))
     normalized["sha256"] = contract_digest(normalized)
     expected = contract.get("sha256")
     if expected is not None and expected != normalized["sha256"]:
@@ -596,7 +738,92 @@ def _expected_code(topic: str, decision: str) -> str | None:
     return None
 
 
-def _code_criterion(decision: dict, index: int) -> dict:
+def _slug(value: str, limit: int = 40) -> str:
+    text = re.sub(r"[^a-z0-9]+", "_", value.casefold()).strip("_")
+    return (text or "criterion")[:limit].strip("_") or "criterion"
+
+
+def _behavioral_test_cases(topic: str, decision: str) -> list[dict]:
+    """Generate only behavior implied by a confirmed decision.
+
+    No decision means no generated test. The test IDs are intentionally stable
+    so a real test runner can emit them verbatim in its output.
+    """
+    lower = decision.casefold()
+
+    def case(test_id, behavior, negative=False, required=True):
+        return {
+            "test_id": test_id,
+            "expected_behavior": behavior,
+            "negative": negative,
+            "required": required,
+        }
+
+    if topic in ("auth_session", "jwt_refresh"):
+        if "jwt" in lower or topic == "jwt_refresh":
+            return [
+                case("test_jwt_access_issuance",
+                     "A valid login issues a signed short-lived access token."),
+                case("test_jwt_refresh_issuance",
+                     "A valid refresh token issues a new access token."),
+                case("test_invalid_refresh_rejected",
+                     "An invalid or revoked refresh token is rejected.",
+                     negative=True),
+                case("test_jwt_expiry_enforced",
+                     "An expired access token is rejected."),
+            ]
+        if "cookie" in lower or "session" in lower:
+            return [
+                case("test_session_issued",
+                     "A successful login issues a session cookie."),
+                case("test_invalid_session_rejected",
+                     "An unknown or tampered session cookie is rejected.",
+                     negative=True),
+                case("test_session_expiry_enforced",
+                     "An expired session is rejected."),
+                case("test_logout_invalidates_session",
+                     "Logout invalidates the server-side session."),
+            ]
+        return []
+    if topic == "database":
+        return [
+            case("test_migration_up",
+                 "The forward migration applies cleanly to an empty database."),
+            case("test_migration_down_or_rollback",
+                 "The migration can be rolled back, or a documented backup "
+                 "restore path is verified."),
+        ]
+    if topic == "file_access":
+        return [
+            case("test_file_access_owner_allowed",
+                 "The resource owner can access the file."),
+            case("test_file_access_unauthorized_denied",
+                 "A non-owner without permission is denied access.",
+                 negative=True),
+            case("test_file_delete_policy",
+                 "Delete follows the approved soft/hard/retention policy."),
+        ]
+    return []
+
+
+def _implementation_files_for(decision: dict, facts: dict,
+                              expected: str | None) -> list[str]:
+    if expected is None:
+        return []
+    code = facts.get("detected") or {}
+    if not code.get(expected):
+        return []
+    evidence = facts.get("code_evidence") or facts.get("evidence") or {}
+    paths = evidence.get(expected) if isinstance(evidence, dict) else None
+    if not isinstance(paths, list):
+        return []
+    return _implementation_files([path for path in paths
+                                 if isinstance(path, str)])[:MAX_IMPLEMENTATION_FILES]
+
+
+def _code_criterion(decision: dict, index: int, *, schema_version: int = 1,
+                    facts: dict | None = None,
+                    verification_command: str | None = None) -> dict:
     topic = decision["topic"]
     expected = _expected_code(topic, decision["decision"])
     criterion_id = f"ac_{index:02d}_{topic}"[:44]
@@ -604,23 +831,37 @@ def _code_criterion(decision: dict, index: int) -> dict:
     decision_ref = (decision.get("decision_ref")
                     or decision.get("decision_id"))
     if expected is None:
-        return {
+        criterion = {
             "id": criterion_id, "text": text,
             "applies_to": ["verify", "review"],
             "decision_ref": decision_ref,
             "evidence": {"kind": "not_automated"},
         }
-    return {
-        "id": criterion_id, "text": text,
-        "applies_to": ["build", "verify", "review"],
-        "decision_ref": decision_ref,
-        "evidence": {"kind": "code_evidence", "topic": topic,
-                     "expected": expected},
-    }
+    else:
+        criterion = {
+            "id": criterion_id, "text": text,
+            "applies_to": ["build", "verify", "review"],
+            "decision_ref": decision_ref,
+            "evidence": {"kind": "code_evidence", "topic": topic,
+                         "expected": expected},
+        }
+    if schema_version >= 2:
+        tests = _behavioral_test_cases(topic, decision["decision"])
+        critical = topic in CRITICAL_TOPICS or bool(tests)
+        criterion.update({
+            "requirement_id": f"req_{index:02d}_{_slug(topic)}"[:66],
+            "critical": critical,
+            "review_required": critical,
+            "implementation_files": _implementation_files_for(
+                decision, facts or {}, expected),
+            "test_cases": tests[:MAX_TEST_CASES],
+        })
+    return criterion
 
 
-def build_from_interview(root, interview_id: str, *, version: int | None = None) -> dict:
-    """Build a confirmed contract from an approved persistent interview."""
+def build_from_interview(root, interview_id: str, *, version: int | None = None,
+                         verification_command: str | None = None) -> dict:
+    """Build a confirmed schema-v2 contract from an approved interview."""
     root = Path(root).resolve()
     if not isinstance(interview_id, str) or not INTERVIEW_ID.fullmatch(interview_id):
         raise ContractError("interview id is invalid")
@@ -681,15 +922,31 @@ def build_from_interview(root, interview_id: str, *, version: int | None = None)
                 if answer and answer.strip().lower() not in (
                         "none", "ek kapsam dışı madde yok"):
                     out_of_scope.append(answer)
-        criteria = [_code_criterion(item, index + 1)
-                    for index, item in enumerate(confirmed)][:MAX_ITEMS - 1]
-        criteria.append({
-            "id": "ac_99_coverage",
-            "text": "All approved decisions are covered by test or review evidence",
-            "applies_to": ["verify", "review", "audit"],
-            "decision_ref": None,
-            "evidence": {"kind": "not_automated"},
-        })
+        try:
+            facts = scan_repository(root)
+        except (OSError, ValueError):
+            facts = {}
+        command = _verification_command(verification_command)
+        criteria = [_code_criterion(
+            item, index + 1, schema_version=CONTRACT_SCHEMA_VERSION,
+            facts=facts, verification_command=command)
+            for index, item in enumerate(confirmed)][:MAX_ITEMS - 1]
+        if not criteria:
+            # A clear interview has no user decision to bind to a test. Keep a
+            # single goal criterion so the contract remains valid, but never
+            # claim it is fully verified.
+            criteria.append({
+                "id": "ac_99_goal",
+                "text": "The approved goal is implemented and verified",
+                "applies_to": ["verify", "review", "audit"],
+                "decision_ref": None,
+                "evidence": {"kind": "not_automated"},
+                "requirement_id": "req_99_goal",
+                "critical": False,
+                "review_required": False,
+                "implementation_files": [],
+                "test_cases": [],
+            })
         contract_id = "rc_" + hashlib.sha256(
             str(interview_id).encode()).hexdigest()[:16]
         latest = latest_contract(root, contract_id)
@@ -700,10 +957,12 @@ def build_from_interview(root, interview_id: str, *, version: int | None = None)
         contract = {
             "contract_id": contract_id,
             "contract_version": next_version,
+            "schema_version": CONTRACT_SCHEMA_VERSION,
             "status": "confirmed",
             "project_id": identity["project_id"],
             "interview_id": interview_id,
             "goal": str(interview["request_summary"])[:MAX_TEXT],
+            "verification_command": command,
             "source": {"kind": "grill-me", "ref": interview_id},
             "confirmed_decisions": [{
                 "decision_ref": item["decision_id"],

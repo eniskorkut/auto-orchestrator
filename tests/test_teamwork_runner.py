@@ -6,6 +6,9 @@ import sys
 import tempfile
 import time
 
+from tools.project_identity import ensure_project_identity
+from tools.project_memory import ProjectMemory
+from tools.requirements_contract import validate_contract
 from tools.run_owner import read_process_identity
 import unittest
 from pathlib import Path
@@ -17,6 +20,7 @@ from tools.teamwork_runner import (
     adapter_options,
     parse_verdict,
     path_allowed,
+    safe_command_output,
 )
 
 
@@ -178,6 +182,56 @@ def plan(run_id="runner-test", *, report_verdict="pass", max_repair=1):
     }
 
 
+def needs_review_contract(root: Path) -> dict:
+    identity = ensure_project_identity(root)
+    with ProjectMemory(root, identity=identity) as memory:
+        decision = memory.add_decision(
+            topic="auth_session", decision="JWT", source="user",
+            status="confirmed", confirmed_by="tester")
+    return validate_contract({
+        "contract_id": "rc_" + "6" * 16,
+        "contract_version": 1,
+        "schema_version": 2,
+        "status": "confirmed",
+        "project_id": identity["project_id"],
+        "interview_id": None,
+        "goal": "Expose unverified behavioral requirements",
+        "source": {"kind": "user", "ref": "runner-test"},
+        "confirmed_decisions": [{
+            "decision_ref": decision["decision_id"],
+            "topic": "auth_session",
+            "decision": "JWT",
+            "rationale": "",
+            "confirmed_by": "tester",
+        }],
+        "constraints": [],
+        "out_of_scope": [],
+        "acceptance_criteria": [{
+            "id": "ac_01_auth",
+            "text": "JWT access issuance is behaviorally tested",
+            "applies_to": ["verify"],
+            "decision_ref": decision["decision_id"],
+            "evidence": {"kind": "not_automated"},
+            "requirement_id": "req_01_auth",
+            "critical": False,
+            "review_required": True,
+            "implementation_files": ["backend/app.py"],
+            "test_cases": [{
+                "test_id": "test_jwt_access_issuance",
+                "expected_behavior": "A valid login issues an access token.",
+                "negative": False,
+                "required": True,
+            }],
+        }],
+        "verification_strategy": {"commands": [],
+                                  "required_roles": ["tester", "reviewer"]},
+        "blockers": [],
+        "tasks": [],
+        "created_at": 1.0,
+        "approved_at": 1.0,
+    })
+
+
 def parallel_plan(run_id="parallel-test"):
     return {
         "run_id": run_id,
@@ -288,6 +342,18 @@ class RunnerHelpersTests(unittest.TestCase):
         self.assertEqual(parse_verdict('{"verdict":"fail"}')["verdict"], "fail")
         self.assertIsNone(parse_verdict("no json"))
 
+    def test_command_output_tail_redacts_obvious_secrets(self):
+        output, safe = safe_command_output(
+            "token=super-secret-value\nAuthorization: Bearer abc123\n"
+            "test_jwt_access_issuance ... ok")
+        self.assertTrue(safe)
+        self.assertNotIn("super-secret-value", output)
+        self.assertNotIn("abc123", output)
+        self.assertIn("<redacted>", output)
+        omitted, safe = safe_command_output("binary\x00output")
+        self.assertEqual(omitted, "")
+        self.assertFalse(safe)
+
 
 class RunnerExecutionTests(unittest.TestCase):
     def setUp(self):
@@ -316,6 +382,82 @@ class RunnerExecutionTests(unittest.TestCase):
                             for item in state["managed_sessions"]))
         self.assertTrue(any(item.get("tool_count") == 1
                             for item in state["managed_sessions"]))
+
+    def test_real_command_test_signals_are_preserved(self):
+        plan_value = plan(run_id="signals-test")
+        signal_command = (
+            f'"{sys.executable}" -c "print('
+            f"'test_jwt_access_issuance (auth.tests.SessionTests.test_jwt_access_issuance) ... ok'"
+            f')"')
+        plan_value["tasks"][0]["verify_commands"] = [signal_command]
+        runner = TeamworkRunner(self.root, plan_value, adapter=FakeAdapter(),
+                                max_seconds=60)
+        self.addCleanup(runner.close)
+        summary = runner.run()
+        self.assertEqual(summary["status"], "passed", summary)
+        engine = TeamworkEngine(self.root)
+        self.addCleanup(engine.close)
+        state = engine.status("signals-test")
+        backend = next(task for task in state["tasks"] if task["id"] == "backend")
+        signals = backend["result"]["tests"][0]["signals"]
+        self.assertIn("test_jwt_access_issuance", signals)
+
+    def test_passed_milestone_can_still_have_needs_review_requirements(self):
+        contract = needs_review_contract(self.root)
+        plan_value = plan(run_id="requirements-review")
+        plan_value["requirements_contract"] = contract
+        runner = TeamworkRunner(self.root, plan_value, adapter=FakeAdapter(),
+                                max_seconds=60)
+        self.addCleanup(runner.close)
+        summary = runner.run()
+        self.assertEqual(summary["status"], "passed", summary)
+        self.assertTrue(summary["requirements"]["criteria"])
+        self.assertEqual(summary["requirements"]["status"], "needs_review")
+        self.assertFalse(summary["requirements"]["verified_completion"])
+        self.assertTrue(summary["requirements"]["binding"]["commit_sha"])
+        self.assertEqual(summary["requirements"]["binding"]["contract_sha256"],
+                         contract["sha256"])
+        evidence_path = (self.root / ".auto-orchestrator" / "evidence" /
+                         "requirements-review" / "completion-verification-0.json")
+        self.assertTrue(evidence_path.is_file())
+        evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+        self.assertEqual(evidence["status"], "needs_review")
+        # Milestone semantics and verified progress are unchanged.
+        engine = TeamworkEngine(self.root)
+        self.addCleanup(engine.close)
+        state = engine.status("requirements-review")
+        self.assertEqual(state["status"], "passed")
+        self.assertEqual(state["verified_progress"], 1.0)
+        self.assertEqual(state["requirements"]["status"], "needs_review")
+        self.assertEqual(state["requirements"], summary["requirements"])
+
+    def test_solo_single_implementer_worktree_is_integrated(self):
+        value = {
+            "run_id": "solo-integration", "max_parallel": 1,
+            "pattern": "iterative_coding", "work_mode": "solo",
+            "milestones": [{
+                "id": "M1", "objective": "SOLO change", "depends_on": [],
+                "acceptance": ["change integrated"],
+                "verification_policy": {"require_roles": [], "max_repair": 0},
+            }],
+            "tasks": [{
+                "id": "backend", "role": "implementer", "milestone": "M1",
+                "phase": "build", "objective": "Create backend",
+                "acceptance": ["backend file exists"], "read_scope": [],
+                "write_scope": ["backend/"], "depends_on": [],
+                "timeout_seconds": 30, "max_retries": 0,
+                "verify_commands": [f'"{sys.executable}" -c "print(\'ok\')"'],
+                "department": "backend", "provider": "fake",
+            }],
+        }
+        runner = TeamworkRunner(self.root, value, adapter=FakeAdapter(),
+                                max_seconds=30)
+        try:
+            summary = runner.run()
+        finally:
+            runner.close()
+        self.assertEqual(summary["status"], "passed")
+        self.assertTrue((self.root / "backend" / "app.py").is_file())
 
     def test_generated_caches_are_not_scoped_as_agent_changes(self):
         with tempfile.TemporaryDirectory() as temp:

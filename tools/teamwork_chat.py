@@ -539,8 +539,8 @@ def start(args) -> dict:
     root = _root(args.root)
     _require_repository(root)
     mode = args.mode
-    if mode not in ("auto", "fast", "balanced", "rigorous"):
-        raise ChatError("mode must be auto, fast, balanced or rigorous")
+    if mode not in ("solo", "auto", "fast", "balanced", "rigorous"):
+        raise ChatError("mode must be solo, auto, fast, balanced or rigorous")
     model = _model(getattr(args, "model", None))
     run_id = _safe_run_id(args.run_id or f"team-{int(time.time())}-{os.getpid()}")
     token = os.urandom(16).hex()
@@ -674,6 +674,17 @@ def start(args) -> dict:
     }
 
 
+def plan_provider(active: dict) -> str | None:
+    path = active.get("plan")
+    if not isinstance(path, str):
+        return None
+    try:
+        value = read_json(Path(path), {})
+        return value.get("execution_provider") if isinstance(value, dict) else None
+    except (OSError, ValueError):
+        return None
+
+
 def status(args) -> dict:
     root = _root(args.root)
     active = _active(root)
@@ -722,6 +733,13 @@ def status(args) -> dict:
         "paused": paused,
         "pause_requested": pause_requested,
         "verified_progress": state.get("verified_progress"),
+        "requirements": state.get("requirements"),
+        "requirements_complete": bool(
+            (state.get("requirements") or {}).get("verified_completion")),
+        "origin_platform": selected_active.get("origin_platform")
+        or (state.get("assumption_guard") or {}).get("platform"),
+        "execution_provider": selected_active.get("execution_provider")
+        or plan_provider(selected_active),
         "estimated_progress": None,
         "current_milestone": current.get("id") if current else None,
         "milestones": [{k: item.get(k) for k in
@@ -795,6 +813,10 @@ def milestones(args) -> dict:
     data = status(args)
     return {"run_id": data["run_id"], "work_mode": data["mode"],
             "verified_progress": data["verified_progress"],
+            "requirements": data.get("requirements"),
+            "requirements_complete": data.get("requirements_complete"),
+            "origin_platform": data.get("origin_platform"),
+            "execution_provider": data.get("execution_provider"),
             "recovery_state": data["recovery_state"],
             "milestones": data["milestones"]}
 
@@ -910,7 +932,7 @@ def main(argv=None) -> int:
     source.add_argument("--request-file")
     source.add_argument("--request-stdin", action="store_true")
     start_p.add_argument("--mode", default="auto",
-                         choices=["auto", "fast", "balanced", "rigorous"])
+                         choices=["solo", "auto", "fast", "balanced", "rigorous"])
     start_p.add_argument("--run-id")
     start_p.add_argument("--model", default=DEFAULT_MODEL)
     start_p.add_argument("--provider", choices=["opencode", "codex"])

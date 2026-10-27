@@ -41,7 +41,7 @@ def main(argv=None) -> int:
     plan.add_argument("--model")
     plan.add_argument("--pattern")
     plan.add_argument("--max-parallel", type=int, default=3)
-    plan.add_argument("--mode", choices=["auto", "fast", "balanced", "rigorous"],
+    plan.add_argument("--mode", choices=["solo", "auto", "fast", "balanced", "rigorous"],
                       default=None)
     plan.add_argument("--repo", type=Path,
                       help="repository root to profile for adaptive planning")

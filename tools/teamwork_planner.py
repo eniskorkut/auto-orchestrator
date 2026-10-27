@@ -79,7 +79,7 @@ DISTRIBUTED_WORDS = (
     "cross-service", "full-stack", "full stack", "end-to-end",
 )
 BOTH_LAYER_WORDS = ("full-stack", "full stack", "end-to-end")
-WORK_MODES = ("fast", "balanced", "rigorous", "auto")
+WORK_MODES = ("solo", "fast", "balanced", "rigorous", "auto")
 SECURITY_WORDS = (
     "security", "auth", "authentication", "authorization", "payment",
     "secret", "credential", "permission", "encryption", "tenant", "billing",
@@ -87,6 +87,11 @@ SECURITY_WORDS = (
 MIGRATION_WORDS = ("migration", "schema", "database", "sqlite", "postgres", "mongo")
 DEPLOY_WORDS = ("deploy", "deployment", "production", "release", "rollout")
 BREAKING_WORDS = ("breaking", "public api", "contract change", "backward incompatible")
+FLOOR_TOPICS = frozenset({
+    "auth_session", "payments", "data_retention", "database",
+})
+MIGRATION_TOPICS = frozenset({"database", "api_compat"})
+HIGH_RISK_TOPICS = FLOOR_TOPICS | MIGRATION_TOPICS | frozenset({"file_access"})
 
 
 class TeamworkPlannerError(ValueError):
@@ -128,22 +133,74 @@ def _profile_number(profile, key, default=0):
     return max(0, value)
 
 
-def assess_complexity(request, *, repo_profile=None, requested_mode=None):
+def _contract_topics(contract):
+    if not isinstance(contract, dict):
+        return set()
+    topics = set()
+    for item in contract.get("confirmed_decisions") or []:
+        if isinstance(item, dict) and isinstance(item.get("topic"), str):
+            topics.add(item["topic"].strip().lower())
+    for criterion in contract.get("acceptance_criteria") or []:
+        if not isinstance(criterion, dict):
+            continue
+        evidence = criterion.get("evidence") or {}
+        topic = evidence.get("topic")
+        if isinstance(topic, str) and topic:
+            topics.add(topic.strip().lower())
+    return topics
+
+
+def _solo_high_risk(score, layers, security, migration, breaking, topics):
+    return bool(security or migration or breaking or layers >= 2
+                or score >= 34 or topics & HIGH_RISK_TOPICS)
+
+
+def assess_complexity(request, *, repo_profile=None, requested_mode=None,
+                      requirements_contract=None):
     """Return a transparent complexity assessment, never a fake certainty.
 
     The score is an aid for choosing a coordination budget. Keyword signals and
     repository facts are listed separately; a missing repository profile lowers
-    confidence and falls back to BALANCED rather than pretending FAST is safe.
+    confidence and falls back to BALANCED rather than pretending SOLO/FAST is
+    safe. AUTO also applies non-negotiable risk floors from approved contract
+    decisions.
     """
     text = _request_text(request).lower()
     if requested_mode is not None and requested_mode not in WORK_MODES:
-        raise TeamworkPlannerError("mode must be fast, balanced, rigorous or auto")
+        raise TeamworkPlannerError(
+            "mode must be solo, fast, balanced, rigorous or auto")
+    contract = (requirements_contract
+                if isinstance(requirements_contract, dict) else None)
+    contract_topics = _contract_topics(contract)
+    text_topics = set()
+    if _has(text, ("payment", "payments", "checkout", "billing", "invoice")):
+        text_topics.add("payments")
+    if _has(text, ("retention", "data retention", "soft delete",
+                   "hard delete", "delete policy", "delete account",
+                   "account deletion", "remove user", "remove users",
+                   "purge", "erase", "wipe", "gdpr", "kvkk", "veri saklama",
+                   "kalıcı sil", "kalici sil")):
+        text_topics.add("data_retention")
+    if _has(text, MIGRATION_WORDS):
+        text_topics.add("database")
+    if _has(text, SECURITY_WORDS):
+        text_topics.add("auth_session")
+    if _has(text, ("file access", "file sharing", "shared file", "upload",
+                   "download", "file delete")):
+        text_topics.add("file_access")
+    if _has(text, BREAKING_WORDS):
+        text_topics.add("api_compat")
+    risk_topics = contract_topics | text_topics
+    approved_contract = bool(contract and contract.get("status") == "confirmed")
     backend = _has(text, BACKEND_WORDS) or _has(text, BOTH_LAYER_WORDS)
     frontend = _has(text, FRONTEND_WORDS) or _has(text, BOTH_LAYER_WORDS)
-    security = _has(text, SECURITY_WORDS)
-    migration = _has(text, MIGRATION_WORDS)
+    security = _has(text, SECURITY_WORDS) or bool(
+        risk_topics & {"auth_session", "payments", "data_retention",
+                       "file_access"})
+    migration = (_has(text, MIGRATION_WORDS)
+                 or bool(risk_topics & MIGRATION_TOPICS))
     deploy = _has(text, DEPLOY_WORDS)
-    breaking = _has(text, BREAKING_WORDS)
+    breaking = _has(text, BREAKING_WORDS) or "api_compat" in risk_topics
     review = _has(text, REVIEW_WORDS)
     profile = repo_profile if isinstance(repo_profile, dict) else {}
     files = _profile_number(profile, "files")
@@ -169,6 +226,9 @@ def assess_complexity(request, *, repo_profile=None, requested_mode=None):
         "profile_tests": tests,
         "profile_languages": len(languages),
         "profile_available": bool(profile),
+        "contract_topics": sorted(contract_topics),
+        "risk_topics": sorted(risk_topics),
+        "contract_approved": approved_contract,
     }
     score = 0
     score += 10 if layers >= 2 else 3
@@ -184,7 +244,18 @@ def assess_complexity(request, *, repo_profile=None, requested_mode=None):
     score = min(100, score)
     confidence = "high" if profile and files > 0 else "low"
     safety_upgrade = False
-    if requested_mode in ("fast", "balanced", "rigorous"):
+    auto_floor = None
+    if requested_mode == "solo":
+        if _solo_high_risk(score, layers, security, migration, breaking,
+                           risk_topics):
+            mode = "balanced" if score < 50 else "rigorous"
+            safety_upgrade = True
+            reason = ("safety upgrade: SOLO is not allowed for high-risk, "
+                      "multi-layer, security, migration or breaking work")
+        else:
+            mode = "solo"
+            reason = "explicit SOLO for a small, low-risk change"
+    elif requested_mode in ("fast", "balanced", "rigorous"):
         mode = requested_mode
         reason = "explicit user mode"
         if requested_mode == "fast" and (security or migration or breaking):
@@ -195,10 +266,22 @@ def assess_complexity(request, *, repo_profile=None, requested_mode=None):
     elif score >= 50:
         mode = "rigorous"
         reason = "high risk/complexity score"
-    elif score <= 18 and layers <= 1 and not security and not migration and not breaking:
-        mode = "fast" if confidence == "high" else "balanced"
-        reason = ("small, low-risk repository change" if mode == "fast"
+    elif (migration or breaking or bool(risk_topics & MIGRATION_TOPICS)) \
+            and approved_contract:
+        mode = "rigorous"
+        auto_floor = "migration/api_compat + approved contract"
+        reason = "AUTO floor: migration or API compatibility work needs rigorous verification"
+    elif security or bool(risk_topics & FLOOR_TOPICS):
+        mode = "balanced"
+        auto_floor = "auth/payments/data retention/database"
+        reason = "AUTO floor: authentication, payments, retention or database work is at least balanced"
+    elif (score <= 18 and layers <= 1 and not security and not migration
+          and not breaking):
+        mode = "solo" if confidence == "high" else "balanced"
+        reason = ("small, clear, low-risk repository change" if mode == "solo"
                   else "small request but repository profile is missing")
+        if mode == "solo" and confidence == "high":
+            reason = "small, clear, low-risk repository change"
     else:
         mode = "balanced"
         reason = "default safe budget"
@@ -210,6 +293,7 @@ def assess_complexity(request, *, repo_profile=None, requested_mode=None):
         "reason": reason,
         "factors": factors,
         "safety_upgrade": safety_upgrade,
+        "auto_floor": auto_floor,
         "fallback_policy": "BALANCED when repository facts are missing",
     }
 
@@ -343,17 +427,30 @@ def _apply_requirements_contract(tasks, contract):
         for criterion in contract.get("acceptance_criteria") or []
         if criterion.get("evidence", {}).get("kind") == "command"
     ]
-    if not commands:
-        return
+    contract_command = contract.get("verification_command")
+    if isinstance(contract_command, str) and contract_command:
+        commands = [contract_command, *commands]
     targets = [task for task in tasks
                if task.get("phase") == "verify" and task.get("role") == "tester"]
     if not targets:
         targets = [task for task in tasks if task.get("phase") == "verify"]
     if not targets:
+        # A SOLO plan has no separate tester/reviewer. The implementer owns
+        # both the change and the deterministic verification command.
+        targets = [task for task in tasks if task.get("role") == "implementer"][:1]
+        for target in targets:
+            acceptance = target.setdefault("acceptance", [])
+            for _applies_to, label in labels:
+                if label in acceptance:
+                    continue
+                if len(acceptance) >= MAX_ACCEPTANCE:
+                    break
+                acceptance.append(label)
+    if not targets:
         return
     target = targets[0]
     verify_commands = target.setdefault("verify_commands", [])
-    for command in commands:
+    for command in dict.fromkeys(commands):
         if command in verify_commands:
             continue
         if len(verify_commands) >= MAX_VERIFY_COMMANDS:
@@ -643,6 +740,37 @@ def _fast_plan(pattern, text, model):
     return [milestone], tasks
 
 
+def _solo_plan(pattern, text, model):
+    """One implementer, one milestone, deterministic self-verification."""
+    backend = _has(text, BACKEND_WORDS) or _has(text, BOTH_LAYER_WORDS)
+    frontend = _has(text, FRONTEND_WORDS) or _has(text, BOTH_LAYER_WORDS)
+    if backend:
+        task_id, department, path = "build-backend", "backend", "backend/"
+    elif frontend:
+        task_id, department, path = "build-frontend", "frontend", "frontend/"
+    else:
+        task_id, department, path = "build", None, "src/"
+    objective = ("Repair the requested behavior inside the declared source scope."
+                 if pattern == "review_and_repair"
+                 else "Implement the requested change inside the declared source scope.")
+    build = _task(
+        task_id, "implementer", "M1", objective, [],
+        [path, "tests/"], [path],
+        [
+            f"The requested change is implemented inside {path}.",
+            "The deterministic verification commands exit 0 and their output is recorded.",
+            f"No files outside {path} are modified.",
+        ],
+        "build", [STATUS_COMMAND, TEST_COMMAND], department)
+    build["model"] = model
+    milestone = _milestone(
+        "M1", "Implement and self-verify the small change.", [],
+        ["The requested change is implemented.",
+         "The deterministic verification commands pass."],
+        [], max_repair=2)
+    return [milestone], [build]
+
+
 def _balanced_plan(pattern, text, model):
     backend = _has(text, BACKEND_WORDS) or _has(text, BOTH_LAYER_WORDS)
     frontend = _has(text, FRONTEND_WORDS) or _has(text, BOTH_LAYER_WORDS)
@@ -707,6 +835,7 @@ def plan_request(request, *, run_id, project_id=None, max_parallel=3,
     if codex_sandbox not in ("read-only", "workspace-write"):
         raise TeamworkPlannerError("codex_sandbox must be read-only or workspace-write")
     contract = None
+    raw_contract = requirements_contract
     if requirements_contract is not None:
         if project_id is None:
             raise TeamworkPlannerError(
@@ -729,18 +858,22 @@ def plan_request(request, *, run_id, project_id=None, max_parallel=3,
     if pattern is not None and pattern not in PATTERNS:
         raise TeamworkPlannerError("Unknown teamwork pattern")
     if mode is not None and mode not in WORK_MODES:
-        raise TeamworkPlannerError("mode must be fast, balanced, rigorous or auto")
+        raise TeamworkPlannerError(
+            "mode must be solo, fast, balanced, rigorous or auto")
     text = _request_text(request).lower()
     selected = _select_pattern(text, pattern)
     shape = _shape(text, selected)
     assessment = None
     chosen_mode = mode
     if mode in WORK_MODES:
-        assessment = assess_complexity(request, repo_profile=repo_profile,
-                                       requested_mode=mode)
+        assessment = assess_complexity(
+            request, repo_profile=repo_profile, requested_mode=mode,
+            requirements_contract=contract)
         chosen_mode = assessment["mode"]
     if shape == "research":
         milestones, tasks = _research_plan(model)
+    elif chosen_mode == "solo":
+        milestones, tasks = _solo_plan(selected, text, model)
     elif chosen_mode == "fast":
         milestones, tasks = _fast_plan(selected, text, model)
     elif chosen_mode == "balanced":
@@ -772,6 +905,19 @@ def plan_request(request, *, run_id, project_id=None, max_parallel=3,
                     if command_source is None:
                         command_source = source.get("source")
     detected_command = detected_commands[0] if detected_commands else None
+    if (contract is not None and detected_command
+            and isinstance(raw_contract, dict)
+            and raw_contract.get("sha256") is None):
+        # Draft contracts (no immutable digest yet) may adopt the repository's
+        # real test command. Approved/digest-bound contracts are never mutated;
+        # the plan-level verification_command carries the execution override.
+        candidate = {key: value for key, value in contract.items()
+                     if key != "sha256"}
+        candidate["verification_command"] = detected_command
+        try:
+            contract = validate_for_plan(candidate, project_id=project_id)
+        except ContractError:
+            pass
     if detected_commands:
         for task in tasks:
             replaced = []
@@ -796,11 +942,12 @@ def plan_request(request, *, run_id, project_id=None, max_parallel=3,
     ]
     if any(task["write_scope"] for task in tasks):
         repo_inputs.append("Confirm the package manager and build commands.")
+    effective_parallel = 1 if chosen_mode == "solo" else max_parallel
     plan = {
         "version": 1,
         "run_id": run_id,
         "project_id": project_id,
-        "max_parallel": max_parallel,
+        "max_parallel": effective_parallel,
         "pattern": selected,
         "work_mode": chosen_mode or "legacy",
         "risk_assessment": assessment,
@@ -810,13 +957,14 @@ def plan_request(request, *, run_id, project_id=None, max_parallel=3,
         "verification_budget": {
             "mode": chosen_mode or "legacy",
             "risk_score": assessment.get("score") if assessment else None,
-            "max_parallel": max_parallel,
+            "max_parallel": effective_parallel,
             "repair_policy": (
                 "bounded by milestone max_repair"
-                if chosen_mode in ("fast", "balanced", "rigorous")
+                if chosen_mode in ("solo", "fast", "balanced", "rigorous")
                 else "legacy milestone policy"
             ),
             "review_depth": {
+                "solo": "self-verified",
                 "fast": "targeted",
                 "balanced": "risk-based",
                 "rigorous": "full",
@@ -847,6 +995,10 @@ def plan_request(request, *, run_id, project_id=None, max_parallel=3,
         _apply_requirements_contract(tasks, contract)
         plan["requirements_contract"] = contract
         plan["contract_ref"] = compact_contract_ref(contract)
+        # The plan may use a repository test command in place of the contract
+        # default for execution. The immutable contract digest is not rewritten.
+        plan["verification_command"] = (
+            detected_command or contract.get("verification_command") or TEST_COMMAND)
     for task in tasks:
         task["provider"] = provider
         if provider == "codex":
