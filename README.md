@@ -23,6 +23,10 @@ python tools/install.py --target /path/to/your/project --platform all --codex-mo
 python tools/install.py --target /path/to/your/project --platform all --codex-model luna-max
 # Preview without writing:
 python tools/install.py --target /path/to/your/project --platform all --dry-run
+python tools/install.py --target /path/to/your/project --uninstall --dry-run
+python tools/install.py --target /path/to/your/project --uninstall
+# Record normal Git commits into project memory (opt-in, preserves existing hooks)
+python tools/universal_teamwork.py --root /path/to/your/project memory install-hook
 ```
 
 Windows PowerShell:

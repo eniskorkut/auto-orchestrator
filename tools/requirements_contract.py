@@ -706,6 +706,33 @@ def build_from_interview(root, interview_id: str, *, version: int | None = None)
         return save_contract(root, contract)
 
 
+def validate_contract_state(root, contract: dict) -> dict:
+    """Validate a contract against the live ledger before planning/execution."""
+    root = Path(root).resolve()
+    normalized = validate_contract(contract)
+    if normalized["status"] != "confirmed":
+        raise ContractError("requirements contract is not confirmed")
+    if normalized["blockers"]:
+        raise ContractError("requirements contract has unresolved blockers")
+    identity = ensure_project_identity(root)
+    if normalized["project_id"] != identity["project_id"]:
+        raise ContractError("requirements contract belongs to another project")
+    with ProjectMemory(root, identity=identity) as memory:
+        decisions = {item["decision_id"]: item for item in
+                     memory.list_decisions(limit=500)}
+        for item in normalized["confirmed_decisions"]:
+            live = decisions.get(item["decision_ref"])
+            if live is None or live["status"] != "confirmed":
+                raise ContractError(
+                    "requirements contract references a superseded decision")
+            if live["decision"] != item["decision"]:
+                raise ContractError("requirements contract decision changed")
+        if memory.list_requirements(status="unresolved_blocking", limit=1):
+            raise ContractError(
+                "requirements contract has unresolved blocking requirements")
+    return normalized
+
+
 def verify_contract(root, contract: dict, *, test_results=None) -> dict:
     """Evaluate executable criteria against code and real test exit codes."""
     root = Path(root).resolve()

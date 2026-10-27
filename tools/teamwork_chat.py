@@ -35,6 +35,7 @@ try:
         load_contract,
         load_current,
         validate_contract,
+        validate_contract_state,
     )
     from tools.run_owner import (
         OwnershipError,
@@ -64,6 +65,7 @@ except ModuleNotFoundError:  # python tools/teamwork_chat.py
         load_contract,
         load_current,
         validate_contract,
+        validate_contract_state,
     )
     from run_owner import (  # type: ignore
         OwnershipError,

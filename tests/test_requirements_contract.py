@@ -176,6 +176,18 @@ class RequirementsContractStorageTests(unittest.TestCase):
         identical = save_contract(self.root, contract(1))
         self.assertEqual(identical["contract_version"], 1)
 
+    def test_live_ledger_change_invalidates_a_contract(self):
+        from tools.project_memory import ProjectMemory
+        from tools.requirements_contract import validate_contract_state
+        saved = save_contract(self.root, contract())
+        with ProjectMemory(self.root) as memory:
+            memory.conn.execute(
+                "UPDATE decisions SET status='superseded',updated_at=? "
+                "WHERE decision_id=?", (1.0, DECISION_ID))
+            memory.conn.commit()
+        with self.assertRaises(ContractError):
+            validate_contract_state(self.root, saved)
+
     def test_contract_command_cannot_run_arbitrary_code(self):
         value = contract()
         value["acceptance_criteria"][1]["evidence"] = {
