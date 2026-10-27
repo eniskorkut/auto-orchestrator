@@ -6,6 +6,7 @@ and the native plan pointers are tested together.
 """
 from __future__ import annotations
 
+import contextlib
 import io
 import json
 import sqlite3
@@ -196,17 +197,17 @@ class V78ContinuityTests(unittest.TestCase):
         plan = json.loads(Path(started["plan"]).read_text(encoding="utf-8"))
         task_id = plan["tasks"][0]["id"]
         database = (self.root / ".auto-orchestrator" / "supervisor.sqlite3")
-        with sqlite3.connect(database) as connection:
-            connection.execute(
-                "UPDATE tasks SET state='failed', reason=?, result=? "
-                "WHERE run_id=? AND id=?",
-                ("pytest failed", json.dumps({"tests": [
-                    {"name": "tests/test_auth.py::test_refresh",
-                     "status": "failed"},
-                    {"name": "tests/test_auth.py::test_login",
-                     "status": "passed"},
-                ]}), "run-cont-1", task_id))
-            connection.commit()
+        with contextlib.closing(sqlite3.connect(database)) as connection:
+            with connection:
+                connection.execute(
+                    "UPDATE tasks SET state='failed', reason=?, result=? "
+                    "WHERE run_id=? AND id=?",
+                    ("pytest failed", json.dumps({"tests": [
+                        {"name": "tests/test_auth.py::test_refresh",
+                         "status": "failed"},
+                        {"name": "tests/test_auth.py::test_login",
+                         "status": "passed"},
+                    ]}), "run-cont-1", task_id))
         prepared = self.cli("codex", "ide", "prepare", "--target-platform",
                             "opencode", "--next-action",
                             "Fix the failing refresh test")
