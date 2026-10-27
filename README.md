@@ -1,4 +1,4 @@
-# Auto-Orchestrator — Native Multi-Agent Coordination (V7.7)
+# Auto-Orchestrator — Native Multi-Agent Coordination (V7.8)
 
 Portable, opt-in native-subagent coordination for **OpenCode**, **Codex**, **Cursor**, and **Google Antigravity**. Platform-native runtime capabilities and proof strength differ.
 
@@ -300,6 +300,73 @@ adds a small, conservative long-tail domain ontology and
 skill selection rates. None of this proves live IDE reliability or speedup
 until matched native runs are repeated. See
 [execution reliability](docs/V64_RELIABILITY.md).
+
+## V7.8 — Native IDE Teamwork, Grill-Me 3.0 and sequential handoff
+
+V7.8 makes the same project continue across Codex, OpenCode V2, Cursor and
+Antigravity with **one writer at a time**:
+
+- **Ownership state machine** (`tools/ide_handoff.py`): `inactive`, `active`,
+  `handoff_prepared`, `released`, `transferred`, `recovery_required`,
+  `blocked`. Owner token + fence compare-and-swap on every transition,
+  heartbeat TTL, PID identity, managed lease evidence and explicit recovery.
+- **Native execution is separate from managed execution.** `start --native`
+  and `plan` write an inspectable plan and engine state without spawning a
+  provider, runner, PID or `active.json`. Codex/Cursor/Antigravity default to
+  their own parent session; the managed OpenCode bridge stays an explicit
+  `--provider` opt-in. No IDE starts another IDE.
+- **Phase 1 plan approval:** `plan` → `approve-plan --run-id <id> --approver
+  <human>` → `start --plan <id>`. Approval is bound to the plan digest; a
+  missing, changed or stale approval is refused. Small SOLO work can use
+  `plan --mode solo`, but the approval remains explicit.
+- **Handoff snapshot v1:** project/run/milestone/task state, mode,
+  branch/HEAD, dirty digest and changed files, completed/pending tasks, failed
+  tests and verified evidence refs, contract id/version/digest, interview id,
+  open question and blocking questions, confirmed decision refs, blockers,
+  context provenance, next action and a canonical digest. Acceptance re-reads
+  every reference; drift blocks without mutating state.
+- **Fail-closed liveness:** a stale heartbeat is `unknown`, not dead. Unknown
+  live ownership blocks transfer and requires `ide recover --apply` with
+  evidence. Recovery records `liveness: unknown`, `stop_ack: false` and
+  `native_cancel_ack: false`; it never fabricates a native cancellation.
+- **Grill-Me 3.0 across IDEs:** one durable interview, one open question at a
+  time, recommended option with rationale and alternatives, write-in answers,
+  dependency-aware follow-ups, back/skip/resume, conflict display and
+  digest-bound approval. Switching IDE mid-interview keeps the interview id,
+  answers and request hash; the new IDE resumes the exact open question.
+- **Per-IDE truth:** OpenCode and Codex ship native skills/commands; Cursor and
+  Antigravity remain contract-only and report `stop_ack: false`. Antigravity's
+  native `/teamwork-preview` and `/grill-me` stay authoritative; `ao-grill-me`
+  only imports explicitly user-confirmed answers.
+- **Dashboard:** active vs previous vs last IDE, ownership state/fence, handoff
+  source/target/age/digest/drift, current task/milestone, next action, open
+  Grill-Me question, requirements completion and recovery/blocked state.
+  Missing evidence renders as `unknown`, never as connected.
+- **Evidence:** `tools/v78_handoff_e2e.py` runs nine scenarios through the real
+  CLI in separate processes (simulated native surfaces); results are in
+  `docs/assets/v78-handoff-sim-e2e.json`. `tools/v78_live_handoff_e2e.py`
+  executed the real Codex and OpenCode CLIs in a temporary project on
+  2026-10-27 and completed the Codex → OpenCode → Codex loop
+  (`docs/assets/v78-live-handoff.json`, `live_ides: ["codex", "opencode"]`).
+  Cursor and Antigravity stayed contract-only; live labels are never inferred
+  from a skill file.
+
+```bash
+# read-only inspection from any IDE
+python3.11 tools/universal_teamwork.py --root . --platform cursor ide status
+
+# take ownership and plan natively, then hand off explicitly
+python3.11 tools/universal_teamwork.py --root . --platform codex ide activate
+python3.11 tools/universal_teamwork.py --root . --platform codex plan --request-file <relative_path>
+python3.11 tools/universal_teamwork.py --root . --platform codex approve-plan --run-id <run_id> --approver <you>
+python3.11 tools/universal_teamwork.py --root . --platform codex start --plan <run_id>
+python3.11 tools/universal_teamwork.py --root . --platform codex ide prepare --target-platform opencode
+python3.11 tools/universal_teamwork.py --root . --platform codex ide release --handoff <handoff_id>
+python3.11 tools/universal_teamwork.py --root . --platform opencode ide accept --handoff <handoff_id> --digest <sha256>
+```
+
+See [Sequential IDE Handoff](docs/V78_SEQUENTIAL_IDE_HANDOFF.md) and the
+[capability matrix](docs/CAPABILITY_MATRIX.md).
 
 ## V7.7 — Intelligent Teamwork, verified completion and native IDE entry points
 

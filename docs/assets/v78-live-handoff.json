@@ -1,0 +1,136 @@
+{
+  "schema_version": 1,
+  "kind": "auto-orchestrator-v78-live-handoff-e2e",
+  "version": "7.8",
+  "mode": "live",
+  "generated_at": 1793126789.457412,
+  "python": "3.11.15",
+  "os": "darwin",
+  "project": "$PROJECT",
+  "available_cli": {
+    "codex": true,
+    "opencode": true,
+    "cursor": false,
+    "antigravity": false
+  },
+  "live_ides": [
+    "codex",
+    "opencode"
+  ],
+  "unavailable": {
+    "cursor": "no documented CLI agent entry",
+    "antigravity": "no documented CLI agent entry"
+  },
+  "status": "passed",
+  "error": null,
+  "steps": [
+    {
+      "name": "codex takes ownership",
+      "ok": true,
+      "seconds": 0.064
+    },
+    {
+      "name": "codex writes a native plan",
+      "ok": true,
+      "seconds": 0.185
+    },
+    {
+      "name": "user approves the plan",
+      "ok": true,
+      "seconds": 0.06
+    },
+    {
+      "name": "codex starts the plan natively",
+      "ok": true,
+      "seconds": 0.229
+    },
+    {
+      "name": "codex writes natively",
+      "ok": true,
+      "seconds": 15.893
+    },
+    {
+      "name": "codex hands ownership to opencode",
+      "ok": true,
+      "seconds": 0.275
+    },
+    {
+      "name": "opencode recovers the next action and writes",
+      "ok": true,
+      "seconds": 17.228
+    },
+    {
+      "name": "opencode hands ownership back to codex",
+      "ok": true,
+      "seconds": 0.274
+    },
+    {
+      "name": "codex continues from the second handoff",
+      "ok": true,
+      "seconds": 18.876
+    }
+  ],
+  "evidence": {
+    "codex_version": "codex-cli 0.164.0",
+    "opencode_version": "opencode v2.1.1",
+    "first_handoff": {
+      "handoff_id": "ho_2554716f5d0d569e0cbaabbf",
+      "digest": "d848932ef3c59a5783add703365de6f5d6deb107396c13c21a27d42cbff08a76"
+    },
+    "second_handoff": {
+      "handoff_id": "ho_ce37e7d55cc771e01eec720f",
+      "digest": "ae82002256fca66d0f9336db6ee6fc0fd9b62fac56f22e63bf8db2bf412fe257"
+    },
+    "codex_first": {
+      "exit": 0,
+      "seconds": 15.892,
+      "attempts": [
+        {
+          "attempt": 1,
+          "ok": true,
+          "seconds": 15.892,
+          "exit": 0
+        }
+      ],
+      "tokens_reported": 11,
+      "file": "codex_part.txt"
+    },
+    "opencode": {
+      "exit": 0,
+      "seconds": 17.167,
+      "attempts": [
+        {
+          "attempt": 1,
+          "ok": true,
+          "seconds": 17.167,
+          "exit": 0
+        }
+      ],
+      "model_reported": "iceman-contributor-free",
+      "file": "opencode_part.txt"
+    },
+    "codex_last": {
+      "exit": 0,
+      "seconds": 18.815,
+      "attempts": [
+        {
+          "attempt": 1,
+          "ok": true,
+          "seconds": 18.815,
+          "exit": 0
+        }
+      ],
+      "tokens_reported": 11,
+      "file": "codex_final.txt"
+    },
+    "next_actions": {
+      "opencode": "NEXT-1873A272",
+      "codex": "FINAL-36B23D13"
+    }
+  },
+  "duration_seconds": 53.29,
+  "limits": [
+    "Codex and OpenCode were executed through their own CLIs in a temporary project; Cursor and Antigravity had no documented CLI agent entry and are not claimed.",
+    "The prompts are scripted test prompts, not a benchmark of model quality or human time saved."
+  ]
+}
