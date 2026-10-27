@@ -15,7 +15,6 @@ import hashlib
 import json
 import re
 import subprocess
-import threading
 from pathlib import Path
 
 try:
@@ -242,7 +241,7 @@ RULES = {
         "terms": (
             "share", "sharing", "shared", "multi-user", "multiuser",
             "multi user", "collaboration", "collaborative", "team access",
-            "workspace", "permission", "permissions", "public link",
+            "permission", "permissions", "public link",
             "access control", "access model", "paylaş", "paylas",
             "paylaşım", "paylasim", "çok kullanıcı", "cok kullanici",
             "ekip", "erişim", "erisim", "erişim kontrolü",

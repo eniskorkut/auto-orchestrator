@@ -718,6 +718,14 @@ def validate_contract_state(root, contract: dict) -> dict:
     if normalized["project_id"] != identity["project_id"]:
         raise ContractError("requirements contract belongs to another project")
     with ProjectMemory(root, identity=identity) as memory:
+        if normalized.get("interview_id"):
+            interview = memory.conn.execute(
+                "SELECT status FROM interviews WHERE project_id=? AND "
+                "interview_id=?",
+                (memory.project_id, normalized["interview_id"])).fetchone()
+            if interview is None or interview["status"] != "approved":
+                raise ContractError(
+                    "requirements contract interview is not approved")
         decisions = {item["decision_id"]: item for item in
                      memory.list_decisions(limit=500)}
         for item in normalized["confirmed_decisions"]:
