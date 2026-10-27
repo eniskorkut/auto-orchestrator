@@ -70,7 +70,7 @@ def _plan(run_id, contract, platform, provider, model, build_objective,
           build_scope, tester_objective):
     common = {
         "milestone": "M1", "read_scope": [], "timeout_seconds": 420,
-        "max_retries": 0, "verify_commands": ["python3 -m unittest -q"],
+        "max_retries": 0, "verify_commands": ["python3 -m unittest discover -v"],
         "department": "backend", "provider": provider, "model": model,
     }
     build = {
@@ -86,20 +86,28 @@ def _plan(run_id, contract, platform, provider, model, build_objective,
         "objective": tester_objective, "acceptance": ["tests pass"],
         "write_scope": [], "depends_on": ["build"],
     }
+    reviewer = {
+        **common, "id": "review", "role": "reviewer", "phase": "verify",
+        "objective": ("Independently review the implementation against the approved "
+                      "contract; run tests and return JSON verdict pass/fail."),
+        "acceptance": ["independent review verdict recorded"],
+        "write_scope": [], "depends_on": ["verify"],
+    }
     if provider == "codex":
         tester.update({"sandbox": "read-only", "approval_policy": "never"})
+        reviewer.update({"sandbox": "read-only", "approval_policy": "never"})
     return {
         "version": 1, "run_id": run_id, "max_parallel": 1,
-        "pattern": "review_and_repair", "work_mode": "fast",
+        "pattern": "review_and_repair", "work_mode": "balanced",
         "origin_platform": platform,
         "requirements_contract": contract,
         "milestones": [{
             "id": "M1", "objective": "Deliver the verified feature",
             "depends_on": [], "acceptance": ["feature and tests pass"],
-            "verification_policy": {"require_roles": ["tester"],
+            "verification_policy": {"require_roles": ["tester", "reviewer"],
                                     "max_repair": 0},
         }],
-        "tasks": [build, tester],
+        "tasks": [build, tester, reviewer],
     }
 
 
@@ -124,6 +132,8 @@ def _brief(summary):
         "milestones": result,
         "tokens": tokens,
         "requirements_contract": summary.get("requirements_contract"),
+        "requirements": summary.get("requirements"),
+        "completion": summary.get("requirements"),
         "error": summary.get("error"),
     }
 
@@ -168,23 +178,32 @@ def main(argv=None) -> int:
         contract = load_current(project)
         if contract is None:
             raise RuntimeError("approved interview did not create a contract")
+        required_tests = [
+            case["test_id"]
+            for criterion in contract["acceptance_criteria"]
+            if criterion.get("critical")
+            for case in criterion.get("test_cases", [])
+        ]
         report["contract"] = {
             "contract_id": contract["contract_id"],
             "version": contract["contract_version"],
+            "schema_version": contract.get("schema_version"),
             "decisions": [item["topic"] for item in contract["confirmed_decisions"]],
+            "required_tests": required_tests,
         }
 
         codex_plan = _plan(
             "v761-codex-auth", contract, "codex", "codex", CODEX_MODEL,
-            "Create auth_jwt.py implementing a compact JWT-like token signed "
-            "with hmac and base64: create_token(subject, token_type='access'), "
-            "verify_token(token), and refresh_access_token(refresh_token). Use "
-            "a short access TTL (900s) and a longer refresh TTL (7 days), with "
-            "access/refresh type separation. Add test_auth_jwt.py covering a "
-            "valid access token, a tampered token, and refresh renewal. Run "
-            "python3 -m unittest -q. Modify only those two files.",
+            "Create auth_jwt.py implementing a standard 3-segment JWT-like token "
+            "signed with hmac and base64: create_token(subject, token_type='access'), "
+            "verify_token(token, expected_type=None), and refresh_access_token. "
+            "Use a short access TTL (900s) and a longer refresh TTL (7 days); "
+            "refresh must reject access tokens and invalid signatures. Add "
+            "test_auth_jwt.py with exactly these unittest method names: "
+            + ", ".join(required_tests) + ". Run python3 -m unittest discover -v. "
+            "Modify only those two files.",
             ["auth_jwt.py", "test_auth_jwt.py"],
-            "Run python3 -m unittest -q and inspect both files. End with JSON "
+            "Run python3 -m unittest discover -v and inspect both files. End with JSON "
             '{"verdict":"pass|fail","findings":[],"summary":"..."}. Do not modify files.')
         runner = TeamworkRunner(project, codex_plan, model=CODEX_MODEL,
                                 max_seconds=600)
@@ -217,10 +236,10 @@ def main(argv=None) -> int:
             "Read auth_jwt.py and the project memory. Add password_reset.py "
             "with create_reset_token(subject) using auth_jwt.create_token with "
             "a reset scope, and verify_reset_token(token) returning the subject. "
-            "Add test_password_reset.py. Run python3 -m unittest -q. Modify only "
-            "those two files.",
+            "Add test_password_reset.py. Run python3 -m unittest discover -v. "
+            "Modify only those two files.",
             ["password_reset.py", "test_password_reset.py"],
-            "Run python3 -m unittest -q and inspect the new files. End with JSON "
+            "Run python3 -m unittest discover -v and inspect the new files. End with JSON "
             '{"verdict":"pass|fail","findings":[],"summary":"..."}. Do not modify files.')
         runner = TeamworkRunner(project, opencode_plan, model=OPENCODE_MODEL,
                                 max_seconds=600)
