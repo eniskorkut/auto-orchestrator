@@ -170,3 +170,16 @@ managed execution layer. It does not make one IDE dispatch another IDE's agent.
 Project memory is shared through the project root, not through a cross-IDE
 agent call. A project-level writer lease prevents two Teamwork runners from
 writing concurrently; ordinary memory writes are serialized by SQLite.
+
+
+## V7.6.1 — assumption guard and verified contracts
+
+| Platform | Guard / contract | Execution |
+|---|---|---|
+| OpenCode V2 | Central guard, persistent interview, contract load | Managed OpenCode adapter; TUI click-through not automated |
+| Codex | Shared skill, guard/contract CLI | Real app-server write E2E with explicit `--codex-sandbox workspace-write`; read-only default; approval bridging absent |
+| Cursor | Shared skill/CLI contract only | No managed adapter; no local live run |
+| Antigravity | Shared skill/CLI and native `/grill-me` guidance | No managed adapter; no local live run |
+
+The guard/contract layer is shared by every platform. Platform execution
+adapters remain separate; no silent cross-IDE process launch is performed.

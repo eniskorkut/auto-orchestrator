@@ -125,3 +125,18 @@ Before risky or underspecified work, use the `grill-me` skill:
 `/teamwork context`, `/teamwork handoff`, `/teamwork --grill` and
 `/grill-me` are the single-chat entry points in OpenCode. Project identity is
 portable via `.auto-orchestrator/project.json`; SQLite stays local.
+
+
+## V7.6.1 — assumption guard and verified requirements
+
+Every new development start runs the central Assumption Guard. Treat an
+`interview_required` result as a hard stop: present the returned question and do
+not start a plan or child agent. Approval creates a versioned requirements
+contract. The contract's confirmed decisions and acceptance criteria are injected
+into prompts and checked against real code/test evidence; unverifiable criteria
+must remain `not_verified`, never a pass.
+
+Use `memory capture` when no managed Git hook is installed. The opt-in hook is
+installed with `memory install-hook` and preserves existing hooks. Cross-IDE
+context includes decisions, open blockers, active interview, contract version,
+last milestone, stale reasons and verified handoff status.

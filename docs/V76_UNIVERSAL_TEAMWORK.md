@@ -1,5 +1,8 @@
 # V7.6 — Universal Teamwork, Cross-IDE Memory and Grill-Me
 
+> V7.6.1 supersedes the V7.6 guard/contract details. See
+> [V761_ASSUMPTION_GUARD.md](V761_ASSUMPTION_GUARD.md).
+
 V7.6 keeps the existing Supervisor, milestone DAG, managed OpenCode execution,
 Codex app-server adapter, worktrees, recovery and Virtual Office. It adds a
 portable project identity, durable project memory, a persistent Grill-Me

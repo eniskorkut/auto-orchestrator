@@ -36,14 +36,20 @@ If an active run exists and the user did not explicitly ask for a new one, use
 
    `python3.11 tools/universal_teamwork.py --root . --platform opencode start --mode <mode> --request-file <relative_path>`
 
+   For Codex managed write mode (explicit opt-in), add
+   `--platform codex --provider codex --codex-sandbox workspace-write`. For a
+   reviewed plan without code, use `--grill-mode plan-only`.
+
    For `--grill`, use:
 
    `python3.11 tools/universal_teamwork.py --root . --platform opencode start --mode <mode> --grill --grill-mode auto --request-file <relative_path>`
 
-   The grill form returns one question and does **not** start code. Record
-   answers with `/grill-me`; after approval start with
+   Even a normal start runs the central Assumption Guard. If it returns
+   `status: interview_required`, present only the returned question and do not
+   start code. Record answers with `/grill-me`; after approval start with
    `--interview-id <id> --request-file <relative_path>` using the original
-   request file. The engine verifies its hash and refuses a different request.
+   request file. The engine verifies its hash, refuses a different request and
+   attaches the approved versioned requirements contract to the plan.
 
 5. Report the run id, platform, mode, risk assessment, current milestone,
    active/queued sessions, recovery state and verified progress. Child sessions

@@ -17,7 +17,10 @@ when the IDE changes.
    answers. Code-derived facts are not user confirmations.
 3. Ask one main question at a time. Put the recommended option first, but never
    mark it selected or confirmed without the user's answer.
-4. Start an interview with a validated request file, never a shell string:
+4. A normal `/teamwork` start may also return `status: interview_required`
+   from the central Assumption Guard. Treat that as a hard stop; no plan or
+   runner exists yet.
+5. Start an interview with a validated request file, never a shell string:
 
    `python3.11 tools/teamwork_chat.py --root . request-path`
 
@@ -25,17 +28,20 @@ when the IDE changes.
 
    `python3.11 tools/universal_teamwork.py --root . --platform <platform> grill start --grill-mode auto --request-file <relative_path>`
 
-5. Use the returned `question`. Present its options; wait for an answer.
-6. Record the answer:
+6. Use the returned `question`. Present its options; wait for an answer.
+7. Record the answer:
    `... grill answer --question-id <id> --option <option>`
    For free text use `--text`.
-7. Support `skip`, `back`, `cancel`, `resume`, `summary` and `approve`.
+8. Support `skip`, `back`, `cancel`, `resume`, `summary` and `approve`.
    Skipped critical questions stay unresolved_blocking.
-8. Show the summary and ask for plan approval before code when risk is high.
-9. Start Teamwork only from an approved interview, and pass the original
+9. Show the summary and ask for plan approval before code when risk is high.
+   Approval creates a digest-bound, versioned requirements contract; the
+   contract is what the planner and verifier consume, not an agent claim.
+10. Start Teamwork only from an approved interview, and pass the original
    request again so the full text is verified, not truncated:
    `... start --interview-id <id> --request-file <relative_path> --mode <mode>`.
-   A different request is rejected.
+   A different request is rejected. The plan carries the approved contract and
+   its version; the runner rejects a stale or contradictory contract.
 
 ## Platform notes
 

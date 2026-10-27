@@ -7,13 +7,17 @@ python tools/teamwork_chat.py --root . request-path
 # write the exact request to the returned relative_path
 python tools/universal_teamwork.py --root . --platform <platform> start --mode auto --request-file <relative_path>
 # Codex read-only managed execution (write mode is not verified):
-python tools/universal_teamwork.py --root . --platform codex --provider codex start --mode auto --request-file <relative_path>
+python tools/universal_teamwork.py --root . --platform codex --provider codex \
+  --codex-sandbox workspace-write start --mode auto --request-file <relative_path>
+# A normal start runs the central Assumption Guard and may return
+# {"status":"interview_required"}; present the question and do not start code.
 python tools/universal_teamwork.py --root . --platform <platform> status
 python tools/universal_teamwork.py --root . --platform <platform> context
 python tools/universal_teamwork.py --root . --platform <platform> handoff
 python tools/universal_teamwork.py --root . --platform <platform> cancel
 python tools/universal_teamwork.py --root . --platform <platform> resume
 python tools/universal_teamwork.py --root . --platform <platform> grill start --grill-mode auto --request-file <relative_path>
+python tools/universal_teamwork.py --root . memory install-hook
 ```
 
 OpenCode exposes `/teamwork` and `/grill-me` through project commands. The
@@ -34,6 +38,11 @@ Modes:
   success auditor.
 - `auto`: repository profile plus explicit risk factors; missing repository
   facts fall back to `balanced`.
+
+V7.6.1 adds a central Assumption Guard on every start/init/run/resume and a
+versioned Verified Requirements Contract. Approved Grill-Me decisions become acceptance
+criteria that are checked against real code/test evidence; unverifiable criteria
+remain `not_verified` and cannot be reported as passed.
 
 Cancellation is a local process signal unless a native ACK is explicitly
 present. A child session is not a native hook start/stop proof.

@@ -1,0 +1,226 @@
+{
+  "schema_version": 1,
+  "kind": "v761-cross-ide-e2e",
+  "codex_model": "gpt-6.1-sol",
+  "opencode_model": "opencode-go/deepseek-v4.1-flash",
+  "contract": {
+    "contract_id": "rc_5ef18e630e157808",
+    "version": 1,
+    "decisions": [
+      "jwt_refresh",
+      "auth_session"
+    ]
+  },
+  "codex": {
+    "status": "passed",
+    "milestones": {
+      "M1": {
+        "status": "passed",
+        "tasks": [
+          {
+            "id": "build",
+            "state": "completed",
+            "changed_files": [
+              "auth_jwt.py",
+              "test_auth_jwt.py"
+            ],
+            "tests": [
+              {
+                "name": "python3 -m unittest -q",
+                "status": "passed",
+                "exit_code": 0
+              }
+            ]
+          },
+          {
+            "id": "verify",
+            "state": "completed",
+            "changed_files": [],
+            "tests": [
+              {
+                "name": "python3 -m unittest -q",
+                "status": "passed",
+                "exit_code": 0
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "tokens": {
+      "cache": {
+        "read": 142080,
+        "write": 0
+      },
+      "cache_read": 142080,
+      "cache_write": 0,
+      "input": 160964,
+      "output": 2769,
+      "reasoning": 94,
+      "total": 163733
+    },
+    "requirements_contract": {
+      "ok": true,
+      "status": "partially_verified",
+      "contract_id": "rc_5ef18e630e157808",
+      "contract_version": 1,
+      "sha256": "11b34d7aa6cbc4c9449feb5b7c2a5eaaae27a8de8e2ccee82e713fb2e4cbfe20",
+      "checks": [
+        {
+          "criterion_id": "ac_01_jwt_refresh",
+          "kind": "not_automated",
+          "status": "not_verified",
+          "evidence": "no automated verification available"
+        },
+        {
+          "criterion_id": "ac_02_auth_session",
+          "kind": "code_evidence",
+          "status": "passed",
+          "evidence": "code evidence: jwt=True"
+        },
+        {
+          "criterion_id": "ac_99_coverage",
+          "kind": "not_automated",
+          "status": "not_verified",
+          "evidence": "no automated verification available"
+        }
+      ],
+      "passed": 1,
+      "not_verified": 2,
+      "reasons": []
+    },
+    "error": null,
+    "auth_file": true,
+    "handoff": true
+  },
+  "opencode_context": {
+    "project_id": "p_9aa01f3fe41e5a74",
+    "same_project": true,
+    "last_platform": "codex",
+    "confirmed_topics": [
+      "jwt_refresh",
+      "auth_session"
+    ],
+    "blocking": 0,
+    "handoff": true
+  },
+  "opencode": {
+    "status": "passed",
+    "milestones": {
+      "M1": {
+        "status": "passed",
+        "tasks": [
+          {
+            "id": "build",
+            "state": "completed",
+            "changed_files": [
+              "password_reset.py",
+              "test_password_reset.py"
+            ],
+            "tests": [
+              {
+                "name": "python3 -m unittest -q",
+                "status": "passed",
+                "exit_code": 0
+              }
+            ]
+          },
+          {
+            "id": "verify",
+            "state": "completed",
+            "changed_files": [],
+            "tests": [
+              {
+                "name": "python3 -m unittest -q",
+                "status": "passed",
+                "exit_code": 0
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "tokens": {
+      "cache": {
+        "read": 128512,
+        "write": 0
+      },
+      "cache_read": 128512,
+      "cache_write": 0,
+      "input": 20179,
+      "output": 2350,
+      "reasoning": 2473
+    },
+    "requirements_contract": {
+      "ok": true,
+      "status": "partially_verified",
+      "contract_id": "rc_5ef18e630e157808",
+      "contract_version": 1,
+      "sha256": "11b34d7aa6cbc4c9449feb5b7c2a5eaaae27a8de8e2ccee82e713fb2e4cbfe20",
+      "checks": [
+        {
+          "criterion_id": "ac_01_jwt_refresh",
+          "kind": "not_automated",
+          "status": "not_verified",
+          "evidence": "no automated verification available"
+        },
+        {
+          "criterion_id": "ac_02_auth_session",
+          "kind": "code_evidence",
+          "status": "passed",
+          "evidence": "code evidence: jwt=True"
+        },
+        {
+          "criterion_id": "ac_99_coverage",
+          "kind": "not_automated",
+          "status": "not_verified",
+          "evidence": "no automated verification available"
+        }
+      ],
+      "passed": 1,
+      "not_verified": 2,
+      "reasons": []
+    },
+    "error": null,
+    "reset_file": true
+  },
+  "final": {
+    "project_id": "p_9aa01f3fe41e5a74",
+    "last_platform": "opencode",
+    "confirmed_topics": [
+      "jwt_refresh",
+      "auth_session"
+    ],
+    "handoffs": 2
+  },
+  "final_contract": {
+    "ok": true,
+    "status": "partially_verified",
+    "contract_id": "rc_5ef18e630e157808",
+    "contract_version": 1,
+    "sha256": "11b34d7aa6cbc4c9449feb5b7c2a5eaaae27a8de8e2ccee82e713fb2e4cbfe20",
+    "checks": [
+      {
+        "criterion_id": "ac_01_jwt_refresh",
+        "kind": "not_automated",
+        "status": "not_verified",
+        "evidence": "no automated verification available"
+      },
+      {
+        "criterion_id": "ac_02_auth_session",
+        "kind": "code_evidence",
+        "status": "passed",
+        "evidence": "code evidence: jwt=True"
+      },
+      {
+        "criterion_id": "ac_99_coverage",
+        "kind": "not_automated",
+        "status": "not_verified",
+        "evidence": "no automated verification available"
+      }
+    ],
+    "passed": 1,
+    "not_verified": 2,
+    "reasons": []
+  }
+}
