@@ -18,6 +18,7 @@ class GitMemoryHookTests(unittest.TestCase):
         subprocess.run(["git", "-C", str(self.root), "init"],
                        check=True, capture_output=True)
 
+    @unittest.skipIf(os.name == "nt", "Git hook shell markers are POSIX-covered")
     def test_install_preserves_existing_hook_and_uninstall_restores_it(self):
         path = git_memory_hook.hook_path(self.root)
         path.parent.mkdir(parents=True, exist_ok=True)

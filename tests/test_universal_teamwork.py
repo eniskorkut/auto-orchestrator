@@ -146,19 +146,16 @@ class UniversalTeamworkTests(unittest.TestCase):
         self.assertFalse(victim.exists())
 
     def test_global_platform_is_preserved_for_grill_subcommands(self):
-        import subprocess
-        import sys
-        request = (self.root / ".auto-orchestrator" / "teamwork"
-                   / "requests" / "request.txt")
-        request.parent.mkdir(parents=True)
-        request.write_text("Kullanıcı giriş sistemini geliştir", encoding="utf-8")
-        process = subprocess.run(
-            [sys.executable, str(Path.cwd() / "tools" / "universal_teamwork.py"),
-             "--root", str(self.root), "--platform", "codex",
-             "grill", "start", "--request-file", str(request)],
-            cwd=str(self.root), capture_output=True, text=True, encoding="utf-8")
-        self.assertEqual(process.returncode, 0, process.stderr)
-        payload = json.loads(process.stdout)
+        import io
+        from contextlib import redirect_stdout
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            code = universal.main([
+                "--root", str(self.root), "--platform", "codex",
+                "grill", "start", "--request",
+                "Kullanıcı giriş sistemini geliştir"])
+        self.assertEqual(code, 0)
+        payload = json.loads(buffer.getvalue())
         self.assertEqual(payload["interview"]["origin_platform"], "codex")
 
     def test_codex_workspace_write_is_explicit_and_planned(self):

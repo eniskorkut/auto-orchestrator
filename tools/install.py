@@ -70,12 +70,12 @@ def write_file(dest: Path, text: str, dry_run: bool, force: bool = False,
         if not dry_run:
             if force:
                 shutil.copy2(dest, dest.with_name(dest.name + '.bak'))
-            dest.write_text(text, encoding='utf-8')
+            dest.write_bytes(text.encode('utf-8'))
     elif dest.exists():
         raise Conflict(f'Not a normal file: {dest}')
     elif not dry_run:
         dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(text, encoding='utf-8')
+        dest.write_bytes(text.encode('utf-8'))
     return 'updated' if existed else 'created'
 
 
