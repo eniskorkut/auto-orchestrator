@@ -8,11 +8,29 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
+import tools.dashboard as dashboard_module
 from tools.dashboard import Catalog, DashboardServer, Store
 from tools.project_memory import ProjectMemory
 from tools.run_owner import write_recovery_state
 from tools.teamwork import TeamworkEngine
+
+
+class FakeHandoffModule:
+    """Read-only status stub matching tools/ide_handoff public shape."""
+
+    payload = {}
+
+    @classmethod
+    def status(cls, root):
+        return dict(cls.payload)
+
+
+class BrokenHandoffModule:
+    @staticmethod
+    def status(root):
+        raise RuntimeError("handoff state is unreadable")
 
 
 def plan(project_id: str) -> dict:
@@ -322,6 +340,230 @@ class MilestoneDashboardTests(unittest.TestCase):
         self.assertTrue(run["usage"]["tokens_unknown"])
         self.assertIsNone(run["usage"]["cost_total_usd"])
         self.assertEqual(run["mode_label"], "balanced")
+
+    def test_memory_reports_unknown_ownership_without_the_handoff_module(self):
+        with mock.patch.object(dashboard_module, "_ide_handoff_module",
+                               lambda: None):
+            payload = self.catalog.memory(self.project_id)
+        self.assertEqual(payload["ide"]["source"], "unavailable")
+        self.assertEqual(payload["ownership"]["state"], "unknown")
+        self.assertFalse(payload["ownership"]["record_present"])
+        self.assertFalse(payload["ide"]["record_present"])
+        self.assertIsNone(payload["ide"]["active_ide"])
+        self.assertIsNone(payload["ide"]["previous_ide"])
+        self.assertIsNone(payload["ide"]["native"]["connected"])
+        self.assertFalse(payload["ide"]["native"]["claimed_live"])
+        self.assertIn("ide_handoff_unavailable", payload["ide"]["unknowns"])
+        self.assertIn("ownership_record_absent", payload["ide"]["unknowns"])
+        self.assertEqual(payload["next_action"]["code"], "confirm_ownership")
+        self.assertIn("confirm", payload["next_action"]["label"].lower())
+        self.assertEqual(payload["requirements_completion"]["status"], "not_run")
+        self.assertIsNone(payload["requirements_completion"]["fully_verified"])
+
+    def test_memory_surfaces_sanitized_ownership_handoff_and_question(self):
+        now = time.time()
+        with ProjectMemory(self.root) as memory:
+            memory.update_meta(last_platform="cursor", last_milestone="M2")
+            interview_id = "iv_" + "c" * 16
+            question_id = "q_" + "d" * 16
+            memory.conn.execute(
+                "INSERT INTO interviews(interview_id,project_id,"
+                "origin_platform,request_hash,request_summary,mode,status,"
+                "created_at,updated_at,schema_version) VALUES (?,?,?,?,?,?,?,?,?,1)",
+                (interview_id, memory.project_id, "cursor",
+                 hashlib.sha256(b"handoff").hexdigest(), "Handoff feature",
+                 "auto", "open", now - 30, now - 30))
+            memory.conn.execute(
+                "INSERT INTO interview_questions(interview_id,question_id,"
+                "ordinal,question_key,question,options,status,depends_on,"
+                "created_at,why,rationale,alternatives,affected_requirements,"
+                "critical) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (interview_id, question_id, 0, "handoff_target",
+                 "Which IDE should own the next milestone?",
+                 json.dumps([{"id": "cursor", "label": "Cursor",
+                              "recommended": True}]),
+                 "open", "[]", now - 30,
+                 "Ownership must be explicit before a native handoff.",
+                 "A fenced owner record prevents two supervisors.",
+                 json.dumps(["Stay in Codex", "OpenCode bridge"]),
+                 "[]", 1))
+            memory.conn.commit()
+        FakeHandoffModule.payload = {
+            "ok": True,
+            "state": "handoff_prepared",
+            "status": "handoff_prepared",
+            "fence": 4,
+            "ownership_path": str(
+                self.root / ".auto-orchestrator/ide/ownership.json"),
+            "owner": {
+                "owner_id": "owner-a",
+                "ide": "codex",
+                "session_id": "ses_raw_secret_value",
+                "host": "raw-host-name",
+                "token_present": True,
+            },
+            "previous_owner": {
+                "owner_id": "owner-b", "ide": "antigravity",
+                "session_id": "ses_previous", "host": "raw-host-name",
+            },
+            "handoff": {
+                "handoff_id": "ho_" + "a" * 24,
+                "digest": "b" * 64,
+                "target_ide": "cursor",
+                "source_fence": 3,
+                "drift": True,
+            },
+            "snapshot": {
+                "handoff_id": "ho_" + "a" * 24,
+                "digest": "b" * 64,
+                "source_ide": "codex",
+                "target_ide": "cursor",
+                "created_at": now - 120,
+            },
+            "liveness": {
+                "owner": {"status": "alive", "reason": "heartbeat_fresh"},
+                "leases": {"held": False},
+                "unknown_live": False,
+                "reasons": [],
+            },
+            "reasons": [],
+            "stop_ack": False,
+            "native_cancel_ack": False,
+        }
+        ownership_path = Path(FakeHandoffModule.payload["ownership_path"])
+        ownership_path.parent.mkdir(parents=True, exist_ok=True)
+        ownership_path.write_text("{}", encoding="utf-8")
+        with mock.patch.object(dashboard_module, "_ide_handoff_module",
+                               lambda: FakeHandoffModule):
+            payload = self.catalog.memory(self.project_id)
+        ide = payload["ide"]
+        self.assertEqual(ide["source"], "ide_handoff")
+        self.assertEqual(ide["active_ide"], "codex")
+        self.assertEqual(ide["previous_ide"], "antigravity")
+        self.assertEqual(ide["last_ide"], "cursor")
+        self.assertEqual(payload["ownership"]["state"], "handoff")
+        self.assertTrue(payload["ownership"]["record_present"])
+        self.assertEqual(payload["ownership"]["fence"], 4)
+        self.assertIsNone(payload["ownership"]["generation"])
+        self.assertRegex(ide["ownership"]["owner"]["host_hash"], r"^[0-9a-f]{12}$")
+        self.assertRegex(ide["ownership"]["owner"]["session_hash"],
+                         r"^[0-9a-f]{12}$")
+        handoff = ide["handoff"]
+        self.assertEqual(handoff["source"], "codex")
+        self.assertEqual(handoff["target"], "cursor")
+        self.assertEqual(handoff["digest"], "b" * 64)
+        self.assertGreaterEqual(handoff["age_seconds"], 120)
+        self.assertLess(handoff["age_seconds"], 180)
+        self.assertIs(handoff["drift"], True)
+        self.assertEqual(ide["next_action"]["code"], "review_handoff_drift")
+        self.assertEqual(ide["requirements_completion"]["status"], "not_run")
+        question = ide["grill_me"]
+        self.assertEqual(question["question_id"], question_id)
+        self.assertEqual(question["why"],
+                         "Ownership must be explicit before a native handoff.")
+        self.assertIn("fenced owner", question["rationale"])
+        self.assertEqual(question["alternatives"],
+                         ["Stay in Codex", "OpenCode bridge"])
+        self.assertIsNone(ide["native"]["connected"])
+        self.assertIn("current_task_unknown", ide["unknowns"])
+        serialized = json.dumps(payload)
+        for secret in ("ses_raw_secret_value", "ses_previous", "raw-host-name",
+                       "owner-a", "owner-b", "token_present"):
+            self.assertNotIn(secret, serialized)
+        self.assertNotIn('"token"', serialized)
+
+    def test_memory_degrades_to_unknown_when_handoff_status_raises(self):
+        with mock.patch.object(dashboard_module, "_ide_handoff_module",
+                               lambda: BrokenHandoffModule):
+            payload = self.catalog.memory(self.project_id)
+        self.assertEqual(payload["ide"]["source"], "unavailable")
+        self.assertEqual(payload["ownership"]["state"], "unknown")
+        self.assertEqual(payload["ownership"]["fence"], None)
+        self.assertIn("ide_handoff_status_error",
+                      payload["ide"]["unknowns"])
+        self.assertIsNone(payload["ide"]["native"]["connected"])
+
+    def test_milestones_include_current_work_and_requirements_completion(self):
+        self._seed()
+        payload = self.catalog.milestones(self.project_id)
+        ide = payload["ide"]
+        self.assertEqual(ide["current"]["run_id"], "team-milestone")
+        self.assertEqual(ide["current"]["milestone_id"], "M1")
+        self.assertEqual(ide["current"]["milestone_status"], "passed")
+        self.assertEqual(ide["requirements_completion"]["status"], "not_run")
+        self.assertEqual(payload["next_action"]["code"], "verify_requirements")
+        self.assertEqual(payload["requirements_completion"]["status"], "not_run")
+        self.assertEqual(payload["ownership_state"], "unknown")
+        self.assertIsNone(payload["native_connected"])
+        self.assertIsNone(payload["active_ide"])
+        self.assertIsNone(payload["previous_ide"])
+        self.assertIsNone(ide["native"]["connected"])
+        evidence = self.root / ".auto-orchestrator" / "evidence" / "team-milestone"
+        evidence.mkdir(parents=True)
+        (evidence / "teamwork-summary-0.json").write_text(json.dumps({
+            "requirements": {
+                "status": "needs_review",
+                "fully_verified": False,
+                "verified_completion": False,
+                "critical_unverified": ["ac_review"],
+                "criteria": [],
+                "reasons": ["independent review remains"],
+            },
+        }), encoding="utf-8")
+        reviewed = self.catalog.milestones(self.project_id)
+        self.assertEqual(
+            reviewed["requirements_completion"]["status"], "review_needed")
+        self.assertIs(reviewed["requirements_completion"]["fully_verified"],
+                      False)
+        self.assertEqual(reviewed["next_action"]["code"], "request_review")
+        self.assertIn("review", reviewed["next_action"]["label"].lower())
+
+    def test_real_handoff_activation_is_sanitized_and_hash_only(self):
+        try:
+            from tools import ide_handoff
+        except ImportError:  # pragma: no cover - optional V7.8 module
+            self.skipTest("ide_handoff is not installed")
+        activated = ide_handoff.activate(
+            self.root, "codex", session_id="ses_real_secret_value",
+            owner_id="real-owner")
+        self.assertTrue(activated["ok"])
+        payload = self.catalog.memory(self.project_id)
+        ide = payload["ide"]
+        self.assertEqual(ide["source"], "ide_handoff")
+        self.assertEqual(ide["active_ide"], "codex")
+        self.assertEqual(ide["ownership"]["state"], "active")
+        self.assertTrue(ide["ownership"]["record_present"])
+        self.assertGreaterEqual(ide["ownership"]["fence"], 1)
+        self.assertRegex(ide["ownership"]["owner"]["host_hash"],
+                         r"^[0-9a-f]{12}$")
+        self.assertRegex(ide["ownership"]["owner"]["session_hash"],
+                         r"^[0-9a-f]{12}$")
+        self.assertIsNone(ide["native"]["connected"])
+        serialized = json.dumps(payload)
+        self.assertNotIn("ses_real_secret_value", serialized)
+        self.assertNotIn("real-owner", serialized)
+        self.assertNotIn("owner_token", serialized)
+
+    def test_http_route_returns_ide_ownership_evidence(self):
+        self._seed()
+        server = DashboardServer(("127.0.0.1", 0), self.store, catalog=self.catalog)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(self._stop, server, thread)
+        host, port = server.server_address[:2]
+        connection = http.client.HTTPConnection(host, port, timeout=5)
+        try:
+            connection.request("GET", f"/api/projects/{self.project_id}/ide")
+            response = connection.getresponse()
+            body = response.read()
+        finally:
+            connection.close()
+        self.assertEqual(response.status, 200)
+        payload = json.loads(body)
+        self.assertEqual(payload["source"], "ide_handoff")
+        self.assertIsNone(payload["native"]["connected"])
+        self.assertEqual(payload["current"]["milestone_id"], "M1")
+        self.assertNotIn("ses_secret_should_not_leak", body.decode())
 
     def test_http_route_returns_project_scoped_milestones(self):
         self._seed()

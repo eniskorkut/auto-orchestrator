@@ -35,6 +35,7 @@ V761_MODULES = ('requirements_contract.py', 'assumption_guard.py',
                 'git_memory_hook.py')
 V77_MODULES = ('completion_engine.py', 'context_selector.py',
                'grill_llm.py', 'grill_benchmark.py')
+V78_MODULES = ('ide_handoff.py',)
 
 class InstallError(ValueError):
     pass
@@ -136,7 +137,7 @@ def installed_map(home:Path,platforms:set[str],opencode_version:str,codex_model:
         for name in ('supervisor.py','router.py','router_eval.py','worktree.py','benchmark.py','quality_gate.py','review_gate.py'):
             files[codex/'auto-orchestrator/tools'/name]=(ROOT/'tools'/name).read_bytes()
         dashboard_at(codex/'auto-orchestrator/tools')
-        for name in V71_MODULES + V73_MODULES + V761_MODULES + V77_MODULES:
+        for name in V71_MODULES + V73_MODULES + V761_MODULES + V77_MODULES + V78_MODULES:
             source=ROOT/'tools'/name
             if source.is_file():
                 files[codex/'auto-orchestrator/tools'/name]=source.read_bytes()
@@ -180,7 +181,7 @@ def installed_map(home:Path,platforms:set[str],opencode_version:str,codex_model:
         for name in ('supervisor.py','router.py','router_eval.py','worktree.py','benchmark.py','quality_gate.py','review_gate.py'):
             files[oc/'auto-orchestrator/tools'/name]=(ROOT/'tools'/name).read_bytes()
         dashboard_at(oc/'auto-orchestrator/tools')
-        for name in V71_MODULES + V73_MODULES + V761_MODULES + V77_MODULES:
+        for name in V71_MODULES + V73_MODULES + V761_MODULES + V77_MODULES + V78_MODULES:
             source=ROOT/'tools'/name
             if source.is_file():
                 files[oc/'auto-orchestrator/tools'/name]=source.read_bytes()
@@ -202,7 +203,7 @@ def installed_map(home:Path,platforms:set[str],opencode_version:str,codex_model:
         for name in ('supervisor.py','router.py','router_eval.py','worktree.py','benchmark.py','quality_gate.py','review_gate.py'):
             files[gemini/'config/auto-orchestrator/tools'/name]=(ROOT/'tools'/name).read_bytes()
         dashboard_at(gemini/'config/auto-orchestrator/tools')
-        for name in V71_MODULES + V73_MODULES + V761_MODULES + V77_MODULES:
+        for name in V71_MODULES + V73_MODULES + V761_MODULES + V77_MODULES + V78_MODULES:
             source=ROOT/'tools'/name
             if source.is_file():
                 files[gemini/'config/auto-orchestrator/tools'/name]=source.read_bytes()
@@ -229,7 +230,7 @@ def installed_map(home:Path,platforms:set[str],opencode_version:str,codex_model:
         for name in ('supervisor.py','router.py','router_eval.py','worktree.py','quality_gate.py','review_gate.py','perf.py','hook_bridge.py'):
             files[cursor/'auto-orchestrator/tools'/name]=(ROOT/'tools'/name).read_bytes()
         dashboard_at(cursor/'auto-orchestrator/tools')
-        for name in V71_MODULES + V73_MODULES + V761_MODULES + V77_MODULES:
+        for name in V71_MODULES + V73_MODULES + V761_MODULES + V77_MODULES + V78_MODULES:
             source=ROOT/'tools'/name
             if source.is_file():
                 files[cursor/'auto-orchestrator/tools'/name]=source.read_bytes()

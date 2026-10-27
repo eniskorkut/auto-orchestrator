@@ -42,7 +42,7 @@ RUNTIME_MODULES = (
     "grill_llm.py",
     "grill_benchmark.py",
 )
-OPTIONAL_RUNTIME_MODULES = ("assumption_guard.py",)
+OPTIONAL_RUNTIME_MODULES = ("assumption_guard.py", "ide_handoff.py")
 PLATFORM_TOOLS = {
     "codex": ".codex/auto-orchestrator/tools",
     "opencode": ".config/opencode/auto-orchestrator/tools",
@@ -93,6 +93,30 @@ class ProjectDashboardInstallTests(unittest.TestCase):
         self.assertIn("one question", skill.read_text(encoding="utf-8").lower())
         self.assertTrue(
             (self.target / ".opencode" / "skills" / "teamwork" / "SKILL.md").is_file())
+
+    def test_project_install_ships_cursor_and_antigravity_role_agents(self):
+        install(self.target, "all", "inherit", False, False)
+        for role in ("planner", "implementer", "tester", "reviewer"):
+            cursor = self.target / ".cursor" / "agents" / f"auto_{role}.md"
+            antigravity = (self.target / ".agents" / "agents" /
+                           f"auto_{role}.md")
+            self.assertTrue(cursor.is_file(), str(cursor))
+            self.assertTrue(antigravity.is_file(), str(antigravity))
+            self.assertIn("name:", cursor.read_text(encoding="utf-8"))
+            self.assertIn("subagent: true",
+                          antigravity.read_text(encoding="utf-8"))
+            for path in (cursor, antigravity):
+                self.assertNotIn("/teamwork", path.read_text(encoding="utf-8"))
+
+    def test_project_install_ships_v78_handoff_module_when_present(self):
+        install(self.target, "opencode", "inherit", False, False)
+        for name in ("ide_handoff.py",):
+            source = SOURCE / "tools" / name
+            if source.is_file():
+                installed = self.target / "tools" / name
+                self.assertEqual(installed.read_bytes(), source.read_bytes())
+            else:
+                self.assertFalse((self.target / "tools" / name).exists())
 
     def test_project_antigravity_install_copies_ao_grill_skill_to_cli(self):
         install(self.target, "antigravity", "inherit", False, False)
@@ -171,6 +195,29 @@ class GlobalDashboardInstallTests(unittest.TestCase):
             (self.home / ".gemini" / "antigravity-cli" / "skills" / "grill-me").exists())
         self.assertFalse(
             (self.home / ".gemini" / "config" / "skills" / "grill-me").exists())
+
+    def test_global_install_ships_cursor_and_antigravity_role_agents(self):
+        execute(self.home, {"cursor", "antigravity"})
+        for role in ("planner", "implementer", "tester", "reviewer"):
+            cursor = self.home / ".cursor" / "agents" / f"auto_{role}.md"
+            antigravity = (self.home / ".gemini" / "config" / "agents" /
+                           f"auto_{role}" / "agent.md")
+            self.assertTrue(cursor.is_file(), str(cursor))
+            self.assertTrue(antigravity.is_file(), str(antigravity))
+        # Antigravity keeps its native commands: no invented shadow file.
+        self.assertFalse((self.home / ".gemini/antigravity-cli/skills/teamwork").exists())
+        self.assertFalse((self.home / ".gemini/config/skills/grill-me").exists())
+
+    def test_global_uninstall_preserves_user_manifest_directory_files(self):
+        platforms = set(PLATFORM_TOOLS)
+        execute(self.home, platforms)
+        user_file = self.home / ".auto-orchestrator" / "user-note.txt"
+        user_file.write_text("keep me", encoding="utf-8")
+        execute(self.home, platforms, uninstall=True)
+        self.assertEqual(user_file.read_text(encoding="utf-8"), "keep me")
+        self.assertFalse(
+            (self.home / ".auto-orchestrator" /
+             "auto-orchestrator-global-manifest.json").exists())
 
     def test_global_manifest_records_v71_modules(self):
         execute(self.home, set(PLATFORM_TOOLS))

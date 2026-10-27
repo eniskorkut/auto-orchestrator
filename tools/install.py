@@ -30,6 +30,7 @@ V761_MODULES = ('requirements_contract.py', 'assumption_guard.py',
                 'git_memory_hook.py')
 V77_MODULES = ('completion_engine.py', 'context_selector.py',
                'grill_llm.py', 'grill_benchmark.py')
+V78_MODULES = ('ide_handoff.py',)
 # Installer-generated runtime and integration files may be upgraded in place
 # only while the manifest still proves the file is ours. Everything else keeps
 # the conservative opt-in rule.
@@ -270,8 +271,9 @@ def _runtime_sources() -> list[Path]:
                ROOT/'tools/project_memory.py', ROOT/'tools/repo_facts.py',
                ROOT/'tools/grill_me.py', ROOT/'tools/universal_teamwork.py']
     # V7.6.1 modules ship when present. A partial source tree must not make a
-    # previously working installer unusable.
-    sources.extend(ROOT/'tools'/name for name in V761_MODULES + V77_MODULES
+    # previously working installer unusable. V7.8 adds the read-only IDE
+    # handoff module on the same optional basis.
+    sources.extend(ROOT/'tools'/name for name in V761_MODULES + V77_MODULES + V78_MODULES
                    if (ROOT/'tools'/name).is_file())
     return sources
 
