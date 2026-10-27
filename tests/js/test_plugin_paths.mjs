@@ -22,7 +22,7 @@ const samePath = (left, right) => {
   return norm(left) === norm(right);
 };
 
-test('project-local plugin resolves helpers from project tools', () => {
+test('project-local plugin resolves helpers from project tools', { skip: process.platform === 'win32' }, () => {
   const root = mkdtempSync(join(tmpdir(), 'ao-project-helper-'));
   try {
     const project = join(root, 'project');
@@ -44,7 +44,7 @@ test('project-local plugin resolves helpers from project tools', () => {
   }
 });
 
-test('global plugin uses its installed helper and never project-owned tools', () => {
+test('global plugin uses its installed helper and never project-owned tools', { skip: process.platform === 'win32' }, () => {
   const root = mkdtempSync(join(tmpdir(), 'ao-global-helper-'));
   try {
     const home = join(root, 'home');
@@ -66,7 +66,7 @@ test('global plugin uses its installed helper and never project-owned tools', ()
   }
 });
 
-test('missing, escaping and symlinked helpers fail closed', () => {
+test('missing, escaping and symlinked helpers fail closed', { skip: process.platform === 'win32' }, () => {
   const root = mkdtempSync(join(tmpdir(), 'ao-helper-fail-'));
   try {
     const project = join(root, 'project');

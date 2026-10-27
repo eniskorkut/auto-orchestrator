@@ -111,7 +111,8 @@ class GlobalInstallTests(unittest.TestCase):
         skill = self.home/'.codex/skills/auto-orchestrator/SKILL.md'
         old = skill.read_text(encoding='utf-8') + '\nold generated revision\n'
         skill.write_text(old, encoding='utf-8')
-        manifest['files'][str(skill.resolve())] = hashlib.sha256(old.encode()).hexdigest()
+        manifest['files'][str(skill.resolve())] = hashlib.sha256(
+            skill.read_bytes()).hexdigest()
         obsolete = self.home/'.codex/skills/old-generated/SKILL.md'
         obsolete.parent.mkdir(parents=True)
         obsolete.write_text('obsolete integration\n', encoding='utf-8')
