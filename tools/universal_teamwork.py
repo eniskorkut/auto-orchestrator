@@ -1495,6 +1495,11 @@ def _run_bounded(argv, *, cwd, env, timeout):
             pass
     for thread in threads:
         thread.join(timeout=5)
+    for stream in (process.stdout, process.stderr):
+        try:
+            stream.close()
+        except OSError:
+            pass
     stdout = chunks["stdout"].decode("utf-8", "replace")
     stderr = chunks["stderr"].decode("utf-8", "replace")
     return {
@@ -1785,7 +1790,39 @@ def native_verify(args) -> dict:
     directory = Path(root) / ".auto-orchestrator" / "verification"
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     path = directory / f"{run_id}-{task_id}-{time.time_ns()}.json"
+    record_sha256 = hashlib.sha256(json.dumps(
+        record, sort_keys=True, separators=(",", ":"),
+        ensure_ascii=False).encode("utf-8")).hexdigest()
     atomic_write_json(path, record)
+    receipt_id = None
+    receipt_error = None
+    try:
+        from tools import verification_receipt
+    except ModuleNotFoundError:
+        import verification_receipt  # type: ignore
+    try:
+        project = ensure_project_identity(root)
+        receipt = verification_receipt.issue(root, {
+            "verification_run_id": verification_run_id,
+            "project_id": project["project_id"],
+            "run_id": run_id,
+            "task_id": task_id,
+            "commit": head,
+            "contract_sha256": (contract or {}).get("sha256"),
+            "plan_sha256": approval.get("plan_sha256"),
+            "verified": record["verified"],
+            "exit_code": exit_code,
+            "results_sha256": results_sha256 or hashlib.sha256(
+                output.encode("utf-8", "replace")).hexdigest(),
+            "output_sha256": hashlib.sha256(
+                output.encode("utf-8", "replace")).hexdigest(),
+            "record_sha256": record_sha256,
+            "record_ref": path.relative_to(root).as_posix(),
+            "issued_at": time.time(),
+        })
+        receipt_id = receipt.name[:-5]
+    except Exception as exc:  # noqa: BLE001 - optional receipt boundary
+        receipt_error = str(exc)[:300]
     dispatch_id = getattr(args, "dispatch_id", None)
     dispatch_state = None
     if dispatch_id:
@@ -1809,8 +1846,7 @@ def native_verify(args) -> dict:
             relative = path.relative_to(root).as_posix()
             native_dispatch.verify(
                 root, dispatch_id, run_id=run_id,
-                verification_run_id=verification_run_id,
-                evidence_ref=relative)
+                verification_run_id=verification_run_id)
             dispatch_state = "verified"
     try:
         from tools import project_identity
@@ -1844,6 +1880,8 @@ def native_verify(args) -> dict:
         "verification_run_id": verification_run_id,
         "dispatch_id": dispatch_id,
         "dispatch_state": dispatch_state,
+        "receipt_id": receipt_id,
+        "receipt_error": receipt_error,
         "results_error": results_error,
         "evidence": str(path),
         "observation_id": (observation or {}).get("observation_id"),
@@ -2159,6 +2197,31 @@ def native_dispatch_command(args) -> dict:
     dispatch_id = getattr(args, "dispatch_id", None)
     if action == "create":
         task_id = _run_id(getattr(args, "task_id", None) or "")
+        commit = None
+        plan_sha256 = None
+        contract_sha256 = None
+        try:
+            from tools import completion_engine
+        except ModuleNotFoundError:
+            import completion_engine  # type: ignore
+        commit = completion_engine._head_sha(root)
+        try:
+            plan = teamwork_chat.load_native_plan(root, run_id)
+            plan_sha256 = teamwork_chat.plan_digest(plan)
+            reference = plan.get("requirements_contract")
+            if isinstance(reference, dict) and isinstance(
+                    reference.get("sha256"), str):
+                contract_sha256 = reference["sha256"]
+            else:
+                try:
+                    from tools import requirements_contract
+                except ModuleNotFoundError:
+                    import requirements_contract  # type: ignore
+                current = requirements_contract.current_contract_ref(root)
+                if isinstance(current, dict):
+                    contract_sha256 = current.get("sha256")
+        except (UniversalError, teamwork_chat.ChatError, OSError, ValueError):
+            plan_sha256 = None
         result = native_dispatch.create(
             root, run_id=run_id, task_id=task_id,
             role=getattr(args, "role", None) or "implementer",
@@ -2167,7 +2230,9 @@ def native_dispatch_command(args) -> dict:
             read_scope=getattr(args, "read_scope", None) or [],
             write_scope=getattr(args, "write_scope", None) or [],
             dependencies=getattr(args, "dependency", None) or [],
-            parent_agent_id=getattr(args, "parent_agent_id", None))
+            parent_agent_id=getattr(args, "parent_agent_id", None),
+            commit=commit, contract_sha256=contract_sha256,
+            plan_sha256=plan_sha256)
         return _with_ownership({"status": "created", "dispatch": result},
                                ownership)
     if not dispatch_id:

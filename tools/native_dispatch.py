@@ -5,13 +5,19 @@ that through its own native tools. This module records the dispatch contract,
 the lifecycle events the parent can actually observe, and the evidence needed
 before any task may be considered complete.
 
-A dispatch never enters ``running`` without a native child reference or an
-observed hook event. Missing lifecycle evidence ends in ``unknown``, not in a
-fabricated ``completed`` state.
+A dispatch never enters ``running`` without a native child reference, and a
+parent-supplied reference is recorded as ``child_provenance="declared"`` unless
+a trusted adapter observes the lifecycle. Missing lifecycle evidence ends in
+``unknown``/``recovery_required``, not in a fabricated ``completed`` state.
+
+Python access to this module is an internal API, not an authorization
+boundary. The CLI calls ``ide_handoff`` ownership checks before every mutation;
+embedding code must do the same.
 """
 from __future__ import annotations
 
 import hashlib
+import json
 import secrets
 import time
 from pathlib import Path
@@ -80,9 +86,14 @@ def _scopes(value, field):
     result = []
     for item in value:
         item = _text(item, field, 300)
-        normalized = item.replace("\\", "/").strip("/")
-        if (not normalized or normalized.startswith("/")
-                or ".." in normalized.split("/")):
+        unified = item.replace("\\", "/")
+        if (unified.startswith("/") or unified.startswith("//")
+                or item.startswith("\\\\")
+                or (len(unified) >= 2 and unified[1] == ":")
+                or unified.startswith("~")):
+            raise DispatchError(f"{field} must be workspace-relative")
+        normalized = unified.strip("/")
+        if (not normalized or ".." in normalized.split("/")):
             raise DispatchError(f"{field} contains an unsafe path")
         if normalized not in result:
             result.append(normalized)
@@ -161,10 +172,38 @@ def list_dispatches(root, run_id=None) -> list[dict]:
     return result
 
 
+
+def _head(root: Path):
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
+def _is_ancestor(root: Path, ancestor, descendant) -> bool:
+    if not ancestor or not descendant:
+        return True
+    if ancestor == descendant:
+        return True
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(root), "merge-base", "--is-ancestor",
+             ancestor, descendant], capture_output=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0
+
+
 def create(root, *, run_id, task_id, role, ide, owner_session_id,
            read_scope=None, write_scope=None, dependencies=None,
            sandbox_policy=None, permission_policy=None,
-           parent_agent_id=None) -> dict:
+           parent_agent_id=None, commit=None, contract_sha256=None,
+           plan_sha256=None) -> dict:
     root = _root(root)
     run_id = _text(run_id, "run_id", 100)
     task_id = _text(task_id, "task_id", 100)
@@ -180,6 +219,21 @@ def create(root, *, run_id, task_id, role, ide, owner_session_id,
     except ModuleNotFoundError:
         from project_identity import ensure_project_identity  # type: ignore
     identity = ensure_project_identity(root)
+    if commit is None:
+        try:
+            import subprocess
+            resolved = subprocess.run(
+                ["git", "-C", str(root), "rev-parse", "HEAD"],
+                capture_output=True, text=True, timeout=10)
+            commit = resolved.stdout.strip() if resolved.returncode == 0 else None
+        except (OSError, subprocess.SubprocessError):
+            commit = None
+    for label, value in (("commit", commit),
+                         ("contract_sha256", contract_sha256),
+                         ("plan_sha256", plan_sha256)):
+        if value is not None and (not isinstance(value, str)
+                                  or len(value) > 80):
+            raise DispatchError(f"{label} is invalid")
     read_scope = _scopes(read_scope, "read_scope")
     write_scope = _scopes(write_scope, "write_scope")
     dependencies = _scopes(dependencies, "dependencies")
@@ -213,6 +267,9 @@ def create(root, *, run_id, task_id, role, ide, owner_session_id,
             "version": VERSION,
             "dispatch_id": dispatch_id,
             "project_id": identity["project_id"],
+            "commit": commit,
+            "contract_sha256": contract_sha256,
+            "plan_sha256": plan_sha256,
             "run_id": run_id,
             "task_id": task_id,
             "role": role,
@@ -221,6 +278,8 @@ def create(root, *, run_id, task_id, role, ide, owner_session_id,
             "parent_agent_id": parent_agent_id,
             "child_agent_id": None,
             "native_child_ref": None,
+            "child_provenance": None,
+            "native_lifecycle_observed": False,
             "read_scope": read_scope,
             "write_scope": write_scope,
             "dependencies": dependencies,
@@ -306,6 +365,11 @@ def start(root, dispatch_id, *, run_id, native_child_ref=None) -> dict:
         record["state"] = "running"
         record["lifecycle_status"] = "running"
         record["native_child_ref"] = child
+        # A reference supplied by the parent is a declaration, not proof of a
+        # vendor lifecycle event. Adapters may raise this only with trusted
+        # evidence; no such adapter is claimed here.
+        record["child_provenance"] = "declared"
+        record["native_lifecycle_observed"] = False
         _history(record, "start", to_state="running",
                  native_child_ref=child)
         return _public(_write(root, record))
@@ -330,20 +394,51 @@ def complete(root, dispatch_id, *, run_id, result_ref) -> dict:
                        result_ref=ref)
 
 
-def collect(root, dispatch_id, *, run_id, evidence_ref, output_dir=None) -> dict:
-    ref = _text(evidence_ref, "evidence_ref", 300)
-    base = (Path(output_dir) if output_dir else Path(root)).resolve()
-    path = (base / ref).resolve()
-    if base not in path.parents and path != base:
+def _workspace_path(root, base, relative):
+    base = Path(base).resolve()
+    if base != root and root not in base.parents:
+        raise DispatchError("output directory escapes the workspace")
+    candidate = base / relative
+    if candidate.is_symlink():
+        raise DispatchError("evidence artifact must not be a symlink")
+    current = candidate
+    while current != base and current.parent != current:
+        if current.parent.is_symlink():
+            raise DispatchError("evidence path contains a symlink")
+        current = current.parent
+    resolved = candidate.resolve()
+    if resolved != root and root not in resolved.parents:
         raise DispatchError("evidence path escapes the workspace")
-    if not path.is_file() or path.is_symlink():
+    if not resolved.is_file():
         raise DispatchError("evidence artifact is missing")
-    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    return resolved
+
+
+def _hash_path(path: Path) -> tuple[str, int]:
+    digest = hashlib.sha256()
+    size = 0
+    with path.open("rb") as handle:
+        while True:
+            block = handle.read(1024 * 1024)
+            if not block:
+                break
+            size += len(block)
+            digest.update(block)
+    return digest.hexdigest(), size
+
+
+def collect(root, dispatch_id, *, run_id, evidence_ref, output_dir=None) -> dict:
+    root = _root(root).resolve()
+    ref = _text(evidence_ref, "evidence_ref", 300)
+    base = Path(output_dir) if output_dir else root
+    path = _workspace_path(root, base, ref)
+    digest, size = _hash_path(path)
     with project_lock(root, timeout=10.0):
         record = _load(root, run_id, dispatch_id)
         if record.get("state") != "completed_claimed":
             raise DispatchError("output is not claimed complete")
         record["output_digest"] = digest
+        record["output_size"] = size
         record["state"] = "output_collected"
         record["lifecycle_status"] = "output_collected"
         record["evidence_ref"] = ref
@@ -352,36 +447,57 @@ def collect(root, dispatch_id, *, run_id, evidence_ref, output_dir=None) -> dict
         return _public(_write(root, record))
 
 
-def verify(root, dispatch_id, *, run_id, verification_run_id,
-           evidence_ref) -> dict:
-    ref = _text(verification_run_id, "verification_run_id", 120)
-    evidence = _text(evidence_ref, "evidence_ref", 400)
+def verify(root, dispatch_id, *, run_id, verification_run_id) -> dict:
     root = _root(root).resolve()
-    raw_path = root / evidence
-    if raw_path.is_symlink():
-        raise DispatchError("verification evidence must not be a symlink")
-    path = raw_path.resolve()
-    if root not in path.parents or not path.is_file():
-        raise DispatchError("verification evidence is missing or unsafe")
+    ref = _text(verification_run_id, "verification_run_id", 120)
     try:
-        value = read_json(path, {})
-    except (OSError, ValueError) as exc:
-        raise DispatchError("verification evidence is invalid") from exc
-    if (not isinstance(value, dict) or value.get("kind") != "native-verification"
-            or value.get("verified") is not True
-            or value.get("run_id") != run_id
-            or value.get("verification_run_id") != ref):
-        raise DispatchError(
-            "verification evidence does not prove this dispatch")
+        from tools import verification_receipt
+    except ModuleNotFoundError:
+        import verification_receipt  # type: ignore
     with project_lock(root, timeout=10.0):
         record = _load(root, run_id, dispatch_id)
         if record.get("state") not in ("output_collected",
                                        "verification_pending"):
             raise DispatchError("dispatch output is not collected")
-        if value.get("task_id") != record.get("task_id"):
-            raise DispatchError("verification evidence belongs to another task")
+        evidence_ref = record.get("evidence_ref")
+        if not isinstance(evidence_ref, str) or not evidence_ref:
+            raise DispatchError("dispatch has no collected artifact")
+        path = _workspace_path(root, root, evidence_ref)
+        digest, size = _hash_path(path)
+        if digest != record.get("output_digest") or size != record.get("output_size"):
+            raise DispatchError(
+                "collected artifact changed after collection; re-collect it")
+        current_head = _head(root)
+        if not current_head:
+            raise DispatchError("dispatch verification requires a git commit")
+        if (record.get("commit")
+                and not _is_ancestor(root, record.get("commit"), current_head)):
+            raise DispatchError(
+                "dispatch base commit is not an ancestor of HEAD")
+        payload = verification_receipt.require(
+            root, ref, run_id=run_id, task_id=record.get("task_id"),
+            commit=current_head,
+            contract_sha256=record.get("contract_sha256"),
+            plan_sha256=record.get("plan_sha256"))
+        record_ref = payload.get("record_ref")
+        record_path = _workspace_path(root, root, record_ref)
+        try:
+            if record_path.stat().st_size > 262_144:
+                raise DispatchError("verification record is too large")
+            record_value = json.loads(record_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise DispatchError("verification record is unreadable") from exc
+        record_digest = hashlib.sha256(json.dumps(
+            record_value, sort_keys=True, separators=(",", ":"),
+            ensure_ascii=False).encode("utf-8")).hexdigest()
+        if record_digest != payload.get("record_sha256"):
+            raise DispatchError(
+                "verification record changed after the receipt was issued")
         record["verification_run_id"] = ref
-        record["verification_evidence_ref"] = evidence
+        record["verification_receipt_id"] = ref
+        record["verification_record_ref"] = record_ref
+        record["verification_record_sha256"] = record_digest
+        record["verified_commit"] = current_head
         record["state"] = "verified"
         record["lifecycle_status"] = "verified"
         record["completed_at"] = time.time()
@@ -415,6 +531,9 @@ def recover(root, dispatch_id, *, run_id, reason) -> dict:
         record["exit_reason"] = _text(reason, "reason", 500)
         record["stop_ack"] = False
         record["native_cancel_ack"] = False
+        record["verification_run_id"] = None
+        record["verification_receipt_id"] = None
+        record["verification_record_ref"] = None
         _history(record, "recover", to_state="recovery_required",
                  exit_reason=record["exit_reason"], stop_ack=False)
         return _public(_write(root, record))

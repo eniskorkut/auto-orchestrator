@@ -62,9 +62,15 @@ Rules:
   `dispatch_confirmed`.
 - `complete` only records a **claim**; `collect` requires the result artifact to
   exist and hashes it.
-- `verify` requires a `native-verification` record with `verified: true`, the
-  same run/task and the same `verification_run_id`; the evidence path must be
-  inside the project and not a symlink.
+- `verify` requires a **verification receipt** issued by `native-verify`:
+  HMAC-protected under `.auto-orchestrator/verification/receipts/`, bound to the
+  project/run/task, the dispatch commit, and the contract/plan digests when
+  pinned. It re-hashes the collected artifact and the verification record; a
+  hand-written `verified:true` JSON file is not accepted. A changed artifact or
+  record is rejected.
+- A parent-supplied `native_child_ref` is `child_provenance: declared`; no
+  adapter here proves an observed vendor lifecycle, so
+  `native_lifecycle_observed` stays false.
 - `recover` records `recovery_required` with `stop_ack: false` and
   `native_cancel_ack: false`; it never fabricates completion.
 - Out-of-order transitions are rejected.
@@ -94,7 +100,7 @@ python3.11 tools/universal_teamwork.py --root . --platform codex \
   native-dispatch collect --run-id run-1 --dispatch-id nd_… --evidence-ref out.txt
 python3.11 tools/universal_teamwork.py --root . --platform codex \
   native-dispatch verify --run-id run-1 --dispatch-id nd_… \
-  --verification-run-id vr_… --evidence-ref .auto-orchestrator/verification/…
+  --verification-run-id vr_…
 ```
 
 `native-dispatch status` is read-only.

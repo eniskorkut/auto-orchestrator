@@ -60,6 +60,12 @@ class NativeVerifyTests(unittest.TestCase):
             "</testsuite>', encoding='utf-8')\n"
             "        self.assertTrue(True)\n",
             encoding="utf-8")
+        (self.root / "tests" / "test_fail.py").write_text(
+            "import unittest\n\n"
+            "class Fail(unittest.TestCase):\n"
+            "    def test_fail(self):\n"
+            "        self.assertEqual(1, 2)\n",
+            encoding="utf-8")
         (self.root / "tests" / "test_writer_empty.py").write_text(
             "import os\n"
             "import pathlib\n"
@@ -244,6 +250,16 @@ class NativeVerifyTests(unittest.TestCase):
         self.assertFalse(result["verified_completion"])
         self.assertEqual(result["status"], "results_missing")
         self.assertIn("no result file", result["results_error"])
+
+    def test_a_failing_test_command_is_not_verified(self):
+        self._native_run_with_contract()
+        result = self.cli(
+            "codex", "native-verify", "--run-id", "run-verify-1",
+            "--task-id", "build", "--verification-command",
+            "python3 -m unittest tests.test_fail")
+        self.assertEqual(result["exit_code"], 1)
+        self.assertFalse(result["verified_completion"])
+        self.assertEqual(result["status"], "command_failed")
 
     def test_missing_runner_evidence_fails_closed(self):
         self._native_run_with_contract()
