@@ -152,6 +152,29 @@ class IdleEvidenceTests(SecurityBase):
         return credential["owner_token"], credential["fence"]
 
 
+class AtomicityTests(SecurityBase):
+    def test_failed_ownership_write_leaves_no_orphan_snapshot(self):
+        from unittest import mock
+        self.cli("codex", "ide", "activate")
+        credential = json.loads(
+            self.credential_path("codex").read_text(encoding="utf-8"))
+        directory = handoff._snapshots_dir(self.root)
+        before = sorted(path.name for path in directory.glob("*.json"))
+        with mock.patch.object(
+                handoff, "_write_ownership",
+                side_effect=handoff.HandoffError("simulated crash")):
+            with self.assertRaises(handoff.HandoffError):
+                handoff.prepare_handoff(
+                    self.root, credential["owner_token"],
+                    credential["fence"], "opencode",
+                    idle_confirmation="user_confirmed")
+        after = sorted(path.name for path in directory.glob("*.json"))
+        self.assertEqual(after, before)
+        record = json.loads(
+            handoff._ownership_path(self.root).read_text(encoding="utf-8"))
+        self.assertEqual(record["state"], "active")
+
+
 class SessionAuthorityTests(SecurityBase):
     def test_missing_credential_blocks_same_ide_mutation(self):
         self.cli("codex", "ide", "activate")

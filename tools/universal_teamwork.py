@@ -1288,6 +1288,19 @@ def native_verify(args) -> dict:
         }],
         reviews=_review_projection(reviews),
         commit_sha=head, head_sha=head, expected_commit=head)
+    merged_tree_clean = not changed_before and not changed_after
+    if not merged_tree_clean:
+        # Merged-tree gate: a dirty worktree means the test result is not
+        # bound to the commit. Keep the evidence, but never claim verified
+        # completion.
+        result["verified_completion"] = False
+        result["fully_verified"] = False
+        result["merged_tree_clean"] = False
+        reasons = list(result.get("reasons") or [])
+        if "dirty worktree" not in " ".join(str(item) for item in reasons):
+            reasons.append(
+                "dirty worktree: commit the change and re-run native-verify")
+        result["reasons"] = reasons
     record = {
         "version": 1,
         "kind": "native-verification",
@@ -1310,11 +1323,13 @@ def native_verify(args) -> dict:
         "output_sha256": __import__("hashlib").sha256(
             output.encode("utf-8", "replace")).hexdigest(),
         "changed_files": changed,
+        "merged_tree_clean": merged_tree_clean,
         "post_run_changes": sorted(set(changed_after) - set(changed_before)),
         "reviews": _review_projection(reviews),
         "review_count": len(reviews),
         "result": result,
-        "verified": bool(result.get("verified_completion")),
+        "verified": bool(result.get("verified_completion"))
+        and merged_tree_clean,
         "completion_recorded": False,
         "note": ("This command ran a real test command. It does not mark the "
                  "task complete; Supervisor acceptance and independent review "

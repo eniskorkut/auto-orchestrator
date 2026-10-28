@@ -165,6 +165,20 @@ class NativeVerifyTests(unittest.TestCase):
                             "run-verify-1", "--task-id", "build")
         self.assertGreaterEqual(verified["review_count"], 1)
 
+    def test_native_verify_never_verifies_a_dirty_tree(self):
+        self._native_run_with_contract()
+        (self.root / "README.md").write_text(
+            "# demo\n\nuncommitted edit\n", encoding="utf-8")
+        result = self.cli("codex", "native-verify", "--run-id",
+                          "run-verify-1", "--task-id", "build")
+        self.assertEqual(result["exit_code"], 0)
+        self.assertFalse(result["verified_completion"])
+        evidence = json.loads(Path(result["evidence"]).read_text(
+            encoding="utf-8"))
+        self.assertFalse(evidence["merged_tree_clean"])
+        self.assertIn("dirty worktree", " ".join(
+            str(item) for item in evidence["result"]["reasons"]))
+
     def _error(self, platform, *args):
         stderr = io.StringIO()
         with redirect_stdout(io.StringIO()), redirect_stderr(stderr):
