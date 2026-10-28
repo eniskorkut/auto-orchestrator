@@ -100,6 +100,7 @@ class DelayedFakeAdapter(FakeAdapter):
         self.active = 0
         self.max_active = 0
         self.lock = __import__("threading").Lock()
+        self.both_started = __import__("threading").Event()
 
     def start(self, **kwargs):
         handle = super().start(**kwargs)
@@ -108,10 +109,17 @@ class DelayedFakeAdapter(FakeAdapter):
             self.start_times[task_id] = time.monotonic()
             self.active += 1
             self.max_active = max(self.max_active, self.active)
+            if len(self.start_times) >= 2:
+                self.both_started.set()
         handle["due"] = time.monotonic() + self.duration
         return handle
 
     def poll(self, handle, *, timeout=0):
+        # Keep the first task alive until the second one has actually started.
+        # This measures concurrency without depending on worktree startup time;
+        # a serialized runner leaves max_active at 1 and the test fails.
+        if not self.both_started.is_set():
+            self.both_started.wait(timeout=15.0)
         if time.monotonic() < handle["due"]:
             return {"status": "running", "session_id": handle["session_id"],
                     "events_path": handle["events_path"]}
@@ -509,9 +517,12 @@ class RunnerExecutionTests(unittest.TestCase):
                          "VALUE = 2\n")
 
     def test_two_independent_worktrees_run_concurrently(self):
-        adapter = DelayedFakeAdapter(duration=4.0)
+        # Worktree creation for the second task can take a few seconds on a
+        # loaded machine. The agent window must outlive that startup jitter so
+        # the assertion measures concurrency, not scheduler startup latency.
+        adapter = DelayedFakeAdapter(duration=2.0)
         runner = TeamworkRunner(self.root, parallel_plan("parallel-test"),
-                                adapter=adapter, max_seconds=20)
+                                adapter=adapter, max_seconds=60)
         self.addCleanup(runner.close)
         summary = runner.run()
         self.assertEqual(summary["status"], "passed", summary)
