@@ -18,7 +18,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import secrets
+import sys
 import time
 from pathlib import Path
 
@@ -78,6 +80,28 @@ def _text(value, field, limit=MAX_TEXT, *, required=True):
     return value.strip()
 
 
+def _canonical_scope(value):
+    """Return a canonical workspace-relative scope or None when unsafe."""
+    if not isinstance(value, str):
+        return None
+    unified = value.replace("\\", "/")
+    if (unified.startswith("/") or unified.startswith("//")
+            or value.startswith("\\\\")
+            or (len(unified) >= 2 and unified[1] == ":")
+            or unified.startswith("~")):
+        return None
+    parts = []
+    for part in unified.split("/"):
+        if part in ("", "."):
+            continue
+        if part == "..":
+            return None
+        parts.append(part)
+    if not parts:
+        return None
+    return "/".join(parts)
+
+
 def _scopes(value, field):
     if value is None:
         return []
@@ -86,25 +110,44 @@ def _scopes(value, field):
     result = []
     for item in value:
         item = _text(item, field, 300)
-        unified = item.replace("\\", "/")
-        if (unified.startswith("/") or unified.startswith("//")
-                or item.startswith("\\\\")
-                or (len(unified) >= 2 and unified[1] == ":")
-                or unified.startswith("~")):
-            raise DispatchError(f"{field} must be workspace-relative")
-        normalized = unified.strip("/")
-        if (not normalized or ".." in normalized.split("/")):
+        normalized = _canonical_scope(item)
+        if normalized is None:
             raise DispatchError(f"{field} contains an unsafe path")
         if normalized not in result:
             result.append(normalized)
     return result
 
 
-def _overlap(left, right):
+def _compare(value):
+    # macOS and Windows default to case-insensitive filesystems; fail closed
+    # there so Api.py and api.py cannot be treated as separate writers.
+    return value.casefold() if (os.name == "nt" or sys.platform == "darwin") else value
+
+
+def _prefix(left, right):
+    return (left == right or left.startswith(right.rstrip("/") + "/")
+            or right.startswith(left.rstrip("/") + "/"))
+
+
+def _overlap(left, right, root=None):
     for a in left:
+        ca = _canonical_scope(a)
+        if ca is None:
+            ca = str(a).replace("\\", "/")
         for b in right:
-            if a == b or a.startswith(b + "/") or b.startswith(a + "/"):
+            cb = _canonical_scope(b)
+            if cb is None:
+                cb = str(b).replace("\\", "/")
+            if _prefix(_compare(ca), _compare(cb)):
                 return True
+            if root is not None:
+                try:
+                    pa = (Path(root) / ca).resolve()
+                    pb = (Path(root) / cb).resolve()
+                except (OSError, ValueError):
+                    continue
+                if _prefix(_compare(pa.as_posix()), _compare(pb.as_posix())):
+                    return True
     return False
 
 
@@ -204,7 +247,7 @@ def create(root, *, run_id, task_id, role, ide, owner_session_id,
            sandbox_policy=None, permission_policy=None,
            parent_agent_id=None, commit=None, contract_sha256=None,
            plan_sha256=None) -> dict:
-    root = _root(root)
+    root = _root(root).resolve()
     run_id = _text(run_id, "run_id", 100)
     task_id = _text(task_id, "task_id", 100)
     role = _text(role, "role", 40)
@@ -237,6 +280,10 @@ def create(root, *, run_id, task_id, role, ide, owner_session_id,
     read_scope = _scopes(read_scope, "read_scope")
     write_scope = _scopes(write_scope, "write_scope")
     dependencies = _scopes(dependencies, "dependencies")
+    for scope in read_scope + write_scope:
+        candidate = (root / scope).resolve()
+        if candidate != root and root not in candidate.parents:
+            raise DispatchError("scope resolves outside the workspace")
     with project_lock(root, timeout=10.0):
         existing = list_dispatches(root, run_id)
         active = [item for item in existing if item.get("state") in ACTIVE_STATES]
@@ -248,7 +295,7 @@ def create(root, *, run_id, task_id, role, ide, owner_session_id,
         for item in active:
             if item.get("state") in ("failed", "cancelled", "unknown"):
                 continue
-            if _overlap(write_scope, item.get("write_scope") or []):
+            if _overlap(write_scope, item.get("write_scope") or [], root):
                 raise DispatchError(
                     "write scope overlaps another active dispatch")
         for dependency in dependencies:

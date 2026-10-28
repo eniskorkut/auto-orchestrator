@@ -332,6 +332,68 @@ class LifecycleTests(DispatchBase):
         self.assertFalse(record["stop_ack"])
         self.assertFalse(record["native_cancel_ack"])
 
+    def test_noncanonical_scope_aliases_conflict(self):
+        self.create(task="canonical", scope=["src/api.py"])
+        aliases = [
+            "src/./api.py", "src//api.py", "./src/api.py", "src\\api.py",
+        ]
+        for index, alias in enumerate(aliases):
+            with self.subTest(alias=alias):
+                with self.assertRaises(native_dispatch.DispatchError):
+                    self.create(task=f"alias-{index}", scope=[alias])
+
+    def test_directory_scope_conflicts_with_a_file_inside_it(self):
+        self.create(task="dir", scope=["src/"])
+        with self.assertRaises(native_dispatch.DispatchError):
+            self.create(task="file", scope=["src/api.py"])
+
+    def test_independent_scopes_are_allowed(self):
+        self.create(task="a", scope=["src/api.py"])
+        second = self.create(task="b", scope=["tests/test_api.py"])
+        third = self.create(task="c", scope=["src/other/"])
+        self.assertEqual(second["state"], "queued")
+        self.assertEqual(third["state"], "queued")
+
+    def test_legacy_noncanonical_record_conflicts(self):
+        legacy = self.create(task="legacy", scope=["src/old.py"])
+        path = (self.root / ".auto-orchestrator" / "native-dispatches" /
+                "run-v8" / f"{legacy['dispatch_id']}.json")
+        record = json.loads(path.read_text(encoding="utf-8"))
+        record["write_scope"] = ["src/./api.py"]
+        path.write_text(json.dumps(record), encoding="utf-8")
+        with self.assertRaises(native_dispatch.DispatchError):
+            self.create(task="new", scope=["src/api.py"])
+
+    def test_case_alias_conflicts_on_case_insensitive_platforms(self):
+        if not (os.name == "nt" or sys.platform == "darwin"):
+            self.skipTest("case-sensitive filesystem")
+        self.create(task="case-a", scope=["src/Api.py"])
+        with self.assertRaises(native_dispatch.DispatchError):
+            self.create(task="case-b", scope=["src/api.py"])
+
+    def test_symlink_scope_alias_conflicts(self):
+        real = self.root / "real"
+        real.mkdir()
+        alias = self.root / "alias"
+        try:
+            alias.symlink_to(real, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlinks are not available")
+        self.create(task="real", scope=["real/"])
+        with self.assertRaises(native_dispatch.DispatchError):
+            self.create(task="alias", scope=["alias/"])
+
+    def test_scope_symlink_escape_is_rejected(self):
+        outside = Path(self.temp.name) / "outside-scope"
+        outside.mkdir()
+        link = self.root / "escape"
+        try:
+            link.symlink_to(outside, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlinks are not available")
+        with self.assertRaises(native_dispatch.DispatchError):
+            self.create(task="escape", scope=["escape/"])
+
     def test_absolute_and_traversal_scopes_are_rejected(self):
         for scope in ("/src", "../src", "C:/src", "//server/share", "~/.ssh"):
             with self.subTest(scope=scope):

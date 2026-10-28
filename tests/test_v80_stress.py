@@ -63,5 +63,35 @@ class DispatchStressTests(unittest.TestCase):
                 self.assertEqual(records[0]["state"], "queued")
 
 
+    def test_alias_scope_race_has_one_winner(self):
+        script = (
+            "import sys\n"
+            "from tools.native_dispatch import create\n"
+            "try:\n"
+            "    create(sys.argv[1], run_id='alias-race', task_id=sys.argv[2],\n"
+            "           role='implementer', ide='codex',\n"
+            "           owner_session_id='s', write_scope=[sys.argv[3]])\n"
+            "    print('ok')\n"
+            "except Exception as exc:\n"
+            "    print('err', type(exc).__name__)\n"
+            "    raise SystemExit(1)\n"
+        )
+        env = dict(os.environ)
+        env["PYTHONPATH"] = str(REPO)
+        processes = [subprocess.Popen(
+            [sys.executable, "-c", script, str(self.root), f"alias-{i}", scope],
+            cwd=str(REPO), env=env, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, text=True, errors="replace")
+            for i, scope in enumerate(("src/api.py", "src/./api.py"))]
+        codes = []
+        for process in processes:
+            process.communicate(timeout=60)
+            codes.append(process.returncode)
+        self.assertEqual(sorted(codes), [0, 1])
+        records = native_dispatch.list_dispatches(self.root, "alias-race")
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["write_scope"], ["src/api.py"])
+
+
 if __name__ == "__main__":
     unittest.main()
