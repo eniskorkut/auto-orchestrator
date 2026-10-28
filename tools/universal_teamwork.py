@@ -809,6 +809,26 @@ def brief(args) -> dict:
             run_state = module._run_state(root, identity)
         except Exception:  # noqa: BLE001 - optional read-only helper
             run_state = {}
+    dispatch_status = None
+    try:
+        from tools import native_dispatch
+    except ModuleNotFoundError:
+        try:
+            import native_dispatch  # type: ignore
+        except ModuleNotFoundError:
+            native_dispatch = None  # type: ignore
+    if native_dispatch is not None:
+        try:
+            value = native_dispatch.status(root, run_id=run_id or None)
+            dispatch_status = {
+                "total": value.get("total", 0),
+                "counts": value.get("counts") or {},
+                "active": len(value.get("active") or []),
+                "verified": len(value.get("verified") or []),
+                "unknown": len(value.get("unknown") or []),
+            }
+        except Exception:  # noqa: BLE001 - optional evidence
+            dispatch_status = None
     memory_view = _readonly_memory_brief(root, identity["project_id"])
     interview = memory_view["interview"]
     requirements = memory_view["requirements"]
@@ -851,6 +871,8 @@ def brief(args) -> dict:
     if run_state.get("failed_tests"):
         steps.append("Re-run the failing tests: " + ", ".join(
             run_state["failed_tests"][:5]))
+    if dispatch_status and dispatch_status["unknown"]:
+        steps.append("Resolve unknown native dispatches before continuing.")
     if blocking:
         steps.append("Resolve blocking requirements: " + ", ".join(
             str(item) for item in blocking[:5]))
@@ -892,6 +914,7 @@ def brief(args) -> dict:
         },
         "confirmed_decisions": list(decisions)[:10],
         "verification": verified,
+        "dispatches": dispatch_status,
         "resume_steps": steps,
         "read_only": True,
         "note": ("This brief does not grant write authority and does not "
@@ -1763,6 +1786,32 @@ def native_verify(args) -> dict:
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     path = directory / f"{run_id}-{task_id}-{time.time_ns()}.json"
     atomic_write_json(path, record)
+    dispatch_id = getattr(args, "dispatch_id", None)
+    dispatch_state = None
+    if dispatch_id:
+        try:
+            from tools import native_dispatch
+        except ModuleNotFoundError:
+            import native_dispatch  # type: ignore
+        matches = [item for item in native_dispatch.list_dispatches(root, run_id)
+                   if item.get("dispatch_id") == dispatch_id]
+        if not matches:
+            raise UniversalError("dispatch does not exist for this run")
+        current = matches[0]
+        if current.get("task_id") != task_id:
+            raise UniversalError("dispatch belongs to another task")
+        if current.get("state") not in ("output_collected",
+                                        "verification_pending"):
+            raise UniversalError(
+                "dispatch output is not collected; collect it before verifying")
+        dispatch_state = current.get("state")
+        if record["verified"]:
+            relative = path.relative_to(root).as_posix()
+            native_dispatch.verify(
+                root, dispatch_id, run_id=run_id,
+                verification_run_id=verification_run_id,
+                evidence_ref=relative)
+            dispatch_state = "verified"
     try:
         from tools import project_identity
         identity = project_identity.ensure_project_identity(root)
@@ -1793,6 +1842,8 @@ def native_verify(args) -> dict:
         "criteria": result.get("criteria"),
         "review_count": len(reviews),
         "verification_run_id": verification_run_id,
+        "dispatch_id": dispatch_id,
+        "dispatch_state": dispatch_state,
         "results_error": results_error,
         "evidence": str(path),
         "observation_id": (observation or {}).get("observation_id"),
@@ -2226,6 +2277,7 @@ def main(argv=None) -> int:
     verify_p.add_argument("--results-file",
                           help="JUnit XML or pytest JSON from the real run")
     verify_p.add_argument("--results-format", choices=["junit", "pytest-json"])
+    verify_p.add_argument("--dispatch-id")
     verify_p.add_argument("--timeout", type=float, default=900)
 
     audit_p = sub.add_parser("native-audit")

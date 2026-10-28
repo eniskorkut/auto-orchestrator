@@ -18,6 +18,7 @@ from pathlib import Path
 from tools import requirements_contract
 from tools import teamwork_chat
 from tools import universal_teamwork as universal
+from tools import native_dispatch
 
 REQUEST = ("Add a short contributor note to the README and one small unit "
            "test. Keep the change documentation-only.")
@@ -172,6 +173,37 @@ class NativeVerifyTests(unittest.TestCase):
         self.assertIn("OK", evidence["output_tail"])
         self.assertTrue(result["verified_completion"],
                         result["criteria"])
+
+    def test_dispatch_advances_only_after_real_verification(self):
+        started = self._native_run_with_contract()
+        plan = json.loads(Path(started["plan"]).read_text(encoding="utf-8"))
+        task_id = plan["tasks"][0]["id"]
+        dispatch = native_dispatch.create(
+            self.root, run_id="run-verify-1", task_id=task_id,
+            role="implementer", ide="codex", owner_session_id="codex",
+            write_scope=["src/"])
+        native_dispatch.request(self.root, dispatch["dispatch_id"],
+                                run_id="run-verify-1")
+        native_dispatch.confirm(self.root, dispatch["dispatch_id"],
+                                run_id="run-verify-1",
+                                native_child_ref="child-1")
+        native_dispatch.start(self.root, dispatch["dispatch_id"],
+                              run_id="run-verify-1")
+        evidence = self.root / ".auto-orchestrator" / "dispatch-out" / "out.txt"
+        evidence.parent.mkdir(parents=True, exist_ok=True)
+        evidence.write_text("result\n", encoding="utf-8")
+        native_dispatch.complete(self.root, dispatch["dispatch_id"],
+                                 run_id="run-verify-1", result_ref="out.txt")
+        native_dispatch.collect(
+            self.root, dispatch["dispatch_id"], run_id="run-verify-1",
+            evidence_ref=".auto-orchestrator/dispatch-out/out.txt")
+        result = self.cli("codex", "native-verify", "--run-id",
+                          "run-verify-1", "--task-id", task_id,
+                          "--dispatch-id", dispatch["dispatch_id"])
+        self.assertTrue(result["verified_completion"], result["criteria"])
+        self.assertEqual(result["dispatch_state"], "verified")
+        record = native_dispatch.list_dispatches(self.root, "run-verify-1")[0]
+        self.assertEqual(record["state"], "verified")
 
     def test_review_required_criterion_needs_accepted_independence(self):
         self._native_run_with_contract(review_required=True)

@@ -1,4 +1,4 @@
-# Auto-Orchestrator — Native Multi-Agent Coordination (V7.9)
+# Auto-Orchestrator — Native Multi-Agent Coordination (V8.0)
 
 Portable, opt-in native-subagent coordination for **OpenCode**, **Codex**, **Cursor**, and **Google Antigravity**. Platform-native runtime capabilities and proof strength differ.
 
@@ -300,6 +300,40 @@ adds a small, conservative long-tail domain ontology and
 skill selection rates. None of this proves live IDE reliability or speedup
 until matched native runs are repeated. See
 [execution reliability](docs/V64_RELIABILITY.md).
+
+## V8.0 — Native dispatch, typed lifecycle and question quality
+
+V8.0 adds the orchestration state layer on top of the V7.9 verified-evidence
+model:
+
+- **Typed native dispatch:** `tools/native_dispatch.py` records a contract per
+  task/run with role, IDE, parent session, scopes, dependencies, sandbox and
+  permission policy. The lifecycle is `queued → requested → confirmed →
+  running → completed_claimed → output_collected → verified`, plus
+  waiting/failed/cancelled/recovery states. `running` requires an observed
+  native child reference; `verify` requires a real `native-verification`
+  record. Unknown lifecycle becomes `recovery_required`, never completed.
+- **Ownership-aware scheduling:** one active dispatch per task, a bounded
+  concurrency cap, disjoint write scopes, verified dependencies and the
+  existing cross-process project lock.
+- **Verified evidence integration:** `native-verify --dispatch-id` advances a
+  dispatch only after the run-bound test evidence and the merged-tree gate
+  pass.
+- **Continuity:** `brief` now reports active/verified/unknown dispatches and
+  blocks resume on unknown lifecycle.
+- **Grill-Me 5.0 signals:** deterministic relevance, information gain,
+  redundancy, risk coverage and user burden for questions; critical questions
+  are never dropped and the score is never a confirmation.
+- **Dashboard:** native dispatch counts in the ownership panel.
+
+```bash
+python3.11 tools/universal_teamwork.py --root . --platform codex \
+  native-dispatch create --run-id run-1 --task-id build --write-scope src/
+python3.11 tools/universal_teamwork.py --root . --platform codex brief
+```
+
+See [Native dispatch](docs/V80_NATIVE_DISPATCH.md) and
+[V8.0 overview](docs/V80_NATIVE_INTELLIGENT_TEAMWORK.md).
 
 ## V7.9 — Advanced Intelligent Teamwork
 
