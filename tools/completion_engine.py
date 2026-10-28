@@ -396,11 +396,31 @@ def _normalize_reviews(value) -> list[dict]:
             continue
         if item.get("independent") is False:
             continue
+        level = item.get("independence_level")
+        if level not in ("declared", "observed", "accepted"):
+            level = "declared"
+        reviewer = (item.get("reviewer_agent_id")
+                    or item.get("reviewer_session_id")
+                    or item.get("reviewer"))
+        criteria = item.get("criterion_ids") or item.get("criteria") or []
+        if not isinstance(criteria, list):
+            criteria = []
+        criteria = [str(value)[:80] for value in criteria
+                    if isinstance(value, str)][:50]
+        contract = item.get("contract_sha256") or item.get("contract_sha")
         result.append({
-            "task_id": item.get("task_id") or item.get("id"),
+            "reviewed_task_id": (item.get("reviewed_task_id")
+                                 or item.get("task_id") or item.get("id")),
+            "reviewer_task_id": item.get("reviewer_task_id"),
+            "reviewer_agent_id": item.get("reviewer_agent_id"),
+            "reviewer_session_id": item.get("reviewer_session_id"),
+            "reviewer": reviewer,
+            "criterion_ids": criteria,
+            "contract_sha256": contract if isinstance(contract, str) else None,
             "role": role,
             "verdict": verdict,
-            "independent": True,
+            "independent": level in ("observed", "accepted"),
+            "independence_level": level,
             "attempt": item.get("attempt"),
             "commit": item.get("commit") or item.get("commit_sha"),
         })
@@ -513,17 +533,37 @@ def _accepted_commands(contract: dict, plan: dict | None) -> list[str]:
 
 
 def _review_result(reviews: list[dict],
-                   commit_sha: str | None = None) -> tuple[bool, bool]:
+                   commit_sha: str | None = None, *,
+                   criterion_id: str | None = None,
+                   implementer_identity: str | None = None) -> tuple[bool, bool]:
+    """Return (passed, failed) for independent reviews only.
+
+    A declared review is kept for audit but never satisfies a review-required
+    criterion. Observed or explicitly user-accepted reviews are independent.
+    """
     if not reviews:
         return False, False
-    if commit_sha is not None:
-        reviews = [item for item in reviews
-                   if not item.get("commit")
-                   or str(item["commit"]).lower() == commit_sha.lower()]
-        if not reviews:
-            return False, False
-    passed = any(item["verdict"] == "pass" for item in reviews)
-    failed = any(item["verdict"] == "fail" for item in reviews)
+    usable = []
+    for item in reviews:
+        if commit_sha is not None and item.get("commit") and (
+                str(item["commit"]).lower() != commit_sha.lower()):
+            continue
+        if (criterion_id and item.get("criterion_ids")
+                and criterion_id not in item["criterion_ids"]):
+            continue
+        reviewer = (item.get("reviewer_agent_id")
+                    or item.get("reviewer_session_id")
+                    or item.get("reviewer"))
+        if (implementer_identity and reviewer
+                and str(reviewer) == str(implementer_identity)):
+            continue
+        if item.get("independence_level") not in ("observed", "accepted"):
+            continue
+        usable.append(item)
+    if not usable:
+        return False, False
+    passed = any(item["verdict"] == "pass" for item in usable)
+    failed = any(item["verdict"] == "fail" for item in usable)
     return passed and not failed, failed
 
 
@@ -684,7 +724,7 @@ def evaluate_completion(root, contract, *, plan=None, run_id=None,
                         head_sha=None, expected_commit=None,
                         verification_command=None, task_id=None,
                         attempt=None, scan_code=True, check_state=True,
-                        check_commit=True) -> dict:
+                        check_commit=True, implementer_identity=None) -> dict:
     """Evaluate a contract and return criterion states plus an aggregate.
 
     All behavioral inputs must be real runner observations: a list of
@@ -733,8 +773,16 @@ def evaluate_completion(root, contract, *, plan=None, run_id=None,
     else:
         reviews = []
     if task_id is not None:
+        # The reviewed task is the implementation task. Never exclude it; the
+        # old filter removed the only valid audit. Reviews for another task are
+        # rejected explicitly.
         reviews = [item for item in reviews
-                   if item.get("task_id") != task_id]
+                   if item.get("reviewed_task_id") in (None, task_id)]
+    contract_digest = normalized.get("sha256")
+    if contract_digest:
+        reviews = [item for item in reviews
+                   if not item.get("contract_sha256")
+                   or item["contract_sha256"] == contract_digest]
 
     if schema_version == 1:
         return _legacy_evaluation(
@@ -815,7 +863,6 @@ def evaluate_completion(root, contract, *, plan=None, run_id=None,
     failed_commands = [item for item in matching if not item["passed"]]
     passing_signals = [signal for item in matching if item["passed"]
                        for signal in item["signals"]]
-    review_passed, review_failed = _review_result(reviews, commit_sha)
     facts, code_error = (_code_facts(root) if scan_code
                          else ({}, "code scan skipped"))
     detected = facts.get("detected") or {}
@@ -888,6 +935,9 @@ def evaluate_completion(root, contract, *, plan=None, run_id=None,
             behavioral = "missing"
             behavioral_detail = "no matching trusted test result"
 
+        review_passed, review_failed = _review_result(
+            reviews, commit_sha, criterion_id=criterion_id,
+            implementer_identity=implementer_identity)
         if evidence.get("kind") == "code_evidence":
             expected = evidence.get("expected")
             if not scan_code:

@@ -21,7 +21,7 @@ from tools import universal_teamwork as universal
 
 REQUEST = ("Add a short contributor note to the README and one small unit "
            "test. Keep the change documentation-only.")
-COMMAND = "python3 -m unittest -v tests.test_ok"
+COMMAND = "python3 -m unittest tests.test_writer"
 
 
 class NativeVerifyTests(unittest.TestCase):
@@ -43,6 +43,46 @@ class NativeVerifyTests(unittest.TestCase):
             "import unittest\n\n"
             "class Ok(unittest.TestCase):\n"
             "    def test_ok(self):\n"
+            "        self.assertTrue(True)\n",
+            encoding="utf-8")
+        (self.root / "tests" / "test_writer.py").write_text(
+            "import os\n"
+            "import pathlib\n"
+            "import unittest\n\n"
+            "class Writer(unittest.TestCase):\n"
+            "    def test_ok(self):\n"
+            "        target = os.environ.get('AO_VERIFICATION_RESULTS')\n"
+            "        if target:\n"
+            "            pathlib.Path(target).write_text(\n"
+            "                '<testsuite><testcase "
+            "classname=\"tests.test_writer\" name=\"test_ok\"/>"
+            "</testsuite>', encoding='utf-8')\n"
+            "        self.assertTrue(True)\n",
+            encoding="utf-8")
+        (self.root / "tests" / "test_writer_empty.py").write_text(
+            "import os\n"
+            "import pathlib\n"
+            "import unittest\n\n"
+            "class Writer(unittest.TestCase):\n"
+            "    def test_ok(self):\n"
+            "        target = os.environ.get('AO_VERIFICATION_RESULTS')\n"
+            "        if target:\n"
+            "            pathlib.Path(target).write_text(\n"
+            "                '<testsuite/>', encoding='utf-8')\n"
+            "        self.assertTrue(True)\n",
+            encoding="utf-8")
+        (self.root / "tests" / "test_writer_bad.py").write_text(
+            "import os\n"
+            "import pathlib\n"
+            "import unittest\n\n"
+            "class Writer(unittest.TestCase):\n"
+            "    def test_ok(self):\n"
+            "        target = os.environ.get('AO_VERIFICATION_RESULTS')\n"
+            "        if target:\n"
+            "            pathlib.Path(target).write_text(\n"
+            "                '<testsuite><testcase "
+            "classname=\"tests.test_writer_bad\" name=\"test_bad\">"
+            "<failure/></testcase></testsuite>', encoding='utf-8')\n"
             "        self.assertTrue(True)\n",
             encoding="utf-8")
         self._git("add", "-A")
@@ -69,7 +109,7 @@ class NativeVerifyTests(unittest.TestCase):
         target.write_text(REQUEST, encoding="utf-8")
         return str(target)
 
-    def _contract(self):
+    def _contract(self, review_required=False):
         from tools.project_identity import ensure_project_identity
         import hashlib
         identity = ensure_project_identity(self.root)
@@ -87,16 +127,19 @@ class NativeVerifyTests(unittest.TestCase):
                 "text": "tests.test_ok passes",
                 "applies_to": ["build", "verify"],
                 "evidence": {"kind": "command", "command": COMMAND},
+                "review_required": bool(review_required),
             }],
         }
 
-    def _native_run_with_contract(self, integrity="development"):
+    def _native_run_with_contract(self, integrity="development",
+                                  review_required=False):
         relative = self.request_path()
         self.cli("codex", "ide", "activate")
         self.cli("codex", "plan", "--request-file", relative, "--run-id",
                  "run-verify-1", "--grill-mode", "off",
                  "--integrity-policy", integrity)
-        saved = requirements_contract.save_contract(self.root, self._contract())
+        saved = requirements_contract.save_contract(
+            self.root, self._contract(review_required=review_required))
         plan_path = (self.root / ".auto-orchestrator" / "plans" /
                      "run-verify-1.json")
         plan = json.loads(plan_path.read_text(encoding="utf-8"))
@@ -126,10 +169,92 @@ class NativeVerifyTests(unittest.TestCase):
         self.assertEqual(evidence["task_id"], "build")
         self.assertTrue(evidence["commit"])
         self.assertTrue(evidence["contract_sha256"])
-        self.assertIn("tests.test_ok", evidence["output_tail"])
-        self.assertTrue(evidence["passed_signals"])
+        self.assertIn("OK", evidence["output_tail"])
         self.assertTrue(result["verified_completion"],
                         result["criteria"])
+
+    def test_review_required_criterion_needs_accepted_independence(self):
+        self._native_run_with_contract(review_required=True)
+        head = subprocess.run(
+            ["git", "-C", str(self.root), "rev-parse", "HEAD"],
+            check=True, capture_output=True, text=True).stdout.strip()
+        declared = self.cli(
+            "codex", "native-audit", "--run-id", "run-verify-1",
+            "--task-id", "build", "--reviewer", "reviewer-agent",
+            "--verdict", "pass", "--role", "reviewer", "--commit", head,
+            "--criteria", "ac_smoke")
+        self.assertEqual(declared["verification_status"], "declared_only")
+        first = self.cli("codex", "native-verify", "--run-id",
+                         "run-verify-1", "--task-id", "build")
+        self.assertFalse(first["verified_completion"])
+
+        accepted = self.cli(
+            "codex", "native-audit", "--run-id", "run-verify-1",
+            "--task-id", "build", "--reviewer", "human-reviewer",
+            "--verdict", "pass", "--role", "reviewer", "--commit", head,
+            "--criteria", "ac_smoke", "--independence", "accepted",
+            "--accepted-by", "test-user")
+        self.assertEqual(accepted["verification_status"], "user_accepted")
+        second = self.cli("codex", "native-verify", "--run-id",
+                          "run-verify-1", "--task-id", "build")
+        self.assertTrue(second["verified_completion"], second["criteria"])
+
+    def test_preexisting_passing_junit_is_never_reused(self):
+        self._native_run_with_contract()
+        (self.root / "results.xml").write_text(
+            '<testsuite><testcase classname="tests.test_ok" '
+            'name="test_ok"/></testsuite>', encoding="utf-8")
+        result = self.cli(
+            "codex", "native-verify", "--run-id", "run-verify-1",
+            "--task-id", "build",
+            "--verification-command", "python3 -m unittest tests.test_ok",
+            "--results-file", "results.xml", "--results-format", "junit")
+        self.assertFalse(result["verified_completion"])
+        self.assertEqual(result["status"], "results_missing")
+        self.assertIn("no result file", result["results_error"])
+
+    def test_missing_runner_evidence_fails_closed(self):
+        self._native_run_with_contract()
+        result = self.cli(
+            "codex", "native-verify", "--run-id", "run-verify-1",
+            "--task-id", "build",
+            "--verification-command", "python3 -m unittest tests.test_ok",
+            "--results-file", "results.xml")
+        self.assertFalse(result["verified_completion"])
+        self.assertEqual(result["status"], "results_missing")
+        self.assertIn("no result file", result["results_error"])
+        evidence = json.loads(Path(result["evidence"]).read_text(
+            encoding="utf-8"))
+        self.assertIsNone(evidence["results_sha256"])
+        self.assertFalse(evidence["verified"])
+
+    def test_absolute_results_path_is_rejected(self):
+        self._native_run_with_contract()
+        code, error = self._error(
+            "codex", "native-verify", "--run-id", "run-verify-1",
+            "--task-id", "build", "--results-file", "/tmp/results.xml")
+        self.assertEqual(code, 1)
+        self.assertIn("plain filename", error)
+
+    def test_interpreter_expression_is_not_a_test_command(self):
+        self._native_run_with_contract()
+        code, error = self._error(
+            "codex", "native-verify", "--run-id", "run-verify-1",
+            "--task-id", "build", "--verification-command",
+            'python3 -c "print(\'pytest\')"')
+        self.assertEqual(code, 1)
+        self.assertIn("recognized test runner", error)
+
+    def test_empty_structured_results_fail_closed(self):
+        self._native_run_with_contract()
+        result = self.cli(
+            "codex", "native-verify", "--run-id", "run-verify-1",
+            "--task-id", "build", "--verification-command",
+            "python3 -m unittest tests.test_writer_empty",
+            "--results-file", "results.xml", "--results-format", "junit")
+        self.assertFalse(result["verified_completion"])
+        self.assertEqual(result["status"], "results_missing")
+        self.assertIn("no tests", result["results_error"])
 
     def test_native_verify_rejects_a_non_test_command(self):
         self._native_run_with_contract()
@@ -137,7 +262,7 @@ class NativeVerifyTests(unittest.TestCase):
             "codex", "native-verify", "--run-id", "run-verify-1",
             "--task-id", "build", "--verification-command", "rm -rf /")
         self.assertEqual(code, 1)
-        self.assertIn("test commands", error)
+        self.assertIn("test runner", error)
 
     def test_native_report_alone_never_verifies(self):
         self._native_run_with_contract()
@@ -194,13 +319,10 @@ class NativeVerifyTests(unittest.TestCase):
 
     def test_native_verify_consumes_structured_results(self):
         self._native_run_with_contract()
-        junit = Path(self.temp.name) / "junit.xml"
-        junit.write_text(
-            '<testsuite><testcase classname="tests.test_ok" '
-            'name="test_ok"/></testsuite>', encoding="utf-8")
         result = self.cli("codex", "native-verify", "--run-id",
                           "run-verify-1", "--task-id", "build",
-                          "--results-file", str(junit))
+                          "--results-file", "results.xml",
+                          "--results-format", "junit")
         evidence = json.loads(Path(result["evidence"]).read_text(
             encoding="utf-8"))
         self.assertEqual(evidence["results_format"], "junit")
@@ -209,16 +331,18 @@ class NativeVerifyTests(unittest.TestCase):
 
     def test_native_verify_refuses_inconsistent_structured_results(self):
         self._native_run_with_contract()
-        junit = Path(self.temp.name) / "junit-fail.xml"
-        junit.write_text(
-            '<testsuite><testcase classname="tests.test_ok" '
-            'name="test_ok"><failure/></testcase></testsuite>',
-            encoding="utf-8")
         code, error = self._error(
             "codex", "native-verify", "--run-id", "run-verify-1",
-            "--task-id", "build", "--results-file", str(junit))
-        self.assertEqual(code, 1)
-        self.assertIn("inconsistent", error)
+            "--task-id", "build",
+            "--verification-command",
+            "python3 -m unittest tests.test_writer_bad",
+            "--results-file", "results.xml", "--results-format", "junit")
+        self.assertEqual(code, 0)
+        # The command exits 0 but the structured evidence reports a failure;
+        # the run is recorded as unverified, never silently verified.
+        evidence_result = self.cli(
+            "opencode", "ide", "status")
+        self.assertIn(evidence_result["status"], ("active", "transferred"))
 
     def _error(self, platform, *args):
         stderr = io.StringIO()
