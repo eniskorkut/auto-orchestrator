@@ -1794,37 +1794,10 @@ def native_verify(args) -> dict:
         record, sort_keys=True, separators=(",", ":"),
         ensure_ascii=False).encode("utf-8")).hexdigest()
     atomic_write_json(path, record)
-    receipt_id = None
-    receipt_error = None
-    try:
-        from tools import verification_receipt
-    except ModuleNotFoundError:
-        import verification_receipt  # type: ignore
-    try:
-        project = ensure_project_identity(root)
-        receipt = verification_receipt.issue(root, {
-            "verification_run_id": verification_run_id,
-            "project_id": project["project_id"],
-            "run_id": run_id,
-            "task_id": task_id,
-            "commit": head,
-            "contract_sha256": (contract or {}).get("sha256"),
-            "plan_sha256": approval.get("plan_sha256"),
-            "verified": record["verified"],
-            "exit_code": exit_code,
-            "results_sha256": results_sha256 or hashlib.sha256(
-                output.encode("utf-8", "replace")).hexdigest(),
-            "output_sha256": hashlib.sha256(
-                output.encode("utf-8", "replace")).hexdigest(),
-            "record_sha256": record_sha256,
-            "record_ref": path.relative_to(root).as_posix(),
-            "issued_at": time.time(),
-        })
-        receipt_id = receipt.name[:-5]
-    except Exception as exc:  # noqa: BLE001 - optional receipt boundary
-        receipt_error = str(exc)[:300]
     dispatch_id = getattr(args, "dispatch_id", None)
     dispatch_state = None
+    dispatch_artifact_sha256 = None
+    dispatch_artifact_size = None
     if dispatch_id:
         try:
             from tools import native_dispatch
@@ -1841,13 +1814,67 @@ def native_verify(args) -> dict:
                                         "verification_pending"):
             raise UniversalError(
                 "dispatch output is not collected; collect it before verifying")
+        artifact_ref = (current.get("artifact_ref")
+                        or current.get("evidence_ref"))
+        if not isinstance(artifact_ref, str) or not artifact_ref:
+            raise UniversalError("dispatch has no collected artifact")
+        try:
+            artifact_path = native_dispatch._workspace_path(
+                Path(root).resolve(), Path(root).resolve(), artifact_ref)
+        except native_dispatch.DispatchError as exc:
+            raise UniversalError(str(exc)) from exc
+        dispatch_artifact_sha256, dispatch_artifact_size = (
+            native_dispatch._hash_path(artifact_path))
+        if (dispatch_artifact_sha256 != current.get("output_digest")
+                or dispatch_artifact_size != current.get("output_size")):
+            raise UniversalError(
+                "dispatch artifact changed after collection; re-collect it")
         dispatch_state = current.get("state")
-        if record["verified"]:
-            relative = path.relative_to(root).as_posix()
-            native_dispatch.verify(
-                root, dispatch_id, run_id=run_id,
-                verification_run_id=verification_run_id)
-            dispatch_state = "verified"
+    receipt_id = None
+    receipt_error = None
+    try:
+        from tools import verification_receipt
+    except ModuleNotFoundError:
+        import verification_receipt  # type: ignore
+    try:
+        project = ensure_project_identity(root)
+        receipt_payload = {
+            "verification_run_id": verification_run_id,
+            "project_id": project["project_id"],
+            "run_id": run_id,
+            "task_id": task_id,
+            "commit": head,
+            "contract_sha256": (contract or {}).get("sha256"),
+            "plan_sha256": approval.get("plan_sha256"),
+            "verified": record["verified"],
+            "exit_code": exit_code,
+            "test_results_sha256": results_sha256 or hashlib.sha256(
+                output.encode("utf-8", "replace")).hexdigest(),
+            "test_output_sha256": hashlib.sha256(
+                output.encode("utf-8", "replace")).hexdigest(),
+            "verification_record_sha256": record_sha256,
+            "record_ref": path.relative_to(root).as_posix(),
+            "issued_at": time.time(),
+        }
+        if dispatch_id:
+            receipt_payload.update({
+                "dispatch_id": dispatch_id,
+                "dispatch_artifact_sha256": dispatch_artifact_sha256,
+                "dispatch_artifact_size": dispatch_artifact_size,
+            })
+        receipt = verification_receipt.issue(root, receipt_payload)
+        receipt_id = receipt.name[:-5]
+    except Exception as exc:  # noqa: BLE001 - optional receipt boundary
+        receipt_error = str(exc)[:300]
+    if dispatch_id and record["verified"]:
+        try:
+            from tools import native_dispatch
+        except ModuleNotFoundError:
+            import native_dispatch  # type: ignore
+        native_dispatch.verify(
+            root, dispatch_id, run_id=run_id,
+            verification_run_id=verification_run_id)
+        dispatch_state = "verified"
     try:
         from tools import project_identity
         identity = project_identity.ensure_project_identity(root)
@@ -2263,8 +2290,7 @@ def native_dispatch_command(args) -> dict:
     elif action == "verify":
         result = native_dispatch.verify(
             root, dispatch_id, run_id=run_id,
-            verification_run_id=getattr(args, "verification_run_id", None) or "",
-            evidence_ref=getattr(args, "evidence_ref", None) or "")
+            verification_run_id=getattr(args, "verification_run_id", None) or "")
     elif action == "fail":
         result = native_dispatch.fail(
             root, dispatch_id, run_id=run_id,

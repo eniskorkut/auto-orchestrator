@@ -19,6 +19,7 @@ import json
 import os
 import re
 import secrets
+import time
 from pathlib import Path
 
 try:
@@ -110,9 +111,11 @@ def issue(root, payload: dict) -> Path:
         raise ReceiptError("verification receipt already exists")
     safe = {}
     for key in ("verification_run_id", "project_id", "run_id", "task_id",
-                "commit", "contract_sha256", "plan_sha256", "verified",
-                "exit_code", "results_sha256", "output_sha256",
-                "record_sha256", "record_ref", "issued_at"):
+                "dispatch_id", "commit", "contract_sha256", "plan_sha256",
+                "verified", "exit_code", "test_results_sha256",
+                "test_output_sha256", "dispatch_artifact_sha256",
+                "dispatch_artifact_size", "verification_record_sha256",
+                "record_ref", "issued_at"):
         value = payload.get(key)
         if value is not None:
             safe[key] = value
@@ -157,10 +160,24 @@ def read(root, verification_run_id: str) -> dict:
 
 
 def require(root, verification_run_id: str, *, run_id, task_id, commit,
-            contract_sha256=None, plan_sha256=None) -> dict:
+            contract_sha256=None, plan_sha256=None, project_id=None,
+            dispatch_id=None, dispatch_artifact_sha256=None,
+            dispatch_artifact_size=None) -> dict:
     payload = read(root, verification_run_id)
+    if project_id and payload.get("project_id") != project_id:
+        raise ReceiptError("verification receipt belongs to another project")
     if payload.get("run_id") != run_id or payload.get("task_id") != task_id:
         raise ReceiptError("verification receipt belongs to another run/task")
+    if dispatch_id is not None:
+        if payload.get("dispatch_id") != dispatch_id:
+            raise ReceiptError(
+                "verification receipt belongs to another dispatch")
+        if payload.get("dispatch_artifact_sha256") != dispatch_artifact_sha256:
+            raise ReceiptError(
+                "verification receipt belongs to another artifact")
+        if payload.get("dispatch_artifact_size") != dispatch_artifact_size:
+            raise ReceiptError(
+                "verification receipt artifact size differs")
     if payload.get("commit") != commit:
         raise ReceiptError("verification receipt is stale for this commit")
     if contract_sha256 and payload.get("contract_sha256") != contract_sha256:
@@ -171,13 +188,62 @@ def require(root, verification_run_id: str, *, run_id, task_id, commit,
         raise ReceiptError("verification receipt is not verified")
     if payload.get("exit_code") != 0:
         raise ReceiptError("verification receipt has a non-zero exit code")
-    for field in ("results_sha256", "record_sha256"):
+    for field in ("test_results_sha256", "test_output_sha256",
+                  "verification_record_sha256"):
         value = payload.get(field)
         if not isinstance(value, str) or not SHA256.fullmatch(value):
             raise ReceiptError(f"verification receipt {field} is invalid")
+    if dispatch_id is not None:
+        size = payload.get("dispatch_artifact_size")
+        digest = payload.get("dispatch_artifact_sha256")
+        if (type(size) is not int or size < 0
+                or not isinstance(digest, str) or not SHA256.fullmatch(digest)):
+            raise ReceiptError(
+                "verification receipt dispatch artifact binding is invalid")
     record_ref = payload.get("record_ref")
     if record_ref is not None:
         if (not isinstance(record_ref, str) or not record_ref
                 or record_ref.startswith("/") or ".." in record_ref.split("/")):
             raise ReceiptError("verification receipt record_ref is invalid")
     return payload
+
+
+def consume(root, verification_run_id: str, dispatch_id: str) -> bool:
+    """Atomically mark a receipt consumed by one dispatch.
+
+    Returns False for an idempotent replay by the same dispatch. A different
+    dispatch is rejected even if it somehow presents the same receipt.
+    """
+    root = _root(root)
+    if not isinstance(dispatch_id, str) or not dispatch_id.startswith("nd_"):
+        raise ReceiptError("dispatch_id is invalid")
+    receipt = _receipt_path(root, verification_run_id)
+    marker = receipt.with_suffix(".used")
+    marker.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if marker.is_symlink():
+        raise ReceiptError("receipt consumption marker is a symlink")
+    if marker.exists():
+        try:
+            value = json.loads(marker.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise ReceiptError("receipt consumption marker is invalid") from exc
+        if isinstance(value, dict) and value.get("dispatch_id") == dispatch_id:
+            return False
+        raise ReceiptError("verification receipt was consumed by another dispatch")
+    try:
+        fd = os.open(str(marker), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        try:
+            os.write(fd, json.dumps({
+                "verification_run_id": verification_run_id,
+                "dispatch_id": dispatch_id,
+                "consumed_at": time.time(),
+            }).encode("utf-8") + b"\n")
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    except FileExistsError:
+        value = json.loads(marker.read_text(encoding="utf-8"))
+        if value.get("dispatch_id") == dispatch_id:
+            return False
+        raise ReceiptError("verification receipt was consumed by another dispatch")
+    return True

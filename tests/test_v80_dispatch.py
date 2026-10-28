@@ -50,7 +50,8 @@ class DispatchBase(unittest.TestCase):
     def receipt(self, dispatch, *, verified=True, task="build",
                 run_id="run-v8", verification_run_id=RECEIPT_ID,
                 commit=None, contract=None, plan=None, exit_code=0,
-                rewrite_record=False):
+                rewrite_record=False, project=None, dispatch_id=None,
+                artifact_digest=None, artifact_size=None):
         commit = commit or self.commit
         record = {
             "kind": "native-verification",
@@ -68,19 +69,28 @@ class DispatchBase(unittest.TestCase):
         digest = hashlib.sha256(json.dumps(
             record, sort_keys=True, separators=(",", ":"),
             ensure_ascii=False).encode("utf-8")).hexdigest()
+        stored = next(item for item in native_dispatch.list_dispatches(
+            self.root, dispatch["run_id"])
+            if item.get("dispatch_id") == dispatch["dispatch_id"])
         verification_receipt.issue(self.root, {
             "verification_run_id": verification_run_id,
-            "project_id": ensure_project_identity(self.root)["project_id"],
+            "project_id": project or ensure_project_identity(
+                self.root)["project_id"],
             "run_id": run_id,
             "task_id": task,
+            "dispatch_id": dispatch_id or dispatch["dispatch_id"],
             "commit": commit,
             "contract_sha256": contract,
             "plan_sha256": plan,
             "verified": verified,
             "exit_code": exit_code,
-            "results_sha256": "a" * 64,
-            "output_sha256": "b" * 64,
-            "record_sha256": digest,
+            "test_results_sha256": "a" * 64,
+            "test_output_sha256": "b" * 64,
+            "dispatch_artifact_sha256": artifact_digest or stored["output_digest"],
+            "dispatch_artifact_size": (stored["output_size"]
+                                       if artifact_size is None
+                                       else artifact_size),
+            "verification_record_sha256": digest,
             "record_ref": record_path.relative_to(self.root).as_posix(),
             "issued_at": time.time(),
         })
@@ -95,7 +105,7 @@ class DispatchBase(unittest.TestCase):
         path.write_text(content, encoding="utf-8")
         return name
 
-    def collected(self, **kwargs):
+    def collected_artifact(self, ref="out.txt", output_dir=None, **kwargs):
         dispatch = self.create(**kwargs)
         native_dispatch.request(self.root, dispatch["dispatch_id"],
                                 run_id="run-v8")
@@ -104,10 +114,19 @@ class DispatchBase(unittest.TestCase):
         native_dispatch.start(self.root, dispatch["dispatch_id"],
                               run_id="run-v8")
         native_dispatch.complete(self.root, dispatch["dispatch_id"],
-                                 run_id="run-v8", result_ref="out.txt")
+                                 run_id="run-v8", result_ref=ref)
+        if output_dir is not None:
+            (Path(output_dir) / ref).parent.mkdir(parents=True, exist_ok=True)
+            (Path(output_dir) / ref).write_text("result\n", encoding="utf-8")
+        else:
+            self.output(ref)
         native_dispatch.collect(self.root, dispatch["dispatch_id"],
-                                run_id="run-v8", evidence_ref=self.output())
+                                run_id="run-v8", evidence_ref=ref,
+                                output_dir=output_dir)
         return dispatch
+
+    def collected(self, **kwargs):
+        return self.collected_artifact(**kwargs)
 
 
 class LifecycleTests(DispatchBase):
@@ -159,6 +178,10 @@ class LifecycleTests(DispatchBase):
             ("wrong_contract", {"contract": "f" * 64}),
             ("wrong_plan", {"plan": "1" * 64}),
             ("not_verified", {"verified": False}),
+            ("wrong_project", {"project": "p_" + "0" * 16}),
+            ("wrong_dispatch", {"dispatch_id": "nd_" + "0" * 16}),
+            ("wrong_artifact_digest", {"artifact_digest": "f" * 64}),
+            ("wrong_artifact_size", {"artifact_size": 1}),
         ]
         for index, (name, overrides) in enumerate(cases):
             with self.subTest(name=name):
@@ -194,6 +217,70 @@ class LifecycleTests(DispatchBase):
             native_dispatch.verify(
                 self.root, dispatch["dispatch_id"], run_id="run-v8",
                 verification_run_id=receipt_id)
+
+    def test_receipt_cannot_be_replayed_across_dispatch_instances(self):
+        first = self.collected()
+        receipt_id = self.receipt(first)
+        self.assertEqual(native_dispatch.verify(
+            self.root, first["dispatch_id"], run_id="run-v8",
+            verification_run_id=receipt_id)["state"], "verified")
+        second = self.create(task="build", scope=["src/"])
+        native_dispatch.request(self.root, second["dispatch_id"],
+                                run_id="run-v8")
+        native_dispatch.confirm(self.root, second["dispatch_id"],
+                                run_id="run-v8", native_child_ref="child-2")
+        native_dispatch.start(self.root, second["dispatch_id"],
+                              run_id="run-v8")
+        native_dispatch.complete(self.root, second["dispatch_id"],
+                                 run_id="run-v8", result_ref="out-b.txt")
+        native_dispatch.collect(
+            self.root, second["dispatch_id"], run_id="run-v8",
+            evidence_ref=self.output("out-b.txt", "different result\n"))
+        with self.assertRaises((native_dispatch.DispatchError,
+                                verification_receipt.ReceiptError)):
+            native_dispatch.verify(
+                self.root, second["dispatch_id"], run_id="run-v8",
+                verification_run_id=receipt_id)
+
+    def test_nested_output_dir_is_preserved_for_verification(self):
+        dispatch = self.create()
+        native_dispatch.request(self.root, dispatch["dispatch_id"],
+                                run_id="run-v8")
+        native_dispatch.confirm(self.root, dispatch["dispatch_id"],
+                                run_id="run-v8", native_child_ref="child-1")
+        native_dispatch.start(self.root, dispatch["dispatch_id"],
+                              run_id="run-v8")
+        native_dispatch.complete(self.root, dispatch["dispatch_id"],
+                                 run_id="run-v8", result_ref="out.txt")
+        (self.root / "subdir").mkdir()
+        (self.root / "subdir" / "out.txt").write_text(
+            "nested result\n", encoding="utf-8")
+        # A decoy at the workspace root must not be used instead.
+        (self.root / "out.txt").write_text("decoy\n", encoding="utf-8")
+        collected = native_dispatch.collect(
+            self.root, dispatch["dispatch_id"], run_id="run-v8",
+            evidence_ref="out.txt", output_dir=self.root / "subdir")
+        self.assertEqual(collected["artifact_ref"], "subdir/out.txt")
+        receipt_id = self.receipt(dispatch)
+        verified = native_dispatch.verify(
+            self.root, dispatch["dispatch_id"], run_id="run-v8",
+            verification_run_id=receipt_id)
+        self.assertEqual(verified["state"], "verified")
+        self.assertEqual(verified["artifact_ref"], "subdir/out.txt")
+
+    def test_unicode_and_space_paths_are_collected_and_verified(self):
+        subdir = self.root / "alt klasör"
+        dispatch = self.collected_artifact(
+            "ünïcode çıktı.txt", output_dir=subdir)
+        record = native_dispatch.list_dispatches(self.root, "run-v8")[0]
+        self.assertEqual(record["artifact_ref"],
+                         "alt klasör/ünïcode çıktı.txt")
+        verified = native_dispatch.verify(
+            self.root, dispatch["dispatch_id"], run_id="run-v8",
+            verification_run_id=self.receipt(dispatch))
+        self.assertEqual(verified["state"], "verified")
+        self.assertEqual(verified["artifact_ref"],
+                         "alt klasör/ünïcode çıktı.txt")
 
     def test_artifact_changed_after_collection_is_rejected(self):
         dispatch = self.collected()
@@ -305,6 +392,74 @@ class LifecycleTests(DispatchBase):
         path.write_text("{", encoding="utf-8")
         with self.assertRaises(verification_receipt.ReceiptError):
             verification_receipt.read(self.root, receipt_id)
+
+
+class ReceiptConcurrencyTests(DispatchBase):
+    def _script(self):
+        return (
+            "import sys\n"
+            "from tools.native_dispatch import verify\n"
+            "try:\n"
+            "    result = verify(sys.argv[1], sys.argv[2], run_id='run-v8',\n"
+            "                     verification_run_id=sys.argv[3])\n"
+            "    print(result['state'])\n"
+            "except Exception as exc:\n"
+            "    print(type(exc).__name__, exc)\n"
+            "    raise SystemExit(1)\n"
+        )
+
+    def test_concurrent_verify_of_the_same_dispatch_is_idempotent(self):
+        dispatch = self.collected()
+        receipt_id = self.receipt(dispatch)
+        env = dict(os.environ)
+        env["PYTHONPATH"] = str(REPO)
+        processes = [subprocess.Popen(
+            [sys.executable, "-c", self._script(), str(self.root),
+             dispatch["dispatch_id"], receipt_id],
+            cwd=str(REPO), env=env, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, text=True, errors="replace")
+            for _ in range(2)]
+        for process in processes:
+            stdout, stderr = process.communicate(timeout=60)
+            self.assertEqual(process.returncode, 0, stderr)
+            self.assertIn("verified", stdout)
+        record = native_dispatch.list_dispatches(self.root, "run-v8")[0]
+        self.assertEqual(record["state"], "verified")
+        marker = (self.root / ".auto-orchestrator" / "verification" /
+                  "receipts" / f"{receipt_id}.used")
+        self.assertTrue(marker.is_file())
+
+    def test_two_dispatches_cannot_consume_the_same_receipt(self):
+        first = self.collected()
+        receipt_id = self.receipt(first)
+        native_dispatch.verify(
+            self.root, first["dispatch_id"], run_id="run-v8",
+            verification_run_id=receipt_id)
+        second = self.create(task="build", scope=["src/"])
+        native_dispatch.request(self.root, second["dispatch_id"],
+                                run_id="run-v8")
+        native_dispatch.confirm(self.root, second["dispatch_id"],
+                                run_id="run-v8", native_child_ref="child-2")
+        native_dispatch.start(self.root, second["dispatch_id"],
+                              run_id="run-v8")
+        native_dispatch.complete(self.root, second["dispatch_id"],
+                                 run_id="run-v8", result_ref="out-b.txt")
+        native_dispatch.collect(
+            self.root, second["dispatch_id"], run_id="run-v8",
+            evidence_ref=self.output("out-b.txt", "other\n"))
+        env = dict(os.environ)
+        env["PYTHONPATH"] = str(REPO)
+        processes = [subprocess.Popen(
+            [sys.executable, "-c", self._script(), str(self.root),
+             item["dispatch_id"], receipt_id],
+            cwd=str(REPO), env=env, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, text=True, errors="replace")
+            for item in (first, second)]
+        codes = []
+        for process in processes:
+            process.communicate(timeout=60)
+            codes.append(process.returncode)
+        self.assertEqual(sorted(codes), [0, 1])
 
 
 class DispatchCliTests(DispatchBase):

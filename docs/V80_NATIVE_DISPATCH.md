@@ -62,12 +62,18 @@ Rules:
   `dispatch_confirmed`.
 - `complete` only records a **claim**; `collect` requires the result artifact to
   exist and hashes it.
+- `collect` stores the canonical workspace-relative `artifact_ref`, digest and
+  size (not just the caller's filename), so `--output-dir subdir` verifies the
+  same `subdir/...` file later. The artifact is hashed in chunks; symlinks,
+  symlinked parents and external output directories are rejected.
 - `verify` requires a **verification receipt** issued by `native-verify`:
   HMAC-protected under `.auto-orchestrator/verification/receipts/`, bound to the
-  project/run/task, the dispatch commit, and the contract/plan digests when
-  pinned. It re-hashes the collected artifact and the verification record; a
-  hand-written `verified:true` JSON file is not accepted. A changed artifact or
-  record is rejected.
+  project/run/task, **dispatch id**, current HEAD, contract/plan digests, the
+  dispatch artifact digest/size, and the verification record digest. It
+  re-hashes the collected artifact and the record, and consumes the receipt
+  atomically (`.used`) so another dispatch cannot replay it. A hand-written
+  `verified:true` JSON file, a receipt for another dispatch or artifact, a
+  changed artifact/record, or a stale HEAD is rejected.
 - A parent-supplied `native_child_ref` is `child_provenance: declared`; no
   adapter here proves an observed vendor lifecycle, so
   `native_lifecycle_observed` stays false.

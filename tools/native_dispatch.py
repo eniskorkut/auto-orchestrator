@@ -430,7 +430,12 @@ def _hash_path(path: Path) -> tuple[str, int]:
 def collect(root, dispatch_id, *, run_id, evidence_ref, output_dir=None) -> dict:
     root = _root(root).resolve()
     ref = _text(evidence_ref, "evidence_ref", 300)
-    base = Path(output_dir) if output_dir else root
+    if output_dir:
+        base = Path(output_dir)
+        if not base.is_absolute():
+            base = root / base
+    else:
+        base = root
     path = _workspace_path(root, base, ref)
     digest, size = _hash_path(path)
     with project_lock(root, timeout=10.0):
@@ -439,9 +444,11 @@ def collect(root, dispatch_id, *, run_id, evidence_ref, output_dir=None) -> dict
             raise DispatchError("output is not claimed complete")
         record["output_digest"] = digest
         record["output_size"] = size
+        record["artifact_ref"] = path.relative_to(root).as_posix()
+        record["artifact_collected_at"] = time.time()
         record["state"] = "output_collected"
         record["lifecycle_status"] = "output_collected"
-        record["evidence_ref"] = ref
+        record["evidence_ref"] = path.relative_to(root).as_posix()
         _history(record, "collect_output", to_state="output_collected",
                  evidence_ref=ref, output_digest=digest)
         return _public(_write(root, record))
@@ -456,17 +463,28 @@ def verify(root, dispatch_id, *, run_id, verification_run_id) -> dict:
         import verification_receipt  # type: ignore
     with project_lock(root, timeout=10.0):
         record = _load(root, run_id, dispatch_id)
+        if record.get("state") == "verified":
+            if record.get("verification_run_id") == ref:
+                return _public(record)
+            raise DispatchError(
+                "dispatch is already verified by another receipt")
         if record.get("state") not in ("output_collected",
                                        "verification_pending"):
             raise DispatchError("dispatch output is not collected")
-        evidence_ref = record.get("evidence_ref")
-        if not isinstance(evidence_ref, str) or not evidence_ref:
+        artifact_ref = (record.get("artifact_ref")
+                        or record.get("evidence_ref"))
+        if not isinstance(artifact_ref, str) or not artifact_ref:
             raise DispatchError("dispatch has no collected artifact")
-        path = _workspace_path(root, root, evidence_ref)
+        path = _workspace_path(root, root, artifact_ref)
         digest, size = _hash_path(path)
         if digest != record.get("output_digest") or size != record.get("output_size"):
             raise DispatchError(
                 "collected artifact changed after collection; re-collect it")
+        try:
+            from tools.project_identity import ensure_project_identity
+        except ModuleNotFoundError:
+            from project_identity import ensure_project_identity  # type: ignore
+        project = ensure_project_identity(root)
         current_head = _head(root)
         if not current_head:
             raise DispatchError("dispatch verification requires a git commit")
@@ -478,7 +496,11 @@ def verify(root, dispatch_id, *, run_id, verification_run_id) -> dict:
             root, ref, run_id=run_id, task_id=record.get("task_id"),
             commit=current_head,
             contract_sha256=record.get("contract_sha256"),
-            plan_sha256=record.get("plan_sha256"))
+            plan_sha256=record.get("plan_sha256"),
+            project_id=project["project_id"],
+            dispatch_id=record.get("dispatch_id"),
+            dispatch_artifact_sha256=digest,
+            dispatch_artifact_size=size)
         record_ref = payload.get("record_ref")
         record_path = _workspace_path(root, root, record_ref)
         try:
@@ -490,13 +512,15 @@ def verify(root, dispatch_id, *, run_id, verification_run_id) -> dict:
         record_digest = hashlib.sha256(json.dumps(
             record_value, sort_keys=True, separators=(",", ":"),
             ensure_ascii=False).encode("utf-8")).hexdigest()
-        if record_digest != payload.get("record_sha256"):
+        if record_digest != payload.get("verification_record_sha256"):
             raise DispatchError(
                 "verification record changed after the receipt was issued")
+        verification_receipt.consume(root, ref, record["dispatch_id"])
         record["verification_run_id"] = ref
         record["verification_receipt_id"] = ref
         record["verification_record_ref"] = record_ref
         record["verification_record_sha256"] = record_digest
+        record["artifact_ref"] = artifact_ref
         record["verified_commit"] = current_head
         record["state"] = "verified"
         record["lifecycle_status"] = "verified"

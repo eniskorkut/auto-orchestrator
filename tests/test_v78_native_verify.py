@@ -211,6 +211,40 @@ class NativeVerifyTests(unittest.TestCase):
         record = native_dispatch.list_dispatches(self.root, "run-verify-1")[0]
         self.assertEqual(record["state"], "verified")
 
+        # A second dispatch for the same task must not replay the first
+        # receipt, even though run/task/HEAD are unchanged.
+        second = native_dispatch.create(
+            self.root, run_id="run-verify-1", task_id=task_id,
+            role="implementer", ide="codex", owner_session_id="codex",
+            write_scope=["src/"])
+        for action in ("request", "confirm", "start", "complete", "collect"):
+            if action == "confirm":
+                native_dispatch.confirm(
+                    self.root, second["dispatch_id"], run_id="run-verify-1",
+                    native_child_ref="child-2")
+            elif action == "start":
+                native_dispatch.start(
+                    self.root, second["dispatch_id"], run_id="run-verify-1")
+            elif action == "complete":
+                native_dispatch.complete(
+                    self.root, second["dispatch_id"], run_id="run-verify-1",
+                    result_ref="out.txt")
+            elif action == "collect":
+                (self.root / ".auto-orchestrator" / "dispatch-out" /
+                 "out-b.txt").write_text("other\n", encoding="utf-8")
+                native_dispatch.collect(
+                    self.root, second["dispatch_id"], run_id="run-verify-1",
+                    evidence_ref=".auto-orchestrator/dispatch-out/out-b.txt")
+            else:
+                getattr(native_dispatch, action)(
+                    self.root, second["dispatch_id"], run_id="run-verify-1")
+        code, error = self._error(
+            "codex", "native-dispatch", "verify", "--run-id",
+            "run-verify-1", "--dispatch-id", second["dispatch_id"],
+            "--verification-run-id", result["receipt_id"])
+        self.assertEqual(code, 1)
+        self.assertIn("dispatch", error.lower())
+
     def test_review_required_criterion_needs_accepted_independence(self):
         self._native_run_with_contract(review_required=True)
         head = subprocess.run(
