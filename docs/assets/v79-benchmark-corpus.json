@@ -1,0 +1,147 @@
+{
+  "schema_version": 1,
+  "kind": "v79-benchmark-corpus",
+  "modes": [
+    "solo",
+    "fast",
+    "balanced",
+    "rigorous",
+    "auto"
+  ],
+  "tasks": [
+    {
+      "id": "small-bugfix",
+      "category": "bugfix",
+      "risk": "low",
+      "request": "Fix the failing pagination boundary test.",
+      "acceptance": [
+        "the failing test passes",
+        "no unrelated file changes"
+      ],
+      "test_command": "python3 -m unittest"
+    },
+    {
+      "id": "medium-backend",
+      "category": "backend_feature",
+      "risk": "medium",
+      "request": "Add an idempotent order endpoint with tests.",
+      "acceptance": [
+        "endpoint exists",
+        "tests cover duplicate submission"
+      ],
+      "test_command": "python3 -m unittest"
+    },
+    {
+      "id": "frontend-integration",
+      "category": "frontend_backend",
+      "risk": "medium",
+      "request": "Connect the settings page to the new API and add a test.",
+      "acceptance": [
+        "UI calls the API",
+        "error path is tested"
+      ],
+      "test_command": "npm test"
+    },
+    {
+      "id": "auth-negative",
+      "category": "authentication",
+      "risk": "high",
+      "request": "Implement JWT refresh with expiry and invalid-token tests.",
+      "acceptance": [
+        "refresh works",
+        "expired token rejected",
+        "invalid token rejected"
+      ],
+      "test_command": "python3 -m unittest"
+    },
+    {
+      "id": "database-migration",
+      "category": "migration",
+      "risk": "high",
+      "request": "Add a reversible migration for the sessions table.",
+      "acceptance": [
+        "up and down migration pass",
+        "no data loss"
+      ],
+      "test_command": "python3 -m unittest"
+    },
+    {
+      "id": "api-compat",
+      "category": "api_compatibility",
+      "risk": "high",
+      "request": "Add optional pagination without breaking the old response.",
+      "acceptance": [
+        "old fields remain",
+        "new fields are optional"
+      ],
+      "test_command": "python3 -m unittest"
+    },
+    {
+      "id": "concurrency-bug",
+      "category": "concurrency",
+      "risk": "high",
+      "request": "Fix the double-write race in the claim path.",
+      "acceptance": [
+        "exactly one claim wins",
+        "race test is deterministic"
+      ],
+      "test_command": "python3 -m unittest"
+    },
+    {
+      "id": "repair-failing-tests",
+      "category": "repair",
+      "risk": "medium",
+      "request": "Repair the three failing tests without weakening them.",
+      "acceptance": [
+        "all tests pass",
+        "assertions are unchanged"
+      ],
+      "test_command": "python3 -m unittest"
+    },
+    {
+      "id": "multi-module",
+      "category": "multi_module",
+      "risk": "high",
+      "request": "Move the shared model to a package and update both modules.",
+      "acceptance": [
+        "both modules import the package",
+        "tests pass"
+      ],
+      "test_command": "python3 -m unittest"
+    },
+    {
+      "id": "security-sensitive",
+      "category": "security",
+      "risk": "high",
+      "request": "Reject path traversal in the file download handler.",
+      "acceptance": [
+        "traversal is rejected",
+        "normal download still works"
+      ],
+      "test_command": "python3 -m unittest"
+    },
+    {
+      "id": "grill-ambiguous",
+      "category": "requirements",
+      "risk": "medium",
+      "request": "Improve authentication somehow.",
+      "acceptance": [
+        "critical questions answered",
+        "contract approved"
+      ],
+      "test_command": "python3 -m unittest"
+    },
+    {
+      "id": "handoff-continuation",
+      "category": "handoff",
+      "risk": "medium",
+      "request": "Complete a half-finished README task in a second IDE.",
+      "acceptance": [
+        "same run id",
+        "next action preserved",
+        "no duplicate requirement"
+      ],
+      "test_command": "python3 -m unittest"
+    }
+  ]
+}
