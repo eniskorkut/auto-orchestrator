@@ -117,7 +117,7 @@ CONTRACT_METADATA = frozenset({
     "sha256", "created_at", "approved_at", "status", "supersedes",
     "superseded_by", "path",
 })
-BLOCKING_QUESTION_STATES = frozenset({"open", "skipped", "invalidated"})
+BLOCKING_QUESTION_STATES = frozenset({"open", "skipped"})
 
 _SECRET_PATTERNS = (
     (re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{8,}"),

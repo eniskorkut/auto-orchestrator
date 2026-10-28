@@ -13,15 +13,16 @@ import copy
 import inspect
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 import time
 from pathlib import Path
 
 try:
-    from tools import assumption_guard, teamwork_chat
+    from tools import assumption_guard, teamwork_chat, test_evidence
     from tools.grill_me import GrillError, GrillMeEngine
-    from tools.project_identity import ensure_project_identity
+    from tools.project_identity import ensure_project_identity, read_project_identity
     from tools.project_memory import MemoryError, ProjectMemory
     from tools.run_owner import atomic_write_json, read_json, teamwork_dir
     from tools.teamwork import TeamworkError
@@ -31,10 +32,11 @@ try:
         context_selector = None  # type: ignore
 except ModuleNotFoundError:
     import assumption_guard  # type: ignore
+    import test_evidence  # type: ignore
     import git_memory_hook  # type: ignore
     import teamwork_chat  # type: ignore
     from grill_me import GrillError, GrillMeEngine  # type: ignore
-    from project_identity import ensure_project_identity  # type: ignore
+    from project_identity import ensure_project_identity, read_project_identity  # type: ignore
     from project_memory import MemoryError, ProjectMemory  # type: ignore
     from run_owner import atomic_write_json, read_json, teamwork_dir  # type: ignore
     from teamwork import TeamworkError  # type: ignore
@@ -90,7 +92,8 @@ def _chat_args(root, *, command, request=None, request_file=None,
                request_stdin=False, mode="auto", run_id=None, model=None,
                max_seconds=7200, origin_platform="unknown", provider=None,
                interview_id=None, grill_mode="auto", guard_receipt=None,
-               codex_sandbox="read-only", native=False, plan=None):
+               codex_sandbox="read-only", native=False, plan=None,
+               integrity_policy="development"):
     return type("Args", (), {
         "root": str(root), "command": command, "request": request,
         "request_file": request_file, "request_stdin": request_stdin,
@@ -99,6 +102,7 @@ def _chat_args(root, *, command, request=None, request_file=None,
         "provider": provider, "interview_id": interview_id,
         "grill_mode": grill_mode, "guard_receipt": guard_receipt,
         "codex_sandbox": codex_sandbox, "native": native, "plan": plan,
+        "integrity_policy": integrity_policy,
     })()
 
 
@@ -508,7 +512,9 @@ def start(args) -> dict:
         interview_id=interview_id, grill_mode=grill_mode,
         guard_receipt=guard["receipt"],
         codex_sandbox=getattr(args, "codex_sandbox", "read-only"),
-        native=native))
+        native=native,
+        integrity_policy=getattr(args, "integrity_policy",
+                                 "development") or "development"))
     result["platform"] = platform
     result.setdefault("assumption_guard", guard["receipt"])
     return _with_ownership(result, ownership)
@@ -532,7 +538,9 @@ def plan(args) -> dict:
             origin_platform=platform,
             interview_id=getattr(args, "interview_id", None),
             grill_mode=getattr(args, "grill_mode", "auto") or "auto",
-            native=True))
+            native=True,
+            integrity_policy=getattr(args, "integrity_policy",
+                                     "development") or "development"))
     except teamwork_chat.ChatError as exc:
         raise UniversalError(str(exc)) from exc
     result["platform"] = platform
@@ -695,6 +703,195 @@ def pause(args) -> dict:
 GRILL_READ_ONLY = frozenset({"next", "summary", "status"})
 
 
+
+
+def _readonly_memory_brief(root, project_id):
+    """Read the brief fields with SQLite mode=ro; never create or migrate."""
+    empty = {"interview": None, "requirements": {"confirmed": 0,
+             "blocking": 0, "blocking_ids": []}, "decisions": []}
+    path = root / ".auto-orchestrator" / "memory.sqlite3"
+    if path.is_symlink() or not path.is_file():
+        return empty
+    try:
+        connection = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True,
+                                     timeout=2)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA query_only=ON")
+    except (sqlite3.Error, OSError, ValueError):
+        return empty
+    try:
+        tables = {row[0] for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        interview = None
+        if "interviews" in tables:
+            row = connection.execute(
+                "SELECT interview_id,request_summary,status FROM interviews "
+                "WHERE project_id=? AND status IN ('open','blocked','ready') "
+                "ORDER BY updated_at DESC LIMIT 1",
+                (project_id,)).fetchone()
+            if row is not None:
+                interview = {"interview_id": row["interview_id"],
+                             "objective": row["request_summary"],
+                             "status": row["status"]}
+                if "interview_questions" in tables:
+                    question = connection.execute(
+                        "SELECT question_id,question_key FROM "
+                        "interview_questions WHERE interview_id=? AND "
+                        "status='open' ORDER BY ordinal LIMIT 1",
+                        (row["interview_id"],)).fetchone()
+                    if question is not None:
+                        interview["question_id"] = question["question_id"]
+                        interview["question_key"] = question["question_key"]
+        requirements = dict(empty["requirements"])
+        if "requirements" in tables:
+            for row in connection.execute(
+                    "SELECT status,COUNT(*) AS total FROM requirements "
+                    "WHERE project_id=? GROUP BY status", (project_id,)):
+                if row["status"] == "confirmed":
+                    requirements["confirmed"] = int(row["total"])
+                elif row["status"] == "unresolved_blocking":
+                    requirements["blocking"] = int(row["total"])
+            requirements["blocking_ids"] = [
+                row["requirement_id"] for row in connection.execute(
+                    "SELECT requirement_id FROM requirements WHERE "
+                    "project_id=? AND status='unresolved_blocking' "
+                    "ORDER BY updated_at DESC LIMIT 10", (project_id,))]
+        decisions = []
+        if "decisions" in tables:
+            decisions = [
+                {"decision_id": row["decision_id"], "topic": row["topic"],
+                 "decision": row["decision"]}
+                for row in connection.execute(
+                    "SELECT decision_id,topic,decision FROM decisions WHERE "
+                    "project_id=? AND status='confirmed' ORDER BY updated_at "
+                    "DESC LIMIT 10", (project_id,))]
+        return {"interview": interview, "requirements": requirements,
+                "decisions": decisions}
+    except sqlite3.Error:
+        return empty
+    finally:
+        connection.close()
+
+def brief(args) -> dict:
+    """Read-only continuity brief for a new IDE session.
+
+    It never takes ownership and never writes project state. The caller still
+    needs an explicit handoff/release/accept to gain write authority.
+    """
+    root = _root(args.root)
+    platform = _platform(args)
+    identity = read_project_identity(root) or {
+        "project_id": None, "project_uuid": None}
+    ownership_full = _ownership_status(root, platform)
+    ownership = {key: ownership_full.get(key) for key in (
+        "available", "platform", "state", "status", "owner_platform",
+        "owner_id", "fence", "active", "foreign", "read_only")}
+    ownership["previous_owner"] = (
+        (ownership_full.get("snapshot") or {}).get("previous_owner"))
+    module = _ide_handoff_module()
+    snapshot = None
+    run_state = {}
+    if module is not None:
+        try:
+            payload = _handoff_call(module, "status", root)
+            snapshot = ((payload.get("result") or {}).get("snapshot")
+                        if isinstance(payload.get("result"), dict)
+                        else payload.get("snapshot"))
+        except UniversalError:
+            snapshot = None
+        try:
+            run_state = module._run_state(root, identity)
+        except Exception:  # noqa: BLE001 - optional read-only helper
+            run_state = {}
+    memory_view = _readonly_memory_brief(root, identity["project_id"])
+    interview = memory_view["interview"]
+    requirements = memory_view["requirements"]
+    decisions = memory_view["decisions"]
+    blocking = requirements["blocking_ids"]
+    verified = None
+    run_id = (snapshot or {}).get("run_id") or run_state.get("run_id")
+    if isinstance(run_id, str):
+        directory = root / ".auto-orchestrator" / "verification"
+        if directory.is_dir():
+            files = sorted(directory.glob(f"{run_id}-*.json"))
+            if files:
+                try:
+                    record = json.loads(files[-1].read_text(encoding="utf-8"))
+                    verified = {
+                        "verified": bool(record.get("verified")),
+                        "aggregate_status": (record.get("result") or {}).get(
+                            "aggregate_status"),
+                        "commit": record.get("commit"),
+                        "exit_code": record.get("exit_code"),
+                        "evidence": files[-1].relative_to(root).as_posix(),
+                    }
+                except (OSError, ValueError):
+                    verified = None
+    next_action = (snapshot or {}).get("next_action")
+    steps = []
+    if ownership.get("foreign"):
+        steps.append(
+            f"Ownership is held by {ownership.get('owner_platform')}; ask that "
+            "session to hand off or inspect read-only.")
+    elif ownership.get("active"):
+        steps.append("This IDE already holds ownership; continue the run.")
+    else:
+        steps.append("Take ownership with `ide activate` before any write.")
+    if next_action:
+        steps.append("Next action from the handoff: " + str(next_action)[:400])
+    if interview and interview.get("question_id"):
+        steps.append("Answer the open Grill-Me question: "
+                     + str(interview["question_id"]))
+    if run_state.get("failed_tests"):
+        steps.append("Re-run the failing tests: " + ", ".join(
+            run_state["failed_tests"][:5]))
+    if blocking:
+        steps.append("Resolve blocking requirements: " + ", ".join(
+            str(item) for item in blocking[:5]))
+    if verified is not None and not verified["verified"]:
+        steps.append("Verification is not complete; run native-verify after "
+                     "committing the change.")
+    return {
+        "platform": platform,
+        "project_id": identity["project_id"],
+        "project_uuid": identity["project_uuid"],
+        "ownership": ownership,
+        "active_ide": ownership.get("owner_platform"),
+        "previous_ide": (snapshot or {}).get("source_ide")
+        if snapshot else (ownership.get("previous_owner") or {}).get("ide"),
+        "run": {
+            "run_id": run_id,
+            "mode": run_state.get("mode") or (snapshot or {}).get("mode"),
+            "status": run_state.get("run_status")
+            or (snapshot or {}).get("run_status"),
+            "milestone_id": run_state.get("milestone_id")
+            or (snapshot or {}).get("milestone_id"),
+            "task_id": run_state.get("task_id")
+            or (snapshot or {}).get("task_id"),
+            "completed_tasks": run_state.get("completed_tasks")
+            or (snapshot or {}).get("completed_tasks") or [],
+            "pending_tasks": run_state.get("pending_tasks")
+            or (snapshot or {}).get("pending_tasks") or [],
+            "failed_tests": run_state.get("failed_tests")
+            or (snapshot or {}).get("failed_tests") or [],
+        },
+        "objective": ((interview or {}).get("objective") or ""),
+        "next_action": next_action,
+        "open_question": (snapshot or {}).get("open_question")
+        or (interview or {}).get("question_id"),
+        "requirements": {
+            "confirmed": requirements["confirmed"],
+            "blocking": len(blocking),
+            "blocking_ids": list(blocking[:10]),
+        },
+        "confirmed_decisions": list(decisions)[:10],
+        "verification": verified,
+        "resume_steps": steps,
+        "read_only": True,
+        "note": ("This brief does not grant write authority and does not "
+                 "replay another IDE's chat session."),
+    }
+
 def grill(args) -> dict:
     root = _root(args.root)
     platform = _platform(args)
@@ -717,11 +914,13 @@ def grill(args) -> dict:
             result = {"question": engine.next_question(args.interview_id)}
         elif args.grill_command == "answer":
             result = engine.answer(args.question_id, option=args.option,
-                                   text=args.text)
+                                   text=args.text,
+                                   reason=getattr(args, "reason", None))
         elif args.grill_command == "skip":
             result = engine.skip(args.question_id)
         elif args.grill_command == "back":
-            result = engine.back(args.question_id)
+            result = engine.back(args.question_id,
+                                 reason=getattr(args, "reason", None))
         elif args.grill_command == "cancel":
             result = {"interview": engine.cancel()}
         elif args.grill_command == "summary":
@@ -1247,6 +1446,14 @@ def native_verify(args) -> dict:
             "native verification requires an approved requirements contract")
     command, argv = _verification_command(
         getattr(args, "verification_command", None), contract, plan)
+    results_file = getattr(args, "results_file", None)
+    structured = None
+    if results_file:
+        try:
+            structured = test_evidence.parse_file(
+                results_file, getattr(args, "results_format", None))
+        except test_evidence.TestEvidenceError as exc:
+            raise UniversalError(str(exc)) from exc
     timeout = getattr(args, "timeout", None) or 900
     if type(timeout) not in (int, float) or timeout <= 0 or timeout > 3600:
         raise UniversalError("timeout must be between 1 and 3600 seconds")
@@ -1270,8 +1477,16 @@ def native_verify(args) -> dict:
     head = completion_engine._head_sha(root)
     if not head:
         raise UniversalError("native verification requires a git commit")
-    passed_signals = completion_engine.parse_passed_test_signals(output)
-    all_signals = completion_engine.parse_test_signals(output)
+    if structured is not None:
+        if structured["totals"]["failed"] and exit_code == 0:
+            raise UniversalError(
+                "structured test results report failures but the command "
+                "exited 0; refusing inconsistent evidence")
+        passed_signals = structured["passed_names"]
+        all_signals = [item["name"] for item in structured["tests"]]
+    else:
+        passed_signals = completion_engine.parse_passed_test_signals(output)
+        all_signals = completion_engine.parse_test_signals(output)
     changed_after = _git_changed_paths(root)
     # The verification command itself must not become implementation evidence.
     changed = changed_before
@@ -1288,6 +1503,7 @@ def native_verify(args) -> dict:
         }],
         reviews=_review_projection(reviews),
         commit_sha=head, head_sha=head, expected_commit=head)
+    integrity_policy = plan.get("integrity_policy") or "development"
     merged_tree_clean = not changed_before and not changed_after
     if not merged_tree_clean:
         # Merged-tree gate: a dirty worktree means the test result is not
@@ -1300,6 +1516,15 @@ def native_verify(args) -> dict:
         if "dirty worktree" not in " ".join(str(item) for item in reasons):
             reasons.append(
                 "dirty worktree: commit the change and re-run native-verify")
+        result["reasons"] = reasons
+    if integrity_policy != "development":
+        result["verified_completion"] = False
+        result["fully_verified"] = False
+        result["integrity_policy"] = integrity_policy
+        reasons = list(result.get("reasons") or [])
+        reasons.append(
+            f"integrity policy '{integrity_policy}' does not certify "
+            "production completion")
         result["reasons"] = reasons
     record = {
         "version": 1,
@@ -1317,6 +1542,11 @@ def native_verify(args) -> dict:
         "contract_version": (contract or {}).get("contract_version"),
         "contract_sha256": (contract or {}).get("sha256"),
         "plan_sha256": approval.get("plan_sha256"),
+        "integrity_policy": integrity_policy,
+        "results_format": structured["format"] if structured else "stdout",
+        "results_totals": structured["totals"] if structured else None,
+        "failed_tests": structured["failed_names"] if structured else [],
+        "skipped_tests": structured["skipped_names"] if structured else [],
         "passed_signals": passed_signals[:completion_engine.MAX_TEST_SIGNALS],
         "observed_signals": all_signals[:completion_engine.MAX_TEST_SIGNALS],
         "output_tail": output[-4000:],
@@ -1329,7 +1559,7 @@ def native_verify(args) -> dict:
         "review_count": len(reviews),
         "result": result,
         "verified": bool(result.get("verified_completion"))
-        and merged_tree_clean,
+        and merged_tree_clean and integrity_policy == "development",
         "completion_recorded": False,
         "note": ("This command ran a real test command. It does not mark the "
                  "task complete; Supervisor acceptance and independent review "
@@ -1417,6 +1647,7 @@ def native_audit(args) -> dict:
             raise UniversalError("native-audit evidence must be a regular file")
         evidence_refs.append(str(path.resolve().relative_to(root.resolve())))
     criteria = list(getattr(args, "criteria", None) or [])
+    integrity_policy = plan.get("integrity_policy") or "development"
     record = {
         "version": 1,
         "run_id": run_id,
@@ -1429,6 +1660,7 @@ def native_audit(args) -> dict:
         "contract_id": (contract or {}).get("contract_id"),
         "contract_sha256": (contract or {}).get("sha256"),
         "plan_sha256": approval.get("plan_sha256"),
+        "integrity_policy": integrity_policy,
         "evidence_refs": evidence_refs,
         "independence": "declared_role_separation",
         "independent": True,
@@ -1655,6 +1887,8 @@ def main(argv=None) -> int:
                          help="explicit managed execution provider; required "
                               "to opt in from Codex/Cursor/Antigravity")
     start_p.add_argument("--max-seconds", type=float, default=7200)
+    start_p.add_argument("--integrity-policy", default="development",
+                         choices=["development", "demo", "benchmark"])
     start_p.add_argument("--native", action="store_true",
                          help="write a native plan/engine state; never spawn "
                               "a provider, runner or PID")
@@ -1674,6 +1908,8 @@ def main(argv=None) -> int:
     plan_p.add_argument("--grill-mode", default="auto",
                         choices=["off", "auto", "required", "plan-only"])
     plan_p.add_argument("--max-seconds", type=float, default=7200)
+    plan_p.add_argument("--integrity-policy", default="development",
+                        choices=["development", "demo", "benchmark"])
 
     approve_p = sub.add_parser("approve-plan")
     approve_p.add_argument("--run-id", required=True)
@@ -1683,6 +1919,9 @@ def main(argv=None) -> int:
     verify_p.add_argument("--run-id", required=True)
     verify_p.add_argument("--task-id", required=True)
     verify_p.add_argument("--verification-command", dest="verification_command")
+    verify_p.add_argument("--results-file",
+                          help="JUnit XML or pytest JSON from the real run")
+    verify_p.add_argument("--results-format", choices=["junit", "pytest-json"])
     verify_p.add_argument("--timeout", type=float, default=900)
 
     audit_p = sub.add_parser("native-audit")
@@ -1713,6 +1952,8 @@ def main(argv=None) -> int:
     context_p.add_argument("--request")
     context_p.add_argument("--selection-budget", type=int, default=900)
     context_p.add_argument("--module", action="append")
+    brief_p = sub.add_parser("brief")
+    brief_p.add_argument("--run-id")
     handoff_p = sub.add_parser("handoff")
     handoff_p.add_argument("--limit", type=int, default=2400)
     pause_p = sub.add_parser("pause")
@@ -1807,10 +2048,14 @@ def main(argv=None) -> int:
     ga.add_argument("--question-id", required=True)
     ga.add_argument("--option")
     ga.add_argument("--text")
+    ga.add_argument("--reason",
+                    help="bounded provenance for an answer change")
     ga.add_argument("--platform", default=argparse.SUPPRESS)
     for name in ("skip", "back"):
         gp = grill_sub.add_parser(name)
         gp.add_argument("--question-id", required=True)
+        if name == "back":
+            gp.add_argument("--reason")
         gp.add_argument("--platform", default=argparse.SUPPRESS)
     gi = grill_sub.add_parser("import-native")
     gi.add_argument("--file", required=True,
@@ -1825,6 +2070,7 @@ def main(argv=None) -> int:
             "native-report": native_report, "native-verify": native_verify,
             "native-audit": native_audit, "context": context,
             "handoff": handoff, "pause": pause, "grill": grill,
+            "brief": brief,
             "memory": memory_command, "ide": ide,
             "status": lambda a: delegate(a, "status"),
             "agents": lambda a: delegate(a, "agents"),

@@ -797,7 +797,9 @@ def start(args, *, initialize: bool = True,
                 request, contract=contract, run_id=run_id, model=model,
                 mode=mode, repo_profile=profile,
                 project_id=identity["project_id"], provider=provider,
-                codex_sandbox=codex_sandbox)
+                codex_sandbox=codex_sandbox,
+                integrity_policy=getattr(args, "integrity_policy",
+                                         "development") or "development")
         except (TeamworkPlannerError, ValueError) as exc:
             raise ChatError(str(exc)) from exc
         plan["origin_platform"] = platform

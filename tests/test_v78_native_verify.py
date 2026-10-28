@@ -90,11 +90,12 @@ class NativeVerifyTests(unittest.TestCase):
             }],
         }
 
-    def _native_run_with_contract(self):
+    def _native_run_with_contract(self, integrity="development"):
         relative = self.request_path()
         self.cli("codex", "ide", "activate")
         self.cli("codex", "plan", "--request-file", relative, "--run-id",
-                 "run-verify-1", "--grill-mode", "off")
+                 "run-verify-1", "--grill-mode", "off",
+                 "--integrity-policy", integrity)
         saved = requirements_contract.save_contract(self.root, self._contract())
         plan_path = (self.root / ".auto-orchestrator" / "plans" /
                      "run-verify-1.json")
@@ -165,6 +166,18 @@ class NativeVerifyTests(unittest.TestCase):
                             "run-verify-1", "--task-id", "build")
         self.assertGreaterEqual(verified["review_count"], 1)
 
+    def test_demo_integrity_policy_never_certifies_production(self):
+        self._native_run_with_contract(integrity="demo")
+        result = self.cli("codex", "native-verify", "--run-id",
+                          "run-verify-1", "--task-id", "build")
+        self.assertEqual(result["exit_code"], 0)
+        self.assertFalse(result["verified_completion"])
+        evidence = json.loads(Path(result["evidence"]).read_text(
+            encoding="utf-8"))
+        self.assertEqual(evidence["integrity_policy"], "demo")
+        self.assertIn("does not certify", " ".join(
+            str(item) for item in evidence["result"]["reasons"]))
+
     def test_native_verify_never_verifies_a_dirty_tree(self):
         self._native_run_with_contract()
         (self.root / "README.md").write_text(
@@ -178,6 +191,34 @@ class NativeVerifyTests(unittest.TestCase):
         self.assertFalse(evidence["merged_tree_clean"])
         self.assertIn("dirty worktree", " ".join(
             str(item) for item in evidence["result"]["reasons"]))
+
+    def test_native_verify_consumes_structured_results(self):
+        self._native_run_with_contract()
+        junit = Path(self.temp.name) / "junit.xml"
+        junit.write_text(
+            '<testsuite><testcase classname="tests.test_ok" '
+            'name="test_ok"/></testsuite>', encoding="utf-8")
+        result = self.cli("codex", "native-verify", "--run-id",
+                          "run-verify-1", "--task-id", "build",
+                          "--results-file", str(junit))
+        evidence = json.loads(Path(result["evidence"]).read_text(
+            encoding="utf-8"))
+        self.assertEqual(evidence["results_format"], "junit")
+        self.assertEqual(evidence["results_totals"]["passed"], 1)
+        self.assertEqual(evidence["failed_tests"], [])
+
+    def test_native_verify_refuses_inconsistent_structured_results(self):
+        self._native_run_with_contract()
+        junit = Path(self.temp.name) / "junit-fail.xml"
+        junit.write_text(
+            '<testsuite><testcase classname="tests.test_ok" '
+            'name="test_ok"><failure/></testcase></testsuite>',
+            encoding="utf-8")
+        code, error = self._error(
+            "codex", "native-verify", "--run-id", "run-verify-1",
+            "--task-id", "build", "--results-file", str(junit))
+        self.assertEqual(code, 1)
+        self.assertIn("inconsistent", error)
 
     def _error(self, platform, *args):
         stderr = io.StringIO()

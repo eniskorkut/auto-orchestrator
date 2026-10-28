@@ -19,7 +19,12 @@ Codex, and never start an external orchestrator process.
    ```bash
    python3.11 tools/universal_teamwork.py --root . --platform codex context
    python3.11 tools/universal_teamwork.py --root . --platform codex ide status
+   python3.11 tools/universal_teamwork.py --root . --platform codex brief
    ```
+
+   `brief` is read-only: it returns the current objective, run/milestone,
+   completed/pending tasks, failed tests, open question, the next action and
+   explicit resume steps. It does not grant write authority.
 
 3. Write the exact request to a validated request file. Do not interpolate
    request text into a shell line:

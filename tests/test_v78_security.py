@@ -144,7 +144,7 @@ class IdleEvidenceTests(SecurityBase):
             (self.root / allowed["handoff"]["path"]).read_text(
                 encoding="utf-8"))
         self.assertEqual(snapshot["native_child_state"], "observed_active")
-        self.assertFalse(snapshot["digest"].startswith("0"))
+        self.assertEqual(len(snapshot["digest"]), 64)
 
     def _owner(self):
         credential = json.loads(
