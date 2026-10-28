@@ -360,8 +360,8 @@ python3.11 tools/universal_teamwork.py --root . --platform codex ide activate
 python3.11 tools/universal_teamwork.py --root . --platform codex plan --request-file <relative_path>
 python3.11 tools/universal_teamwork.py --root . --platform codex approve-plan --run-id <run_id> --approver <you>
 python3.11 tools/universal_teamwork.py --root . --platform codex start --plan <run_id>
-python3.11 tools/universal_teamwork.py --root . --platform codex ide prepare --target-platform opencode
-python3.11 tools/universal_teamwork.py --root . --platform codex ide release --handoff <handoff_id>
+python3.11 tools/universal_teamwork.py --root . --platform codex ide prepare --target-platform opencode --confirm-idle user
+python3.11 tools/universal_teamwork.py --root . --platform codex ide release --handoff <handoff_id> --confirm-idle user
 python3.11 tools/universal_teamwork.py --root . --platform opencode ide accept --handoff <handoff_id> --digest <sha256>
 ```
 

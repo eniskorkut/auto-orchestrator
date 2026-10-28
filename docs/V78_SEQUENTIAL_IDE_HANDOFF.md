@@ -95,6 +95,11 @@ Ownership record v1:
 
 Rules:
 
+- **Release is mandatory.** `handoff_prepared` is not a transfer authorization;
+  only a `released` record with a matching release transition can be accepted.
+- `prepare` and `release` require an explicit drain acknowledgement
+  (`--confirm-idle user|owner`). A fresh heartbeat is a parent-session signal,
+  never proof that native children are idle or stopped.
 - Every transition increments `fence`. A compare-and-swap with the wrong token
   or a stale fence is rejected, not silently retried.
 - Repeated identical calls (same action, token, fence, digest) return
@@ -134,9 +139,9 @@ handoff directory, and the project id must match the live project.
 Liveness evidence, strongest first:
 
 1. **PID identity match** — start token / creation time, uid, host. A bare PID is
-   never sufficient because PIDs are reused.
-2. **Fresh heartbeat** — only valid for owners without a PID identity. A fresh
-   heartbeat without identity is `unknown_live`, not `alive`.
+   never sufficient because PIDs are reused. Reported as `pid_verified`.
+2. **Fresh heartbeat** — a parent-session signal for owners without a PID.
+   Reported as `heartbeat_fresh`; it says nothing about native child idleness.
 3. **Managed lease evidence** — the existing `project_writer_lease` and
    `runner_lease` locks. Absence of the OS lock plus a token mismatch is
    evidence that a managed process ended; it says nothing about a native child.
@@ -202,6 +207,16 @@ Native task results are recorded with `native-report`, which stores a task
 verdict plus real test output references. Prose-only success claims are
 rejected; a missing reviewer verdict leaves the requirement `needs_review`.
 
+`native-verify` is the verifier, not the agent: it runs the approved
+verification command itself with `subprocess`, captures the real exit code and
+test signals, binds the current commit, contract digest, run/task/attempt and
+writes a `native-verification` record plus a project-memory observation. It
+feeds the existing Completion Engine and never records completion from a
+self-report. `native-audit` records a declared-role review bound to the same
+HEAD and contract; `native-verify` consumes it, and the record states
+`independence: "declared_role_separation"` rather than claiming a
+cryptographic attestation.
+
 ## 8. Grill-Me 3.0 across IDEs
 
 The interview is one durable object in project memory:
@@ -252,8 +267,8 @@ python3.11 tools/universal_teamwork.py --root . --platform codex approve-plan --
 python3.11 tools/universal_teamwork.py --root . --platform codex start --plan run-… --native
 
 # hand off to another IDE
-python3.11 tools/universal_teamwork.py --root . --platform codex ide prepare --target opencode
-python3.11 tools/universal_teamwork.py --root . --platform codex ide release --handoff ho_…
+python3.11 tools/universal_teamwork.py --root . --platform codex ide prepare --target-platform opencode --confirm-idle user
+python3.11 tools/universal_teamwork.py --root . --platform codex ide release --handoff ho_… --confirm-idle user
 python3.11 tools/universal_teamwork.py --root . --platform opencode ide accept --handoff ho_… --digest …
 ```
 
@@ -266,7 +281,14 @@ project state; it does not read the previous IDE's native transcript.
 Ownership credentials are per platform and stored in
 `.auto-orchestrator/teamwork/ide-owner-<platform>.json` with mode `0600`.
 `ide activate`/`ide accept` write it; `--owner-token`/`--fence` may be passed
-explicitly. Status output never includes the raw token.
+explicitly, and `--show-token` is required to print the token. Status output
+never includes it. A second session of the same IDE without that credential is
+rejected for every mutation, even though the platform name matches.
+
+The snapshot digest detects corruption and drift, not a malicious local user
+who can rewrite both the ownership record and the snapshot. The trust boundary
+is the local operating-system account; do not treat a plain SHA-256 as an
+authentication signature.
 
 ```bash
 # abandon a handoff that can no longer be accepted
@@ -301,11 +323,11 @@ different file and are the only ones allowed to claim `live-verified`.
 | Step | Real surface | Observed |
 |---|---|---|
 | Codex takes ownership, plans and starts natively | `codex-cli 0.164.0` | plan approved, no PID/runner |
-| Codex writes its part | `codex exec --sandbox workspace-write` | file created in 15.9 s |
+| Codex writes its part | `codex exec --sandbox workspace-write` | file created in 16.5 s |
 | Handoff to OpenCode | ownership CLI | snapshot accepted |
-| OpenCode recovers `next_action` and writes | `opencode v2.1.1` (`--standalone --auto`) | marker from `ide status` written in 17.2 s |
+| OpenCode recovers `next_action` and writes | `opencode v2.1.1` (`--standalone --auto`) | marker from `ide status` written in 15.8 s |
 | Handoff back to Codex | ownership CLI | snapshot accepted |
-| Codex continues from the second handoff | `codex exec` | final marker written in 18.8 s |
+| Codex continues from the second handoff | `codex exec` | final marker written in 15.3 s |
 
 Evidence: `docs/assets/v78-live-handoff.json` (`mode: "live"`,
 `live_ides: ["codex", "opencode"]`). Cursor and Antigravity had no documented

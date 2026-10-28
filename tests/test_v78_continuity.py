@@ -77,7 +77,7 @@ class V78ContinuityTests(unittest.TestCase):
     def transfer(self, source: str, target: str, *, next_action: str,
                  allow_dirty: bool = False) -> dict:
         args = ["ide", "prepare", "--target-platform", target,
-                "--next-action", next_action]
+                "--next-action", next_action, "--confirm-idle", "user"]
         if allow_dirty:
             args.append("--allow-dirty")
         prepared = self.cli(source, *args)
@@ -133,7 +133,8 @@ class V78ContinuityTests(unittest.TestCase):
     def test_recovery_can_discard_an_unacceptable_handoff(self):
         self.native_plan("codex")
         prepared = self.cli("codex", "ide", "prepare", "--target-platform",
-                            "opencode", "--next-action", "continue")
+                            "opencode", "--next-action", "continue",
+                            "--confirm-idle", "user")
         handoff = prepared["result"]["handoff"]
         record = self.ownership()
         record["owner"]["heartbeat_at"] = (
@@ -159,7 +160,8 @@ class V78ContinuityTests(unittest.TestCase):
 
     def test_recovery_without_evidence_still_fails(self):
         self.native_plan("codex")
-        self.cli("codex", "ide", "prepare", "--target-platform", "opencode")
+        self.cli("codex", "ide", "prepare", "--target-platform", "opencode",
+                 "--confirm-idle", "user")
         result = self.cli("cursor", "ide", "recover", "--apply",
                           expect=1)
         self.assertEqual(result, {})
@@ -167,7 +169,8 @@ class V78ContinuityTests(unittest.TestCase):
     def test_accept_refusal_is_non_zero_and_names_the_drift(self):
         self.native_plan("codex")
         prepared = self.cli("codex", "ide", "prepare", "--target-platform",
-                            "opencode", "--next-action", "continue")
+                            "opencode", "--next-action", "continue",
+                            "--confirm-idle", "user")
         handoff = prepared["result"]["handoff"]
         self.cli("codex", "ide", "release", "--handoff",
                  handoff["handoff_id"])
@@ -187,7 +190,9 @@ class V78ContinuityTests(unittest.TestCase):
 
     def test_status_never_exposes_the_owner_token(self):
         activated = self.cli("codex", "ide", "activate")
-        token = activated["result"]["owner_token"]
+        self.assertNotIn("owner_token", activated["result"])
+        self.assertTrue(activated["ownership"]["credential_present"])
+        token = universal._load_credential(self.root, "codex")["owner_token"]
         status = self.cli("cursor", "ide", "status")
         self.assertNotIn(token, json.dumps(status))
         self.assertTrue(status["result"]["owner"]["token_present"])
@@ -210,7 +215,8 @@ class V78ContinuityTests(unittest.TestCase):
                     ]}), "run-cont-1", task_id))
         prepared = self.cli("codex", "ide", "prepare", "--target-platform",
                             "opencode", "--next-action",
-                            "Fix the failing refresh test")
+                            "Fix the failing refresh test",
+                            "--confirm-idle", "user")
         handoff = prepared["result"]["handoff"]
         path = (self.root / ".auto-orchestrator" / "ide" / "handoffs" /
                 f"{handoff['handoff_id']}.json")

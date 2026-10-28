@@ -532,9 +532,19 @@ def atomic_write_json(path: Path, value: dict) -> None:
     fd = os.open(str(temporary), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
         os.write(fd, (json.dumps(value, indent=2, ensure_ascii=False) + "\n").encode("utf-8"))
+        os.fsync(fd)
     finally:
         os.close(fd)
     os.replace(temporary, path)
+    if os.name == "posix":
+        try:
+            directory_fd = os.open(str(path.parent), os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+        except OSError:
+            pass
 
 
 def update_active(root, run_id: str, *, expected_token: str | None = None,

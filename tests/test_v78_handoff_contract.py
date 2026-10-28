@@ -75,9 +75,17 @@ class HandoffContractTestBase(unittest.TestCase):
         active = self.activate()
         result = handoff.prepare_handoff(
             self.root, active["owner_token"], active["fence"], "codex",
-            next_action="continue", confirm_idle=True, **kwargs)
+            next_action="continue", idle_confirmation="user_confirmed", **kwargs)
         self.assertTrue(result["ok"], result)
         return active, result
+
+    def release(self, active, prepared, **kwargs):
+        result = handoff.release(
+            self.root, active["owner_token"], prepared["fence"],
+            prepared["handoff"]["handoff_id"],
+            idle_confirmation="user_confirmed", **kwargs)
+        self.assertTrue(result["ok"], result)
+        return result
 
     def snapshot(self, prepared):
         return json.loads(
@@ -218,6 +226,7 @@ class SnapshotTests(HandoffContractTestBase):
                 if key != "digest"}
         self.assertEqual(snapshot["digest"], handoff._canonical_digest(body))
 
+        self.release(active, prepared)
         accepted = handoff.accept(
             self.root, prepared["handoff"]["handoff_id"],
             prepared["handoff"]["digest"], "codex", session_id="target")
@@ -262,19 +271,20 @@ class DirtyPolicyTests(HandoffContractTestBase):
         (self.root / "notes.txt").write_text("dirty\n", encoding="utf-8")
         blocked = handoff.prepare_handoff(
             self.root, active["owner_token"], active["fence"], "codex",
-            confirm_idle=True)
+            idle_confirmation="user_confirmed")
         self.assertFalse(blocked["ok"])
         self.assertEqual(blocked["reasons"][0]["code"], "dirty_worktree")
         self.assertEqual(self.snapshot_files(), [])
 
         allowed = handoff.prepare_handoff(
             self.root, active["owner_token"], active["fence"], "codex",
-            allow_dirty=True, confirm_idle=True)
+            allow_dirty=True, idle_confirmation="user_confirmed")
         self.assertTrue(allowed["ok"], allowed)
         snapshot = self.snapshot(allowed)
         self.assertTrue(snapshot["dirty"])
         self.assertIn("notes.txt", [
             item["path"] for item in snapshot["changed_files"]])
+        self.release(active, allowed)
         accepted = handoff.accept(
             self.root, allowed["handoff"]["handoff_id"],
             allowed["handoff"]["digest"], "codex")
@@ -286,7 +296,7 @@ class DirtyPolicyTests(HandoffContractTestBase):
             "ignored\n", encoding="utf-8")
         prepared = handoff.prepare_handoff(
             self.root, active["owner_token"], active["fence"], "codex",
-            confirm_idle=True)
+            idle_confirmation="user_confirmed")
         self.assertTrue(prepared["ok"], prepared)
         snapshot = self.snapshot(prepared)
         self.assertFalse(snapshot["dirty"])
@@ -298,7 +308,7 @@ class DirtyPolicyTests(HandoffContractTestBase):
         (self.root / name).write_bytes("değer\r\n".encode("utf-8"))
         prepared = handoff.prepare_handoff(
             self.root, active["owner_token"], active["fence"], "codex",
-            allow_dirty=True, confirm_idle=True)
+            allow_dirty=True, idle_confirmation="user_confirmed")
         self.assertTrue(prepared["ok"], prepared)
         snapshot = self.snapshot(prepared)
         paths = [item["path"] for item in snapshot["changed_files"]]
@@ -306,6 +316,7 @@ class DirtyPolicyTests(HandoffContractTestBase):
 
         path = self.root / prepared["handoff"]["path"]
         text = json.dumps(snapshot, indent=2, ensure_ascii=False)
+        self.release(active, prepared)
         path.write_bytes(text.replace("\n", "\r\n").encode("utf-8"))
         accepted = handoff.accept(
             self.root, prepared["handoff"]["handoff_id"],
@@ -321,7 +332,8 @@ class DirtyPolicyTests(HandoffContractTestBase):
 
 class SnapshotSafetyTests(HandoffContractTestBase):
     def test_tampered_oversized_and_symlinked_snapshots_are_rejected(self):
-        _, prepared = self.prepare()
+        active, prepared = self.prepare()
+        self.release(active, prepared)
         handoff_id = prepared["handoff"]["handoff_id"]
         digest = prepared["handoff"]["digest"]
         path = self.root / prepared["handoff"]["path"]
@@ -356,7 +368,8 @@ class SnapshotSafetyTests(HandoffContractTestBase):
         path.write_bytes(original)
 
     def test_wrong_project_snapshot_and_traversal_are_rejected(self):
-        _, prepared = self.prepare()
+        active, prepared = self.prepare()
+        self.release(active, prepared)
         handoff_id = prepared["handoff"]["handoff_id"]
         path = self.root / prepared["handoff"]["path"]
         snapshot = self.snapshot(prepared)
@@ -380,7 +393,9 @@ class SnapshotSafetyTests(HandoffContractTestBase):
 
 
 class MismatchTests(HandoffContractTestBase):
-    def _assert_blocked_without_mutation(self, prepared, code):
+    def _assert_blocked_without_mutation(self, prepared, code, active=None):
+        if active is not None:
+            self.release(active, prepared)
         before = self.ownership_bytes()
         result = handoff.accept(
             self.root, prepared["handoff"]["handoff_id"],
@@ -393,24 +408,26 @@ class MismatchTests(HandoffContractTestBase):
     def test_contract_pointer_change_blocks_accept(self):
         interview_id, *_ = self.install_interview()
         self.install_contract(interview_id)
-        _, prepared = self.prepare()
+        active, prepared = self.prepare()
         pointer = (self.root / ".auto-orchestrator" / "contracts"
                    / "current.json")
         value = json.loads(pointer.read_text(encoding="utf-8"))
         value["sha256"] = "a" * 64
         atomic_write_json(pointer, value)
-        self._assert_blocked_without_mutation(prepared, "contract_mismatch")
+        self._assert_blocked_without_mutation(
+            prepared, "contract_mismatch", active)
 
     def test_head_change_blocks_accept(self):
-        _, prepared = self.prepare()
+        active, prepared = self.prepare()
         (self.root / "app.py").write_text("value = 2\n", encoding="utf-8")
         _commit_all(self.root, "second")
-        self._assert_blocked_without_mutation(prepared, "head_mismatch")
+        self._assert_blocked_without_mutation(
+            prepared, "head_mismatch", active)
 
     def test_interview_question_change_blocks_accept(self):
         interview_id, question_id, *_ = self.install_interview()
         self.install_contract(interview_id)
-        _, prepared = self.prepare()
+        active, prepared = self.prepare()
         memory_path = self.root / ".auto-orchestrator" / "memory.sqlite3"
         import sqlite3
         connection = sqlite3.connect(str(memory_path))
@@ -421,13 +438,14 @@ class MismatchTests(HandoffContractTestBase):
             connection.commit()
         finally:
             connection.close()
-        self._assert_blocked_without_mutation(prepared, "interview_mismatch")
+        self._assert_blocked_without_mutation(
+            prepared, "interview_mismatch", active)
 
     def test_dirty_change_after_prepare_blocks_accept(self):
-        _, prepared = self.prepare()
+        active, prepared = self.prepare()
         (self.root / "late.txt").write_text("late\n", encoding="utf-8")
         self._assert_blocked_without_mutation(
-            prepared, "dirty_digest_mismatch")
+            prepared, "dirty_digest_mismatch", active)
 
     def test_content_change_with_same_status_blocks_accept(self):
         active = self.activate()
@@ -435,14 +453,15 @@ class MismatchTests(HandoffContractTestBase):
         path.write_text("first\n", encoding="utf-8")
         prepared = handoff.prepare_handoff(
             self.root, active["owner_token"], active["fence"], "codex",
-            allow_dirty=True, confirm_idle=True)
+            allow_dirty=True, idle_confirmation="user_confirmed")
         self.assertTrue(prepared["ok"], prepared)
         path.write_text("second\n", encoding="utf-8")
         self._assert_blocked_without_mutation(
-            prepared, "dirty_digest_mismatch")
+            prepared, "dirty_digest_mismatch", active)
 
     def test_project_manifest_change_blocks_accept(self):
-        _, prepared = self.prepare()
+        active, prepared = self.prepare()
+        self.release(active, prepared)
         path = self.root / ".auto-orchestrator" / "project.json"
         value = json.loads(path.read_text(encoding="utf-8"))
         value["project_id"] = "p_" + "1" * 16
@@ -451,13 +470,14 @@ class MismatchTests(HandoffContractTestBase):
         self._assert_blocked_without_mutation(prepared, "wrong_project")
 
     def test_ownership_generation_change_blocks_accept(self):
-        _, prepared = self.prepare()
+        active, prepared = self.prepare()
+        self.release(active, prepared)
         record = json.loads(self.ownership_bytes())
         record["fence"] += 1
         with project_lock(self.root):
             atomic_write_json(handoff._ownership_path(self.root), record)
         self._assert_blocked_without_mutation(
-            prepared, "ownership_generation_mismatch")
+            prepared, "release_required")
 
 
 class ModuleSafetyTests(HandoffContractTestBase):

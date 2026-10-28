@@ -75,10 +75,15 @@ are read-only and always allowed. Mutating commands reject a foreign owner.
 ```bash
 python3.11 tools/universal_teamwork.py --root . --platform opencode ide status
 python3.11 tools/universal_teamwork.py --root . --platform opencode \
-  ide prepare --target-platform codex --summary "next action"
+  ide prepare --target-platform codex --confirm-idle user \
+  --summary "next action"
 python3.11 tools/universal_teamwork.py --root . --platform opencode \
-  ide release --handoff <handoff_id>
+  ide release --handoff <handoff_id> --confirm-idle user
 ```
+
+Prepare and release both require an explicit drain acknowledgement; a fresh
+heartbeat is not proof that native children are idle. The target can accept
+only after the release.
 
 The target IDE accepts the same handoff id and digest with `ide accept`, then
 reads `result.snapshot.next_action` from `ide status`. Prepare/release are

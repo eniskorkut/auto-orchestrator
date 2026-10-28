@@ -13,6 +13,7 @@ import copy
 import inspect
 import json
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -301,29 +302,51 @@ def _claim_ownership(root, platform, *, run_id=None, owner_id=None,
             raise UniversalError(
                 f"ownership state {current_state} requires explicit recovery "
                 f"before {action}")
+        if (owner_id is not None and current["owner_id"] is not None
+                and str(current["owner_id"]) != str(owner_id)):
+            raise UniversalError(
+                "project ownership is held by a different session of "
+                f"{platform}; current fence {current['fence']}. Use the "
+                "owning session or hand off explicitly")
+        stored = _credential(root, platform, owner_token)
+        if (not isinstance(stored.get("owner_token"), str)
+                or not isinstance(stored.get("fence"), int)):
+            # A matching platform name is not an authorization. A second
+            # session of the same IDE must present the owner credential or
+            # wait for an explicit handoff.
+            raise UniversalError(
+                "project ownership is held by this IDE platform but no owner "
+                "credential is available to this session; use `ide status`, "
+                "the owning session, or an explicit handoff/recovery")
+        if (current["owner_id"] is not None
+                and stored.get("owner_id") is not None
+                and str(current["owner_id"]) != str(stored["owner_id"])):
+            raise UniversalError(
+                "project ownership credential belongs to a different session "
+                f"of {platform}; current fence {current['fence']}")
         fence = current["fence"]
         if action != "ide heartbeat":
             # Any real command from the current owner refreshes its native
             # heartbeat, so a long working session does not look stale. The
             # heartbeat is a liveness signal only; it never grants a fence.
-            stored = _credential(root, platform)
-            if (isinstance(stored.get("owner_token"), str)
-                    and isinstance(stored.get("fence"), int)):
-                refreshed = _handoff_call(
-                    module, "heartbeat", root,
-                    owner_token=stored["owner_token"], fence=stored["fence"])
-                if refreshed.get("ok") and isinstance(
-                        refreshed.get("fence"), int):
-                    _remember_handoff_result(root, platform, refreshed)
-                    fence = refreshed["fence"]
+            refreshed = _handoff_call(
+                module, "heartbeat", root,
+                owner_token=stored["owner_token"], fence=stored["fence"])
+            if refreshed.get("ok") and isinstance(
+                    refreshed.get("fence"), int):
+                _remember_handoff_result(root, platform, refreshed)
+                fence = refreshed["fence"]
+            elif refreshed.get("ok") is not True:
+                raise UniversalError(
+                    "the stored owner credential is stale; do not retry a "
+                    "write without an explicit `ide status` or recovery")
         return {
             "available": True, "platform": platform, "claimed": False,
             "owner": current["owner"],
             "owner_platform": current["owner_platform"],
             "owner_id": current["owner_id"], "fence": fence,
             "active": True, "state": current_state,
-            "credential_present": bool(
-                _credential(root, platform, owner_token)),
+            "credential_present": True,
         }
     if (current.get("ok") is False
             and current_state not in ("inactive", "released")):
@@ -912,8 +935,13 @@ def _require_ide_platform(args):
     return platform
 
 
-def _ide_result(command, platform, payload, ownership, *, read_only=False):
+def _ide_result(command, platform, payload, ownership, *, read_only=False,
+                show_token=False):
     view = _owner_view(payload)
+    safe_payload = copy.deepcopy(payload)
+    if not show_token:
+        safe_payload.pop("owner_token", None)
+        safe_payload.pop("token", None)
     return {
         "command": command,
         "platform": platform,
@@ -921,7 +949,7 @@ def _ide_result(command, platform, payload, ownership, *, read_only=False):
         "ok": payload.get("ok"),
         "status": view.get("status") or payload.get("state") or "ok",
         "state": view.get("state"),
-        "result": payload,
+        "result": safe_payload,
         "owner": view["owner"] or ownership.get("owner"),
         "owner_platform": (view["owner_platform"]
                            or ownership.get("owner_platform")),
@@ -1032,7 +1060,8 @@ def ide(args) -> dict:
             {"available": True, "platform": platform,
              "owner": payload.get("owner"), "fence": payload.get("fence"),
              "credential_present": bool(payload.get("owner_token")),
-             "claimed": True})
+             "claimed": True},
+            show_token=bool(getattr(args, "show_token", False)))
     if command == "accept":
         handoff_id, digest = _resolve_handoff(args)
         if not isinstance(digest, str) or len(digest) != 64:
@@ -1054,7 +1083,8 @@ def ide(args) -> dict:
                  credential_present=bool(
                      _credential(root, platform,
                                  getattr(args, "owner_token", None)))),
-            read_only=False)
+            read_only=False,
+            show_token=bool(getattr(args, "show_token", False)))
     if command == "recover":
         evidence = None
         evidence_path = getattr(args, "evidence", None)
@@ -1104,7 +1134,9 @@ def ide(args) -> dict:
         "next_action": (getattr(args, "next_action", None)
                         or getattr(args, "summary", None)),
         "allow_dirty": bool(getattr(args, "allow_dirty", False)),
-        "confirm_idle": True if command == "prepare" else None,
+        "idle_confirmation": (
+            {"user": "user_confirmed", "owner": "owner_confirmed"}.get(
+                getattr(args, "confirm_idle", None))),
         "handoff_id": (getattr(args, "handoff", None)
                        if command == "release" else None),
         "reason": getattr(args, "reason", None),
@@ -1117,6 +1149,293 @@ def ide(args) -> dict:
     _remember_handoff_result(root, platform, payload)
     return _ide_result(command, platform, payload, ownership)
 
+
+
+# -- native verification ------------------------------------------------
+SHELL_METACHARACTERS = (";", "|", "&", "$", "`", "\n", "\r")
+REVIEW_ROLES = ("reviewer", "auditor", "challenger", "success-auditor")
+
+
+def _verification_command(value, contract, plan):
+    command = value
+    if not command and isinstance(contract, dict):
+        command = contract.get("verification_command")
+    if not command and isinstance(plan, dict):
+        command = plan.get("verification_command")
+    if not isinstance(command, str) or not command.strip():
+        raise UniversalError(
+            "native-verify needs a verification command on the contract, the "
+            "plan or --command")
+    command = command.strip()
+    if len(command) > 500 or any(char in command for char in SHELL_METACHARACTERS):
+        raise UniversalError("verification command is unsafe or too long")
+    try:
+        from tools import completion_engine
+    except ModuleNotFoundError:
+        import completion_engine  # type: ignore
+    argv = completion_engine._argv(command)
+    if not argv or not completion_engine._is_test_command(command):
+        raise UniversalError(
+            "native-verify only runs test commands; agent prose is not "
+            "verification")
+    return command, argv
+
+
+def _git_changed_paths(root):
+    try:
+        from tools import ide_handoff
+    except ModuleNotFoundError:
+        import ide_handoff  # type: ignore
+    state = ide_handoff._git_state(root)
+    return [item["path"] for item in state.get("changed_files") or []]
+
+
+def _load_native_reviews(root, run_id, task_id, commit):
+    directory = Path(root) / ".auto-orchestrator" / "reviews"
+    if directory.is_symlink() or not directory.is_dir():
+        return []
+    reviews = []
+    for path in sorted(directory.glob(f"{run_id}-{task_id}-*.json"))[-20:]:
+        if path.is_symlink() or not path.is_file():
+            continue
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(value, dict):
+            continue
+        if value.get("run_id") != run_id or value.get("task_id") != task_id:
+            continue
+        if value.get("commit") and value["commit"] != commit:
+            continue
+        reviews.append(value)
+    return reviews
+
+
+def _review_projection(reviews):
+    result = []
+    for item in reviews:
+        role = item.get("role")
+        if role in REVIEW_ROLES and item.get("verdict") in ("pass", "fail"):
+            result.append({
+                "task_id": item.get("task_id"),
+                "role": role,
+                "verdict": item["verdict"],
+                "independent": item.get("independent") is not False,
+                "commit": item.get("commit"),
+                "reviewer": item.get("reviewer"),
+                "criteria": list(item.get("criteria") or []),
+            })
+    return result
+
+
+def native_verify(args) -> dict:
+    root = _root(args.root)
+    platform = _native_platform(args)
+    run_id = _run_id(getattr(args, "run_id", None) or "")
+    task_id = _run_id(getattr(args, "task_id", None) or "")
+    ownership = _claim_ownership(root, platform, run_id=run_id,
+                                 action="run native verification")
+    try:
+        plan = teamwork_chat.load_native_plan(root, run_id)
+        approval = teamwork_chat.verify_plan_approval(root, plan, run_id)
+        contract = teamwork_chat._plan_contract(root, plan)
+    except teamwork_chat.ChatError as exc:
+        raise UniversalError(str(exc)) from exc
+    if contract is None:
+        raise UniversalError(
+            "native verification requires an approved requirements contract")
+    command, argv = _verification_command(
+        getattr(args, "verification_command", None), contract, plan)
+    timeout = getattr(args, "timeout", None) or 900
+    if type(timeout) not in (int, float) or timeout <= 0 or timeout > 3600:
+        raise UniversalError("timeout must be between 1 and 3600 seconds")
+    started = time.time()
+    changed_before = _git_changed_paths(root)
+    try:
+        process = subprocess.run(
+            argv, cwd=str(root), capture_output=True, text=True,
+            timeout=timeout, env=dict(os.environ))
+        exit_code = process.returncode
+        output = (process.stdout or "") + (process.stderr or "")
+    except subprocess.TimeoutExpired as exc:
+        exit_code = 124
+        output = (exc.stdout or "") if isinstance(exc.stdout, str) else ""
+    except OSError as exc:
+        raise UniversalError(f"verification command could not run: {exc}") from exc
+    try:
+        from tools import completion_engine
+    except ModuleNotFoundError:
+        import completion_engine  # type: ignore
+    head = completion_engine._head_sha(root)
+    if not head:
+        raise UniversalError("native verification requires a git commit")
+    passed_signals = completion_engine.parse_passed_test_signals(output)
+    all_signals = completion_engine.parse_test_signals(output)
+    changed_after = _git_changed_paths(root)
+    # The verification command itself must not become implementation evidence.
+    changed = changed_before
+    reviews = _load_native_reviews(root, run_id, task_id, head)
+    result = completion_engine.evaluate_completion(
+        root, contract, plan=plan, run_id=run_id, task_id=task_id,
+        changed_files=changed, commits=[head],
+        test_results=[{
+            "command": command,
+            "exit_code": exit_code,
+            "signals": passed_signals,
+            "all_signals": all_signals,
+            "source": "native-verify",
+        }],
+        reviews=_review_projection(reviews),
+        commit_sha=head, head_sha=head, expected_commit=head)
+    record = {
+        "version": 1,
+        "kind": "native-verification",
+        "run_id": run_id,
+        "task_id": task_id,
+        "platform": platform,
+        "owner_id": ownership.get("owner_id"),
+        "command": command,
+        "argv": argv,
+        "exit_code": exit_code,
+        "duration_seconds": round(time.time() - started, 3),
+        "commit": head,
+        "contract_id": (contract or {}).get("contract_id"),
+        "contract_version": (contract or {}).get("contract_version"),
+        "contract_sha256": (contract or {}).get("sha256"),
+        "plan_sha256": approval.get("plan_sha256"),
+        "passed_signals": passed_signals[:completion_engine.MAX_TEST_SIGNALS],
+        "observed_signals": all_signals[:completion_engine.MAX_TEST_SIGNALS],
+        "output_tail": output[-4000:],
+        "output_sha256": __import__("hashlib").sha256(
+            output.encode("utf-8", "replace")).hexdigest(),
+        "changed_files": changed,
+        "post_run_changes": sorted(set(changed_after) - set(changed_before)),
+        "reviews": _review_projection(reviews),
+        "review_count": len(reviews),
+        "result": result,
+        "verified": bool(result.get("verified_completion")),
+        "completion_recorded": False,
+        "note": ("This command ran a real test command. It does not mark the "
+                 "task complete; Supervisor acceptance and independent review "
+                 "remain separate."),
+        "recorded_at": time.time(),
+    }
+    directory = Path(root) / ".auto-orchestrator" / "verification"
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    path = directory / f"{run_id}-{task_id}-{time.time_ns()}.json"
+    atomic_write_json(path, record)
+    try:
+        from tools import project_identity
+        identity = project_identity.ensure_project_identity(root)
+        with ProjectMemory(root, identity=identity) as memory:
+            observation = memory.record_observation(
+                kind="native-verification", commit_sha=head,
+                files=changed, platform=platform,
+                test_evidence=json.dumps({
+                    "command": command,
+                    "exit_code": exit_code,
+                    "passed_signals": passed_signals[:200],
+                    "verified": record["verified"],
+                    "contract_id": record["contract_id"],
+                }, ensure_ascii=False))
+    except Exception:
+        observation = None
+    return _with_ownership({
+        "status": "verified" if record["verified"] else result.get(
+            "aggregate_status") or "needs_review",
+        "verified_completion": record["verified"],
+        "aggregate_status": result.get("aggregate_status"),
+        "run_id": run_id,
+        "task_id": task_id,
+        "command": command,
+        "exit_code": exit_code,
+        "commit": head,
+        "contract_id": record["contract_id"],
+        "contract_sha256": record["contract_sha256"],
+        "criteria": result.get("criteria"),
+        "review_count": len(reviews),
+        "evidence": str(path),
+        "observation_id": (observation or {}).get("observation_id"),
+        "completion_recorded": False,
+        "note": record["note"],
+    }, ownership)
+
+
+def native_audit(args) -> dict:
+    root = _root(args.root)
+    platform = _native_platform(args)
+    run_id = _run_id(getattr(args, "run_id", None) or "")
+    task_id = _run_id(getattr(args, "task_id", None) or "")
+    reviewer = getattr(args, "reviewer", None)
+    if not isinstance(reviewer, str) or not reviewer.strip() or len(reviewer) > 120:
+        raise UniversalError("native-audit requires a reviewer identity")
+    verdict = getattr(args, "verdict", None)
+    if verdict not in ("pass", "fail"):
+        raise UniversalError("native-audit verdict must be pass or fail")
+    role = getattr(args, "role", None) or "reviewer"
+    if role not in REVIEW_ROLES:
+        raise UniversalError("native-audit role is not supported")
+    ownership = _claim_ownership(root, platform, run_id=run_id,
+                                 action="record a native audit")
+    try:
+        plan = teamwork_chat.load_native_plan(root, run_id)
+        approval = teamwork_chat.verify_plan_approval(root, plan, run_id)
+        contract = teamwork_chat._plan_contract(root, plan)
+    except teamwork_chat.ChatError as exc:
+        raise UniversalError(str(exc)) from exc
+    try:
+        from tools import completion_engine
+    except ModuleNotFoundError:
+        import completion_engine  # type: ignore
+    head = completion_engine._head_sha(root)
+    if not head:
+        raise UniversalError("native-audit requires a git commit")
+    commit = getattr(args, "commit", None) or head
+    if not isinstance(commit, str) or commit != head:
+        raise UniversalError(
+            "native-audit must bind to the current HEAD; the code changed")
+    evidence_refs = []
+    for value in getattr(args, "evidence", None) or []:
+        path = Path(value)
+        if path.is_symlink() or not path.is_file():
+            raise UniversalError("native-audit evidence must be a regular file")
+        evidence_refs.append(str(path.resolve().relative_to(root.resolve())))
+    criteria = list(getattr(args, "criteria", None) or [])
+    record = {
+        "version": 1,
+        "run_id": run_id,
+        "task_id": task_id,
+        "role": role,
+        "reviewer": reviewer.strip(),
+        "verdict": verdict,
+        "criteria": criteria,
+        "commit": head,
+        "contract_id": (contract or {}).get("contract_id"),
+        "contract_sha256": (contract or {}).get("sha256"),
+        "plan_sha256": approval.get("plan_sha256"),
+        "evidence_refs": evidence_refs,
+        "independence": "declared_role_separation",
+        "independent": True,
+        "platform": platform,
+        "reviewed_at": time.time(),
+    }
+    directory = Path(root) / ".auto-orchestrator" / "reviews"
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    path = directory / f"{run_id}-{task_id}-{time.time_ns()}.json"
+    atomic_write_json(path, record)
+    return _with_ownership({
+        "status": "recorded",
+        "verdict": verdict,
+        "role": role,
+        "run_id": run_id,
+        "task_id": task_id,
+        "commit": head,
+        "review": str(path),
+        "independence": record["independence"],
+        "note": ("Declared role separation, not a cryptographic attestation. "
+                 "native-verify consumes this review with the real test run."),
+    }, ownership)
 
 def _validate_ttl(value):
     if value is None:
@@ -1345,6 +1664,24 @@ def main(argv=None) -> int:
     approve_p.add_argument("--run-id", required=True)
     approve_p.add_argument("--approver", required=True)
 
+    verify_p = sub.add_parser("native-verify")
+    verify_p.add_argument("--run-id", required=True)
+    verify_p.add_argument("--task-id", required=True)
+    verify_p.add_argument("--verification-command", dest="verification_command")
+    verify_p.add_argument("--timeout", type=float, default=900)
+
+    audit_p = sub.add_parser("native-audit")
+    audit_p.add_argument("--run-id", required=True)
+    audit_p.add_argument("--task-id", required=True)
+    audit_p.add_argument("--reviewer", required=True)
+    audit_p.add_argument("--verdict", required=True,
+                         choices=["pass", "fail"])
+    audit_p.add_argument("--role", default="reviewer",
+                         choices=list(REVIEW_ROLES))
+    audit_p.add_argument("--criteria", action="append")
+    audit_p.add_argument("--commit")
+    audit_p.add_argument("--evidence", action="append")
+
     report_p = sub.add_parser("native-report")
     report_p.add_argument("--run-id", required=True)
     report_p.add_argument("--task-id", required=True)
@@ -1379,6 +1716,9 @@ def main(argv=None) -> int:
     ide_activate.add_argument("--owner-token")
     ide_activate.add_argument("--ttl-seconds", type=float,
                              default=NATIVE_OWNER_TTL)
+    ide_activate.add_argument("--show-token", action="store_true",
+                              help="print the owner token; it is stored in a "
+                                   "0600 credential file otherwise")
     ide_activate.add_argument("--platform", default=argparse.SUPPRESS)
     for name in ("heartbeat", "prepare", "accept", "release", "recover"):
         ide_command = ide_sub.add_parser(name)
@@ -1393,14 +1733,21 @@ def main(argv=None) -> int:
             ide_command.add_argument("--target-platform", required=True,
                                      choices=list(NATIVE_PLATFORMS))
             ide_command.add_argument("--allow-dirty", action="store_true")
+            ide_command.add_argument("--confirm-idle", choices=["user", "owner"],
+                                     help="explicit drain acknowledgement; "
+                                          "required for prepare")
         if name == "accept":
             ide_command.add_argument("--handoff", required=True,
                                      help="handoff id or snapshot JSON path")
             ide_command.add_argument("--digest")
+            ide_command.add_argument("--show-token", action="store_true")
         if name in ("release", "recover"):
             ide_command.add_argument("--reason")
         if name == "release":
             ide_command.add_argument("--handoff")
+            ide_command.add_argument("--confirm-idle", choices=["user", "owner"],
+                                     help="explicit drain acknowledgement; a "
+                                          "prepared handoff inherits it")
         if name == "recover":
             ide_command.add_argument("--evidence")
             ide_command.add_argument("--apply", action="store_true")
@@ -1460,7 +1807,8 @@ def main(argv=None) -> int:
     try:
         action = {
             "start": start, "plan": plan, "approve-plan": approve_plan,
-            "native-report": native_report, "context": context,
+            "native-report": native_report, "native-verify": native_verify,
+            "native-audit": native_audit, "context": context,
             "handoff": handoff, "pause": pause, "grill": grill,
             "memory": memory_command, "ide": ide,
             "status": lambda a: delegate(a, "status"),

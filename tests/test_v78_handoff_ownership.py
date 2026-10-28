@@ -63,7 +63,8 @@ class StateMatrixTests(OwnershipTestBase):
         self.assertEqual(self.ownership()["owner"]["ide"], "opencode")
 
         released = handoff.release(
-            self.root, active["owner_token"], active["fence"])
+            self.root, active["owner_token"], active["fence"],
+            idle_confirmation="user_confirmed")
         self.assertTrue(released["ok"])
         self.assertEqual(released["state"], "released")
         self.assertIsNone(released["owner"])
@@ -72,11 +73,11 @@ class StateMatrixTests(OwnershipTestBase):
         self.assertTrue(again["ok"])
         self.assertEqual(again["state"], "active")
 
-    def test_prepared_handoff_requires_accept_not_activate(self):
+    def test_prepared_handoff_requires_explicit_release_before_accept(self):
         active = self.activate(session_id="source")
         prepared = handoff.prepare_handoff(
             self.root, active["owner_token"], active["fence"], "codex",
-            confirm_idle=True)
+            idle_confirmation="user_confirmed")
         self.assertTrue(prepared["ok"], prepared)
         self.assertEqual(prepared["state"], "handoff_prepared")
         self.assertEqual(prepared["handoff"]["source_fence"], active["fence"])
@@ -84,6 +85,25 @@ class StateMatrixTests(OwnershipTestBase):
         blocked = handoff.activate(self.root, "cursor", session_id="thief")
         self.assertFalse(blocked["ok"])
         self.assertEqual(blocked["status"], "conflict")
+
+        # Prepared is not released: the target must not be able to accept yet.
+        premature = handoff.accept(
+            self.root, prepared["handoff"]["handoff_id"],
+            prepared["handoff"]["digest"], "codex", session_id="target")
+        self.assertFalse(premature["ok"], premature)
+        self.assertEqual(premature["status"], "blocked")
+        self.assertEqual(premature["reasons"][0]["code"], "release_required")
+
+        # The source still owns the project and can heartbeat at this fence.
+        still_owner = handoff.heartbeat(
+            self.root, active["owner_token"], prepared["fence"])
+        self.assertTrue(still_owner["ok"], still_owner)
+
+        released = handoff.release(
+            self.root, active["owner_token"], still_owner["fence"],
+            prepared["handoff"]["handoff_id"],
+            idle_confirmation="user_confirmed")
+        self.assertTrue(released["ok"], released)
 
         accepted = handoff.accept(
             self.root, prepared["handoff"]["handoff_id"],
@@ -97,7 +117,7 @@ class StateMatrixTests(OwnershipTestBase):
         self.assertEqual(heartbeat["fence"], accepted["fence"] + 1)
 
         old_owner = handoff.heartbeat(
-            self.root, active["owner_token"], active["fence"] + 1)
+            self.root, active["owner_token"], released["fence"] - 1)
         self.assertFalse(old_owner["ok"])
         self.assertEqual(old_owner["status"], "conflict")
 
@@ -105,7 +125,7 @@ class StateMatrixTests(OwnershipTestBase):
         active = self.activate(session_id="source")
         prepared = handoff.prepare_handoff(
             self.root, active["owner_token"], active["fence"], "codex",
-            confirm_idle=True)
+            idle_confirmation="user_confirmed")
         released = handoff.release(
             self.root, active["owner_token"], prepared["fence"],
             prepared["handoff"]["handoff_id"])
@@ -131,7 +151,7 @@ class StateMatrixTests(OwnershipTestBase):
         crashed = self.activate(session_id="crash", pid=child.pid)
         prepared = handoff.prepare_handoff(
             self.root, crashed["owner_token"], crashed["fence"], "codex",
-            confirm_idle=True)
+            idle_confirmation="user_confirmed")
         child.kill()
         child.wait(timeout=10)
         escalated = handoff.recover(
@@ -144,7 +164,7 @@ class StateMatrixTests(OwnershipTestBase):
             self.root, crashed["owner_token"], prepared["fence"])["ok"])
         self.assertFalse(handoff.prepare_handoff(
             self.root, crashed["owner_token"], prepared["fence"], "codex",
-            confirm_idle=True)["ok"])
+            idle_confirmation="user_confirmed")["ok"])
         self.assertFalse(handoff.accept(
             self.root, prepared["handoff"]["handoff_id"],
             prepared["handoff"]["digest"], "codex")["ok"])
@@ -170,13 +190,13 @@ class CompareAndSwapTests(OwnershipTestBase):
 
         stale = handoff.prepare_handoff(
             self.root, active["owner_token"], active["fence"], "codex",
-            confirm_idle=True)
+            idle_confirmation="user_confirmed")
         self.assertFalse(stale["ok"])
         self.assertEqual(stale["status"], "conflict")
 
         prepared = handoff.prepare_handoff(
             self.root, active["owner_token"], beat["fence"], "codex",
-            confirm_idle=True)
+            idle_confirmation="user_confirmed")
         self.assertTrue(prepared["ok"], prepared)
 
         wrong = handoff.release(
@@ -188,14 +208,14 @@ class CompareAndSwapTests(OwnershipTestBase):
         active = self.activate(session_id="source")
         prepared = handoff.prepare_handoff(
             self.root, active["owner_token"], active["fence"], "codex",
-            next_action="continue", confirm_idle=True)
+            next_action="continue", idle_confirmation="user_confirmed")
         self.assertTrue(prepared["ok"], prepared)
         files = self.snapshot_files()
         self.assertEqual(len(files), 1)
 
         replay = handoff.prepare_handoff(
             self.root, active["owner_token"], active["fence"], "codex",
-            next_action="continue", confirm_idle=True)
+            next_action="continue", idle_confirmation="user_confirmed")
         self.assertTrue(replay["ok"])
         self.assertTrue(replay["unchanged"])
         self.assertEqual(replay["fence"], prepared["fence"])
@@ -287,7 +307,8 @@ class LivenessTests(OwnershipTestBase):
         process = self._sleeping_child()
         active = self.activate(pid=process.pid, session_id="managed")
         live = handoff.status(self.root)["liveness"]["owner"]
-        self.assertEqual(live["status"], "alive")
+        self.assertEqual(live["status"], "pid_verified")
+        self.assertTrue(live["process_verified"])
         self.assertEqual(live["reason"], "pid_verified")
 
         process.kill()
@@ -297,7 +318,7 @@ class LivenessTests(OwnershipTestBase):
 
         blocked = handoff.prepare_handoff(
             self.root, active["owner_token"], active["fence"], "codex",
-            confirm_idle=True)
+            idle_confirmation="user_confirmed")
         self.assertFalse(blocked["ok"])
         self.assertEqual(blocked["reasons"][0]["code"], "owner_not_alive")
 
@@ -322,13 +343,15 @@ class LivenessTests(OwnershipTestBase):
         self.write_ownership(record)
 
         status = handoff.status(self.root)
-        self.assertEqual(status["liveness"]["owner"]["status"], "unknown")
+        self.assertEqual(status["liveness"]["owner"]["status"],
+                         "heartbeat_stale")
+        self.assertTrue(status["liveness"]["owner"]["unknown"])
         self.assertTrue(status["liveness"]["unknown_live"])
         self.assertEqual(status["liveness"]["owner"]["reason"], "heartbeat_stale")
 
         blocked = handoff.prepare_handoff(
             self.root, active["owner_token"], active["fence"], "codex",
-            confirm_idle=True)
+            idle_confirmation="user_confirmed")
         self.assertFalse(blocked["ok"])
         self.assertEqual(blocked["reasons"][0]["code"], "liveness_unknown")
 
@@ -341,7 +364,7 @@ class LivenessTests(OwnershipTestBase):
         self.assertTrue(beat["ok"], beat)
         prepared = handoff.prepare_handoff(
             self.root, active["owner_token"], beat["fence"], "codex",
-            confirm_idle=True)
+            idle_confirmation="user_confirmed")
         self.assertTrue(prepared["ok"], prepared)
 
 

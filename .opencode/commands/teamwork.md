@@ -18,7 +18,7 @@ If the arguments are exactly one of `status`, `agents`, `milestones`, `context`,
 
 `python3.11 tools/universal_teamwork.py --root . --platform opencode <subcommand>`
 
-If the user asks for `ide status`, `ide prepare`, `ide accept` or `ide release`,
+If the user asks for `ide status`, `ide prepare --confirm-idle user`, `ide accept` or `ide release`,
 run the matching `ide` command. `ide status` and `context` are read-only. A
 mutation rejected because another IDE owns the project must not be retried from
 this session; show the owner/fence and ask the owner to hand off.

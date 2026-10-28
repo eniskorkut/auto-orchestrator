@@ -300,6 +300,12 @@ project on 2026-10-27 (macOS, Python 3.11.15). Evidence:
 | Cursor | no `cursor-agent`/`cursor` CLI on this machine | `contract-only` |
 | Antigravity | no CLI agent entry on this machine; native `/teamwork-preview` and `/grill-me` remain vendor-authoritative | `contract-only` |
 
+Native verification is separate from native self-report: `native-verify` runs
+the approved test command itself and binds the real exit code, commit, contract
+digest and run/task to the Completion Engine. `native-audit` records a
+declared-role review against the same HEAD; it is not a cryptographic
+attestation. Self-report alone stays `verified: false`.
+
 What this does **not** prove: native child liveness, a native stop
 acknowledgement, per-child supervision, Cursor/Antigravity execution, or model
 quality. Those remain exactly as described in the table above. One scripted

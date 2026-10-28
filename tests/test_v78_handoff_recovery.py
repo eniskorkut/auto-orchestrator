@@ -84,7 +84,7 @@ class RecoveryTestBase(unittest.TestCase):
     def prepare(self, active, **kwargs):
         result = handoff.prepare_handoff(
             self.root, active["owner_token"], active["fence"], "codex",
-            confirm_idle=True, **kwargs)
+            idle_confirmation="user_confirmed", **kwargs)
         self.assertTrue(result["ok"], result)
         return result
 
@@ -196,9 +196,10 @@ class UnknownLivenessTests(RecoveryTestBase):
             time.time() - record["owner"]["ttl_seconds"] - 120)
         self.write_ownership(record)
 
-        blocked = handoff.accept(
-            self.root, prepared["handoff"]["handoff_id"],
-            prepared["handoff"]["digest"], "codex")
+        blocked = handoff.release(
+            self.root, active["owner_token"], prepared["fence"],
+            prepared["handoff"]["handoff_id"],
+            idle_confirmation="user_confirmed")
         self.assertFalse(blocked["ok"])
         self.assertEqual(blocked["status"], "blocked")
         self.assertEqual(blocked["reasons"][0]["code"], "liveness_unknown")
@@ -208,7 +209,7 @@ class UnknownLivenessTests(RecoveryTestBase):
         self.assertTrue(escalated["ok"], escalated)
         self.assertEqual(escalated["state"], "recovery_required")
         self.assertEqual(self.ownership()["last_transition"]["liveness"],
-                         "unknown")
+                         "heartbeat_stale")
 
         applied = handoff.recover(
             self.root, "operator", "operator confirmed stopped",
@@ -289,12 +290,17 @@ class LeaseEvidenceTests(RecoveryTestBase):
         with project_writer_lease(self.root):
             blocked = handoff.prepare_handoff(
                 self.root, active["owner_token"], active["fence"], "codex",
-                confirm_idle=True)
+                idle_confirmation="user_confirmed")
             self.assertFalse(blocked["ok"])
             self.assertIn("lease_held",
                           [item["code"] for item in blocked["reasons"]])
 
         prepared = self.prepare(active)
+        released = handoff.release(
+            self.root, active["owner_token"], prepared["fence"],
+            prepared["handoff"]["handoff_id"],
+            idle_confirmation="user_confirmed")
+        self.assertTrue(released["ok"], released)
         with project_writer_lease(self.root):
             blocked_accept = handoff.accept(
                 self.root, prepared["handoff"]["handoff_id"],
@@ -316,7 +322,7 @@ class LeaseEvidenceTests(RecoveryTestBase):
         with runner_lease(self.root, "run-1"):
             blocked = handoff.prepare_handoff(
                 self.root, active["owner_token"], active["fence"], "codex",
-                confirm_idle=True)
+                idle_confirmation="user_confirmed")
             self.assertFalse(blocked["ok"])
             self.assertIn("lease_held",
                           [item["code"] for item in blocked["reasons"]])

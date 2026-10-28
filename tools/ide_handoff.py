@@ -52,8 +52,12 @@ STATES = frozenset({
     "inactive", "active", "handoff_prepared", "released", "transferred",
     "recovery_required", "blocked",
 })
-ACTIVE_OWNER_STATES = frozenset({"active", "transferred"})
-ACCEPT_STATES = frozenset({"handoff_prepared", "released"})
+ACTIVE_OWNER_STATES = frozenset({"active", "transferred",
+                                 "handoff_prepared"})
+# A normal accept is only possible after the source owner explicitly
+# released the project. `handoff_prepared` alone never authorizes a transfer.
+ACCEPT_STATES = frozenset({"released"})
+IDLE_CONFIRMATIONS = frozenset({"user_confirmed", "owner_confirmed"})
 
 DEFAULT_TTL_SECONDS = 14_400  # 4h native session; heartbeat refreshes it
 MAX_OWNERSHIP_BYTES = 64 * 1024
@@ -93,6 +97,7 @@ OWNER_FIELDS = frozenset({
 })
 HANDOFF_FIELDS = frozenset({
     "handoff_id", "digest", "path", "source_fence", "target_ide",
+    "idle_confirmation",
 })
 SNAPSHOT_FIELDS = frozenset({
     "version", "schema_version", "project_id", "project_uuid", "source_ide",
@@ -105,7 +110,8 @@ SNAPSHOT_FIELDS = frozenset({
     "open_question", "open_question_id", "request_hash",
     "blocking_questions", "confirmed_decision_refs", "blockers",
     "context_provenance", "context_refs", "next_action", "handoff_refs",
-    "created_at", "digest",
+    "idle_confirmation", "native_child_state", "dirty_coverage",
+    "changed_total", "changed_complete", "created_at", "digest",
 })
 CONTRACT_METADATA = frozenset({
     "sha256", "created_at", "approved_at", "status", "supersedes",
@@ -357,6 +363,8 @@ def _validate_handoff(value):
     if (not isinstance(value.get("target_ide"), str)
             or not IDE.fullmatch(value["target_ide"])):
         raise HandoffError("handoff target ide is invalid")
+    if value.get("idle_confirmation") not in IDLE_CONFIRMATIONS:
+        raise HandoffError("handoff idle confirmation is invalid")
 
 
 def _validate_previous_owner(value):
@@ -365,16 +373,11 @@ def _validate_previous_owner(value):
     if not isinstance(value, dict):
         raise HandoffError("previous_owner must be an object or null")
     fields = set(value)
-    if fields in (OWNER_FIELDS, OWNER_FIELDS | {"fence"}):
-        owner = {key: item for key, item in value.items() if key != "fence"}
-        _validate_owner(owner, "previous_owner")
-        if "fence" in value and (type(value["fence"]) is not int
-                                 or value["fence"] < 0):
-            raise HandoffError("previous_owner fence is invalid")
-        return
+    allowed = {"owner_id", "ide", "session_id", "host", "activated_at",
+               "heartbeat_at", "ttl_seconds", "fence", "token_fingerprint"}
     if not {"owner_id", "ide"} <= fields:
         raise HandoffError("previous_owner is invalid")
-    if fields - {"owner_id", "ide", "fence"}:
+    if fields - allowed:
         raise HandoffError("previous_owner has unexpected fields")
     if not isinstance(value.get("owner_id"), str) or not OWNER_ID.fullmatch(
             value["owner_id"]):
@@ -382,17 +385,49 @@ def _validate_previous_owner(value):
     if not isinstance(value.get("ide"), str) or not IDE.fullmatch(
             value["ide"]):
         raise HandoffError("previous_owner ide is invalid")
+    _validate_session(value.get("session_id"))
+    if value.get("host") is not None and (
+            not isinstance(value["host"], str) or len(value["host"]) > 255):
+        raise HandoffError("previous_owner host is invalid")
+    for key in ("activated_at", "heartbeat_at"):
+        item = value.get(key)
+        if item is not None and (isinstance(item, bool)
+                                 or not isinstance(item, (int, float))):
+            raise HandoffError(f"previous_owner {key} is invalid")
+    if value.get("ttl_seconds") is not None and (
+            type(value["ttl_seconds"]) is not int or value["ttl_seconds"] <= 0):
+        raise HandoffError("previous_owner ttl is invalid")
     if "fence" in value and (type(value["fence"]) is not int
                              or value["fence"] < 0):
         raise HandoffError("previous_owner fence is invalid")
 
 
 def _previous_owner(owner, fence):
+    """Reduced, credential-free record of the previous owner.
+
+    The owner token and PID identity are deliberately dropped: a released or
+    transferred owner must not leave a reusable credential in the record.
+    """
     if isinstance(owner, dict):
-        value = dict(owner)
-        value.setdefault("fence", fence)
-        return value
+        return {
+            "owner_id": owner.get("owner_id"),
+            "ide": owner.get("ide"),
+            "session_id": owner.get("session_id"),
+            "host": owner.get("host"),
+            "activated_at": owner.get("activated_at"),
+            "heartbeat_at": owner.get("heartbeat_at"),
+            "ttl_seconds": owner.get("ttl_seconds"),
+            "fence": fence,
+            "token_fingerprint": _token_fingerprint(owner.get("token")),
+        }
     return owner
+
+
+def _token_fingerprint(token):
+    if not isinstance(token, str) or not token:
+        return None
+    return hashlib.sha256(("auto-orchestrator-owner|" + token).encode(
+        "utf-8")).hexdigest()
 
 
 def _validate_record(record) -> dict:
@@ -579,6 +614,19 @@ def _validate_snapshot(value: dict) -> dict:
         raise HandoffError("handoff snapshot has no contract digest")
     if not ({"open_question", "open_question_id"} & set(value)):
         raise HandoffError("handoff snapshot has no open question")
+    if value.get("idle_confirmation") not in IDLE_CONFIRMATIONS:
+        raise HandoffError("handoff snapshot has no idle confirmation")
+    if value.get("native_child_state") not in (
+            "unknown", "observed_active", "observed_stopped",
+            "observed_incomplete"):
+        raise HandoffError("handoff snapshot native child state is invalid")
+    if value.get("dirty_coverage") not in ("full", "sampled", "partial"):
+        raise HandoffError("handoff snapshot dirty coverage is invalid")
+    if (type(value.get("changed_total")) is not int
+            or value["changed_total"] < 0):
+        raise HandoffError("handoff snapshot changed total is invalid")
+    if not isinstance(value.get("changed_complete"), bool):
+        raise HandoffError("handoff snapshot changed complete flag is invalid")
     if (not isinstance(value.get("project_id"), str)
             or not PROJECT_ID.fullmatch(value["project_id"])):
         raise HandoffError("snapshot project id is invalid")
@@ -630,13 +678,18 @@ def _validate_snapshot(value: dict) -> dict:
             continue
         if not isinstance(item, dict):
             raise HandoffError("snapshot changed file entry is invalid")
-        allowed = {"status", "path", "content_digest", "size", "kind"}
+        allowed = {"status", "path", "content_digest", "size", "kind",
+                   "from_path"}
         if set(item) - allowed:
             raise HandoffError("snapshot changed file entry is invalid")
         if (not isinstance(item.get("status"), str)
                 or not isinstance(item.get("path"), str)
                 or len(item["status"]) > 8 or len(item["path"]) > 1000):
             raise HandoffError("snapshot changed file entry is invalid")
+        if item.get("from_path") is not None and (
+                not isinstance(item["from_path"], str)
+                or len(item["from_path"]) > 1000):
+            raise HandoffError("snapshot changed file origin is invalid")
         content = item.get("content_digest")
         if content is not None and (not isinstance(content, str)
                                     or not SHA256.fullmatch(content)):
@@ -787,18 +840,23 @@ def _probe_lock(path: Path, *, mutation: bool):
 
 
 def _pid_liveness(owner: dict) -> tuple[str, str, dict]:
+    """Classify the owner parent session.
+
+    ``pid_verified`` is process evidence. ``heartbeat_fresh`` is only a
+    parent-session signal: it says nothing about native child idleness.
+    """
     pid_identity = owner.get("pid_identity")
     if not isinstance(pid_identity, dict):
         heartbeat = owner.get("heartbeat_at")
         ttl = owner.get("ttl_seconds")
         if isinstance(heartbeat, bool) or not isinstance(heartbeat, (int, float)):
-            return "unknown", "heartbeat_missing", {}
+            return "heartbeat_missing", "heartbeat_missing", {}
         age = max(0.0, round(time.time() - float(heartbeat), 3))
         ttl_value = int(ttl) if isinstance(ttl, (int, float)) else 0
         details = {"heartbeat_age_seconds": age, "ttl_seconds": ttl_value}
         if ttl_value and age <= ttl_value:
-            return "alive", "heartbeat_fresh", details
-        return "unknown", "heartbeat_stale", details
+            return "heartbeat_fresh", "heartbeat_fresh", details
+        return "heartbeat_stale", "heartbeat_stale", details
     pid = pid_identity.get("pid")
     if type(pid) is not int or pid <= 0:
         return "unknown", "pid_identity_invalid", {}
@@ -821,7 +879,57 @@ def _pid_liveness(owner: dict) -> tuple[str, str, dict]:
         return "dead", "pid_zombie", {"pid": pid}
     if live.get("start_token") != pid_identity.get("start_token"):
         return "dead", "pid_reused", {"pid": pid}
-    return "alive", "pid_verified", {"pid": pid}
+    return "pid_verified", "pid_verified", {"pid": pid}
+
+
+
+def _native_child_state(root: Path, run_id) -> dict:
+    """Observed native hook lifecycle, never a vendor stop acknowledgement."""
+    result = {
+        "state": "unknown",
+        "reason": "not_observable",
+        "source": "none",
+        "observed_starts": 0,
+        "observed_stops": 0,
+        "open_bindings": 0,
+        "stop_ack": False,
+    }
+    if not isinstance(run_id, str) or not RUN_ID.fullmatch(run_id):
+        return result
+    connection = _open_sqlite_readonly(_state_dir(root) / "supervisor.sqlite3")
+    if connection is None:
+        return result
+    try:
+        if "native_bindings" not in _table_names(connection):
+            return result
+        row = connection.execute(
+            "SELECT COUNT(*), COALESCE(SUM(started),0), "
+            "COALESCE(SUM(stopped),0) FROM native_bindings WHERE run_id=?",
+            (run_id,)).fetchone()
+        total, started, stopped = int(row[0]), int(row[1]), int(row[2])
+        open_bindings = int(connection.execute(
+            "SELECT COUNT(*) FROM native_bindings WHERE run_id=? "
+            "AND started=1 AND stopped=0", (run_id,)).fetchone()[0])
+        result.update({
+            "observed_starts": started,
+            "observed_stops": stopped,
+            "open_bindings": open_bindings,
+            "source": "supervisor.native_bindings",
+        })
+        if open_bindings:
+            result["state"] = "observed_active"
+            result["reason"] = "open_native_binding"
+        elif total and started == total and stopped == total:
+            result["state"] = "observed_stopped"
+            result["reason"] = "hook_pair_complete"
+        elif total:
+            result["state"] = "observed_incomplete"
+            result["reason"] = "hook_pair_incomplete"
+    except sqlite3.Error:
+        result["reason"] = "native_state_unreadable"
+    finally:
+        connection.close()
+    return result
 
 
 def _liveness(root: Path, record: dict, *, mutation=False) -> dict:
@@ -858,9 +966,15 @@ def _liveness(root: Path, record: dict, *, mutation=False) -> dict:
             "heartbeat_fresh": age <= int(ttl),
             "expired": age > int(ttl),
         }
-    if owner_status == "alive":
+    owner_alive = owner_status in ("pid_verified", "heartbeat_fresh")
+    if owner_status == "pid_verified":
         reasons.append(_reason(owner_reason, "owner process is verified alive",
                                source="owner", **details))
+    elif owner_status == "heartbeat_fresh":
+        reasons.append(_reason(
+            owner_reason,
+            "owner heartbeat is fresh; this is not proof that native children "
+            "are idle or stopped", source="owner", **details))
     elif owner_status == "dead":
         reasons.append(_reason(owner_reason, "owner process is not alive",
                                source="owner", **details))
@@ -883,19 +997,37 @@ def _liveness(root: Path, record: dict, *, mutation=False) -> dict:
                                "the managed runner lease cannot be verified",
                                run_id=run_id))
     leases_held = writer is True or runner is True
-    unknown_live = (owner_status == "unknown" or writer is None or runner is None
-                    or (leases_held and owner_status != "alive"))
+    uncertain_owner = owner_status in (
+        "heartbeat_stale", "heartbeat_missing", "unknown", "host_unknown",
+        "pid_unverified", "pid_identity_unavailable")
+    unknown_live = (uncertain_owner or writer is None or runner is None
+                    or (leases_held and not owner_alive))
+    transition = record.get("last_transition") or {}
+    idle_confirmation = transition.get("idle_confirmation")
+    if idle_confirmation not in IDLE_CONFIRMATIONS:
+        idle_confirmation = None
     return {
         "owner": {"status": owner_status, "reason": owner_reason,
-                  "alive": owner_status == "alive",
+                  "alive": owner_alive,
+                  "process_verified": owner_status == "pid_verified",
+                  "heartbeat_only": owner_status == "heartbeat_fresh",
                   "dead": owner_status == "dead",
-                  "unknown": owner_status == "unknown",
+                  "unknown": owner_status in (
+                      "unknown", "heartbeat_stale", "heartbeat_missing",
+                      "host_unknown", "pid_unverified",
+                      "pid_identity_unavailable"),
                   **details, **heartbeat_details},
         "leases": {
             "project_writer": writer,
             "runner": runner,
             "run_id": run_id,
             "held": leases_held,
+        },
+        "native_children": _native_child_state(root, run_id),
+        "idle": {
+            "confirmed": idle_confirmation is not None,
+            "source": idle_confirmation,
+            "transition": transition.get("op"),
         },
         "unknown_live": bool(unknown_live),
         "reasons": reasons,
@@ -1005,25 +1137,43 @@ def _git_state(root: Path) -> dict:
                 continue
             status = text[:2]
             path = text[3:]
+            from_path = None
             if status[0] in ("R", "C") and index < len(parts):
+                from_path = parts[index].decode(
+                    "utf-8", "replace").replace("\\", "/")
                 index += 1
             path = path.replace("\\", "/")
             if _excluded_path(path):
                 continue
             evidence, used = _content_evidence(root, path, budget)
             budget -= used
-            entries.append({
+            entry = {
                 "status": status,
                 "path": path,
                 **evidence,
-            })
+            }
+            if from_path:
+                entry["from_path"] = from_path
+            entries.append(entry)
     entries.sort(key=lambda item: (item["path"], item["status"]))
+    kinds = {str(item.get("kind")) for item in entries}
+    if kinds & {"budget", "other", "unreadable", "invalid"}:
+        coverage = "partial"
+    elif "large" in kinds:
+        coverage = "sampled"
+    else:
+        coverage = "full"
+    if len(entries) > MAX_CHANGED_FILES:
+        coverage = "partial"
     return {
         "branch": branch or None,
         "head": head or None,
         "dirty": bool(entries),
         "dirty_digest": _canonical_digest(entries),
         "changed_files": entries[:MAX_CHANGED_FILES],
+        "changed_total": len(entries),
+        "changed_complete": len(entries) <= MAX_CHANGED_FILES,
+        "dirty_coverage": coverage,
     }
 
 
@@ -1485,7 +1635,8 @@ def _project_facts(root: Path, identity: dict, *, git=None) -> dict:
 
 
 def _build_snapshot(identity: dict, owner: dict, target_ide: str, facts: dict,
-                    next_action, handoff_refs) -> dict:
+                    next_action, handoff_refs, *, idle_confirmation=None,
+                    native_child_state=None) -> dict:
     run = facts["run"]
     contract = facts["contract"]
     memory = facts["memory"]
@@ -1539,6 +1690,14 @@ def _build_snapshot(identity: dict, owner: dict, target_ide: str, facts: dict,
         "context_refs": list(facts.get("context_refs") or [])[:20],
         "next_action": _safe_text(next_action, 2000) or None,
         "handoff_refs": list(handoff_refs or [])[:20],
+        "idle_confirmation": idle_confirmation,
+        "native_child_state": (
+            (native_child_state or {}).get("state")
+            if isinstance(native_child_state, dict)
+            else (native_child_state or "unknown")),
+        "dirty_coverage": git.get("dirty_coverage") or "partial",
+        "changed_total": int(git.get("changed_total") or 0),
+        "changed_complete": bool(git.get("changed_complete")),
         "created_at": time.time(),
     }
     snapshot["digest"] = _canonical_digest(snapshot)
@@ -1670,6 +1829,11 @@ def status(root) -> dict:
                 "contract_id": loaded.get("contract_id"),
                 "contract_sha256": loaded.get("contract_sha256"),
                 "interview_id": loaded.get("interview_id"),
+                "idle_confirmation": loaded.get("idle_confirmation"),
+                "native_child_state": loaded.get("native_child_state"),
+                "dirty_coverage": loaded.get("dirty_coverage"),
+                "changed_total": loaded.get("changed_total"),
+                "changed_complete": loaded.get("changed_complete"),
             }
         except HandoffError as exc:
             snapshot = {"error": str(exc)}
@@ -1850,11 +2014,14 @@ def heartbeat(root, owner_token, fence) -> dict:
 
 
 def prepare_handoff(root, owner_token, fence, target_ide, next_action=None,
-                    allow_dirty=False, confirm_idle=False) -> dict:
+                    allow_dirty=False, confirm_idle=False,
+                    idle_confirmation=None) -> dict:
     root = _root(root)
     owner_token = _validate_token(owner_token)
     fence = _validate_fence(fence)
     target_ide = _validate_ide(target_ide)
+    if idle_confirmation is not None and idle_confirmation not in IDLE_CONFIRMATIONS:
+        raise HandoffError("idle_confirmation must be user_confirmed or owner_confirmed")
     if next_action is not None:
         if not isinstance(next_action, str) or len(next_action) > 4000:
             raise HandoffError("next_action is invalid")
@@ -1886,6 +2053,11 @@ def prepare_handoff(root, owner_token, fence, target_ide, next_action=None,
                 or record["fence"] != fence):
             return _conflict(record, "stale_fence_or_token",
                              "owner token and fence do not match")
+        if record["state"] == "handoff_prepared":
+            return _conflict(
+                record, "handoff_already_prepared",
+                "a handoff is already prepared; release it or recover before "
+                "preparing another", current_state=record["state"])
         if record["state"] not in ACTIVE_OWNER_STATES:
             return _conflict(record, "state_not_preparable",
                              "ownership is not active",
@@ -1895,16 +2067,26 @@ def prepare_handoff(root, owner_token, fence, target_ide, next_action=None,
             return _blocked(record, "owner_not_alive",
                             "the owner process is not alive; use recovery",
                             liveness=live["owner"])
-        if live["owner"]["status"] != "alive" or live["unknown_live"]:
+        if not live["owner"]["alive"] or live["unknown_live"]:
             return _blocked(record, "liveness_unknown",
                             "owner liveness cannot be determined",
                             liveness=live["owner"])
         if live["leases"]["held"]:
             return _blocked(record, "lease_held",
                             "a managed writer or runner lease is active")
-        if not confirm_idle:
-            return _blocked(record, "idle_not_confirmed",
-                            "prepare requires confirm_idle=True")
+        if idle_confirmation not in IDLE_CONFIRMATIONS:
+            return _blocked(
+                record, "idle_not_confirmed",
+                "prepare requires an explicit --confirm-idle user|owner; a "
+                "fresh heartbeat is not proof that native children are idle")
+        children = live["native_children"]
+        if (children.get("state") == "observed_active"
+                and idle_confirmation != "user_confirmed"):
+            return _blocked(
+                record, "native_child_active",
+                "an observed native child binding is still open; confirm the "
+                "drain explicitly as the user before transferring",
+                native_children=children)
         git = _git_state(root)
         if git["dirty"] and not allow_dirty:
             return _blocked(record, "dirty_worktree",
@@ -1913,7 +2095,9 @@ def prepare_handoff(root, owner_token, fence, target_ide, next_action=None,
         try:
             snapshot = _build_snapshot(
                 identity, owner, target_ide, facts, next_action,
-                facts.get("handoff_refs") or [])
+                facts.get("handoff_refs") or [],
+                idle_confirmation=idle_confirmation,
+                native_child_state=children)
         except HandoffError as exc:
             return _blocked(record, "snapshot_invalid", str(exc))
         snapshot_digest = snapshot["digest"]
@@ -1939,6 +2123,7 @@ def prepare_handoff(root, owner_token, fence, target_ide, next_action=None,
                 "path": relative,
                 "source_fence": fence,
                 "target_ide": target_ide,
+                "idle_confirmation": idle_confirmation,
             },
             "last_transition": {
                 "op": "prepare_handoff",
@@ -1954,6 +2139,9 @@ def prepare_handoff(root, owner_token, fence, target_ide, next_action=None,
                 "target_ide": target_ide,
                 "handoff_id": handoff_id,
                 "dirty": bool(git["dirty"]),
+                "idle_confirmation": idle_confirmation,
+                "native_child_state": children.get("state"),
+                "native_stop_ack": False,
             },
             "native_cancel_ack": False,
             "stop_ack": False,
@@ -1983,10 +2171,13 @@ def prepare_handoff(root, owner_token, fence, target_ide, next_action=None,
         return result
 
 
-def release(root, owner_token, fence, handoff_id=None) -> dict:
+def release(root, owner_token, fence, handoff_id=None,
+            idle_confirmation=None) -> dict:
     root = _root(root)
     owner_token = _validate_token(owner_token)
     fence = _validate_fence(fence)
+    if idle_confirmation is not None and idle_confirmation not in IDLE_CONFIRMATIONS:
+        raise HandoffError("idle_confirmation must be user_confirmed or owner_confirmed")
     if handoff_id is not None:
         handoff_id = _validate_handoff_id(handoff_id)
     _check_state_dir(root)
@@ -2004,7 +2195,8 @@ def release(root, owner_token, fence, handoff_id=None) -> dict:
                               if isinstance(current_handoff, dict) else None)
         if (record["state"] == "released"
                 and isinstance(previous, dict)
-                and previous.get("token") == owner_token
+                and previous.get("token_fingerprint")
+                == _token_fingerprint(owner_token)
                 and transition.get("op") == "release"
                 and transition.get("from_fence") == fence
                 and (handoff_id is None or current_handoff_id == handoff_id)):
@@ -2021,10 +2213,24 @@ def release(root, owner_token, fence, handoff_id=None) -> dict:
             return _conflict(record, "handoff_mismatch",
                              "handoff id does not match the prepared handoff")
         live = _liveness(root, record, mutation=True)
-        if (live["leases"]["held"]
-                and live["owner"]["status"] != "alive"):
-            return _blocked(record, "lease_held",
-                            "an unrelated managed writer lease is active")
+        if live["leases"]["held"]:
+            return _blocked(
+                record, "lease_held",
+                "a managed writer or runner lease is active; finish or cancel "
+                "it before releasing ownership")
+        if not live["owner"]["alive"] or live["unknown_live"]:
+            return _blocked(
+                record, "liveness_unknown",
+                "owner liveness cannot be determined; refresh the heartbeat or "
+                "use recovery before releasing", liveness=live["owner"])
+        if idle_confirmation is None and isinstance(current_handoff, dict):
+            previous_idle = current_handoff.get("idle_confirmation")
+            if previous_idle in IDLE_CONFIRMATIONS:
+                idle_confirmation = previous_idle
+        if idle_confirmation not in IDLE_CONFIRMATIONS:
+            return _blocked(
+                record, "idle_not_confirmed",
+                "release requires an explicit --confirm-idle user|owner")
         now = time.time()
         updated = {
             **record,
@@ -2044,6 +2250,8 @@ def release(root, owner_token, fence, handoff_id=None) -> dict:
                 "from_fence": fence,
                 "to_fence": fence + 1,
                 "handoff_id": current_handoff_id,
+                "idle_confirmation": idle_confirmation,
+                "native_stop_ack": False,
             },
             "native_cancel_ack": False,
             "stop_ack": False,
@@ -2096,12 +2304,13 @@ def _accept_mismatch_reasons(snapshot: dict, identity, git: dict,
     handoff = record.get("handoff") or {}
     source_fence = handoff.get("source_fence")
     transition = record.get("last_transition") or {}
-    if record["state"] == "handoff_prepared":
-        valid_generation = record["fence"] == source_fence + 1
-    elif record["state"] == "released":
+    if record["state"] == "released":
         valid_generation = (
-            record["fence"] >= source_fence + 2
+            isinstance(source_fence, int)
+            and record["fence"] >= source_fence + 2
             and transition.get("to_fence") == record["fence"]
+            and isinstance(transition.get("from_fence"), int)
+            and transition["from_fence"] >= source_fence + 1
             and transition.get("op") in ("release", "recover_apply"))
     else:
         valid_generation = False
@@ -2146,16 +2355,36 @@ def accept(root, handoff_id, digest, ide, session_id=None) -> dict:
                     and (session_id is None
                          or owner.get("session_id") == session_id))
             if same:
-                return _result(record, ok=True, unchanged=True)
+                # Idempotent replay. Only the same recorded session gets the
+                # token again, so a crashed CLI can recover its credential
+                # without handing the token to an arbitrary caller.
+                replay_token = None
+                if (session_id is not None
+                        and owner.get("session_id") == session_id):
+                    replay_token = owner.get("token")
+                return _result(record, ok=True, unchanged=True,
+                               owner_token=replay_token)
             return _conflict(record, "already_transferred",
                              "ownership was already transferred")
-        if record["state"] not in ACCEPT_STATES:
-            return _blocked(record, "accept_not_allowed",
-                            "handoff cannot be accepted in this state",
-                            current_state=record["state"])
+        if record["state"] != "released":
+            return _blocked(
+                record, "release_required",
+                "a handoff can only be accepted after the source owner "
+                "explicitly released ownership; handoff_prepared is not "
+                "sufficient", current_state=record["state"])
         if not isinstance(current_handoff, dict):
             return _blocked(record, "handoff_missing",
                             "no prepared handoff is recorded")
+        transition = record.get("last_transition") or {}
+        source_fence = current_handoff.get("source_fence")
+        if (transition.get("op") not in ("release", "recover_apply")
+                or transition.get("to_fence") != record.get("fence")
+                or not isinstance(source_fence, int)
+                or not isinstance(transition.get("from_fence"), int)
+                or transition["from_fence"] < source_fence + 1):
+            return _blocked(
+                record, "release_required",
+                "ownership was not released by the recorded source owner")
         if (current_handoff_id != handoff_id
                 or current_handoff.get("digest") != digest):
             return _blocked(record, "handoff_mismatch",
@@ -2175,6 +2404,10 @@ def accept(root, handoff_id, digest, ide, session_id=None) -> dict:
         if snapshot["target_ide"] != ide:
             return _blocked(record, "target_ide_mismatch",
                             "handoff target does not match the accepting IDE")
+        if snapshot.get("idle_confirmation") not in IDLE_CONFIRMATIONS:
+            return _blocked(
+                record, "idle_not_confirmed",
+                "handoff snapshot has no explicit idle confirmation")
         expected_path = _relative(root, _snapshot_path(root, handoff_id))
         if current_handoff.get("path") != expected_path:
             return _blocked(record, "handoff_path_mismatch",
@@ -2388,7 +2621,7 @@ def recover(root, actor, reason, evidence=None, apply=False,
             if evidence_value is None:
                 raise HandoffError(
                     "explicit recovery evidence is required for apply")
-            if live["owner"]["status"] == "alive" and state != "recovery_required":
+            if live["owner"]["alive"] and state != "recovery_required":
                 return _conflict(record, "owner_alive",
                                  "owner is alive; recovery is not required")
             now = time.time()
@@ -2433,7 +2666,7 @@ def recover(root, actor, reason, evidence=None, apply=False,
         if state == "recovery_required":
             return _result(record, ok=True, unchanged=True,
                            status="recovery_required")
-        if live["owner"]["status"] == "alive":
+        if live["owner"]["alive"]:
             return _conflict(record, "owner_alive",
                              "owner is alive; recovery is not required")
         now = time.time()

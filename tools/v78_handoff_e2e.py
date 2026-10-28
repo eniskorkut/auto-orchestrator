@@ -147,7 +147,8 @@ def snapshot(root: Path, handoff_id: str) -> dict:
 def prepare_and_accept(root: Path, source: str, target: str, *, next_action=None,
                        allow_dirty=False) -> dict:
     args = ["ide", "prepare", "--target-platform", target,
-            "--summary", f"handoff {source} to {target}"]
+            "--summary", f"handoff {source} to {target}",
+            "--confirm-idle", "user"]
     if next_action:
         args += ["--next-action", next_action]
     if allow_dirty:
@@ -447,7 +448,8 @@ def scenario_dirty(base: Path) -> dict:
         "# Demo project\n\nEdited but not committed.\n", encoding="utf-8")
     (root / "feature.py").write_text("VALUE = 1\n", encoding="utf-8")
     prepared = run_cli(root, "codex", "ide", "prepare", "--target-platform",
-                       "opencode", "--allow-dirty", "--next-action",
+                       "opencode", "--allow-dirty", "--confirm-idle", "user",
+                       "--next-action",
                        "Commit the edited README and finish feature.py")["payload"]
     handoff = (prepared.get("result") or {}).get("handoff") or {}
     check(handoff.get("handoff_id"), "dirty prepare returned no handoff")
@@ -475,7 +477,8 @@ def scenario_drift(base: Path) -> dict:
     started = time.time()
     run_cli(root, "codex", "ide", "activate")
     prepared = run_cli(root, "codex", "ide", "prepare", "--target-platform",
-                       "opencode", "--summary", "drift test")["payload"]
+                       "opencode", "--summary", "drift test",
+                       "--confirm-idle", "user")["payload"]
     handoff = (prepared.get("result") or {}).get("handoff") or {}
     run_cli(root, "codex", "ide", "release", "--handoff",
             handoff["handoff_id"])
@@ -511,8 +514,17 @@ def scenario_recovery(base: Path) -> dict:
     root = new_project(base, "recovery")
     started = time.time()
     activated = run_cli(root, "codex", "ide", "activate")["payload"]
-    token = (activated.get("result") or {}).get("owner_token")
-    check(token, "activation returned no owner token")
+    check("owner_token" not in (activated.get("result") or {}),
+          "activation printed the owner token by default")
+    credential_path = (root / ".auto-orchestrator" / "teamwork" /
+                       "ide-owner-codex.json")
+    check(credential_path.is_file(), "activation did not store a credential")
+    credential = json.loads(credential_path.read_text(encoding="utf-8"))
+    check(bool(credential.get("owner_token")),
+          "stored credential has no owner token")
+    if os.name == "posix":
+        check((credential_path.stat().st_mode & 0o777) == 0o600,
+              "credential file is not 0600")
     path = root / ".auto-orchestrator" / "ide" / "ownership.json"
     record = json.loads(path.read_text(encoding="utf-8"))
     record["owner"]["heartbeat_at"] = time.time() - record["owner"]["ttl_seconds"] - 300
@@ -521,8 +533,10 @@ def scenario_recovery(base: Path) -> dict:
     status = run_cli(root, "codex", "ide", "status")["payload"]
     liveness = status.get("result", {}).get("liveness") or status.get("liveness") or {}
     owner = (liveness.get("owner") or {})
-    check(owner.get("status") == "unknown",
-          f"stale heartbeat must be unknown, got {owner.get('status')}")
+    check(owner.get("status") in ("heartbeat_stale", "unknown"),
+          f"stale heartbeat must be unverifiable, got {owner.get('status')}")
+    check(owner.get("unknown") is True,
+          "stale heartbeat was not marked unknown")
     check(owner.get("expired") is True, "stale heartbeat was not reported expired")
 
     takeover = run_cli(root, "opencode", "ide", "activate", expect=1)

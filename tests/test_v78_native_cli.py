@@ -68,11 +68,12 @@ class FakeHandoff:
         return self._result()
 
     def prepare_handoff(self, root, owner_token, fence, target_ide,
-                        next_action=None, allow_dirty=False, confirm_idle=False):
+                        next_action=None, allow_dirty=False, confirm_idle=False,
+                        idle_confirmation=None):
         self.calls.append(("prepare", target_ide))
         if owner_token != self.token or fence != self.fence:
             return self._result(ok=False, status="conflict")
-        if not confirm_idle:
+        if idle_confirmation not in ("user_confirmed", "owner_confirmed"):
             return self._result(ok=False, status="blocked")
         self.fence += 1
         self.state = "handoff_prepared"
@@ -81,10 +82,12 @@ class FakeHandoff:
             "digest": secrets.token_hex(32),
             "source_fence": fence,
             "target_ide": target_ide,
+            "idle_confirmation": idle_confirmation,
         }
         return self._result()
 
-    def release(self, root, owner_token, fence, handoff_id=None):
+    def release(self, root, owner_token, fence, handoff_id=None,
+                idle_confirmation=None):
         self.calls.append(("release", fence))
         if owner_token != self.token or fence != self.fence:
             return self._result(ok=False, status="conflict")
@@ -271,7 +274,7 @@ class NativeCliTests(unittest.TestCase):
         self.assertEqual(activated["status"], "active")
         prepared = run("ide", "prepare", "--target-platform", "opencode",
                        "--summary", "continue in opencode", "--owner-id",
-                       "source")
+                       "source", "--confirm-idle", "user")
         self.assertEqual(prepared["status"], "handoff_prepared")
         handoff = prepared["result"]["handoff"]
         released = run("ide", "release", "--handoff",
@@ -439,7 +442,8 @@ class RealHandoffCliTests(unittest.TestCase):
             "active")
         prepared = self._run(
             "codex", "ide", "prepare", "--target-platform", "opencode",
-            "--summary", "continue", "--owner-id", "source")
+            "--summary", "continue", "--owner-id", "source",
+            "--confirm-idle", "user")
         handoff = prepared["result"]["handoff"]
         self.assertEqual(prepared["status"], "handoff_prepared")
         released = self._run(

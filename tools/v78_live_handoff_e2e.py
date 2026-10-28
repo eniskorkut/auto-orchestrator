@@ -278,7 +278,8 @@ def scenario(base: Path, *, timeout: int, steps: list) -> dict:
 
     def handoff_to_opencode():
         prepared = run_cli(root, "codex", "ide", "prepare", "--target-platform",
-                           "opencode", "--allow-dirty", "--summary",
+                           "opencode", "--allow-dirty", "--confirm-idle",
+                           "user", "--summary",
                            "Codex finished its part; continue the README task",
                            "--next-action",
                            f"Write the handoff marker {next_action} to "
@@ -345,7 +346,7 @@ def scenario(base: Path, *, timeout: int, steps: list) -> dict:
     def handoff_back():
         prepared = run_cli(root, "opencode", "ide", "prepare",
                            "--target-platform", "codex", "--allow-dirty",
-                           "--summary",
+                           "--confirm-idle", "user", "--summary",
                            "OpenCode continued the task; finish in Codex",
                            "--next-action",
                            f"Write the final marker {final_action} to "

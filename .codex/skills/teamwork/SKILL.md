@@ -97,19 +97,23 @@ Only one IDE owns write authority at a time. Read-only `context`, `status` and
    ```bash
    python3.11 tools/universal_teamwork.py --root . --platform codex \
      ide prepare --target-platform <opencode|cursor|antigravity> \
-     --summary "<next action>"
+     --confirm-idle user --summary "<next action>"
    ```
 
-   `ide prepare` requires a clean, idle worktree by default; pass
-   `--allow-dirty` only when the uncommitted work is intentional. It does not
-   start the target IDE.
+   `ide prepare` requires an explicit drain acknowledgement (`--confirm-idle
+   user|owner`) and a clean worktree by default. A fresh heartbeat is not
+   proof that native children are idle. Pass `--allow-dirty` only when the
+   uncommitted work is intentional. It does not start the target IDE.
 
 2. Release only after the handoff snapshot exists:
 
    ```bash
    python3.11 tools/universal_teamwork.py --root . --platform codex \
-     ide release --handoff <handoff_id>
+     ide release --handoff <handoff_id> --confirm-idle user
    ```
+
+   An accept is only valid after this release. `handoff_prepared` alone never
+   authorizes a transfer.
 
 3. The target IDE accepts the exact snapshot digest:
 
