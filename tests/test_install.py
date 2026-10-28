@@ -3,7 +3,8 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from tools.install import install, uninstall, Conflict, START, END, MANIFEST_RELATIVE
+from tools.install import (Conflict, END, MANIFEST_RELATIVE, START,
+                           V78_MODULES, install, uninstall)
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -27,6 +28,11 @@ class InstallerTests(unittest.TestCase):
         self.assertTrue((self.dest/'.codex/agents/auto_tester.toml').exists())
         self.assertTrue((self.dest/'.codex/agents/auto_planner.toml').exists())
         self.assertTrue((self.dest/'.cursor/agents/auto_planner.md').exists())
+        for role in ('planner', 'implementer', 'tester', 'reviewer'):
+            self.assertTrue(
+                (self.dest/f'.cursor/agents/auto_{role}.md').is_file(), role)
+            self.assertTrue(
+                (self.dest/f'.agents/agents/auto_{role}.md').is_file(), role)
         self.assertTrue((self.dest/'.codex/skills/teamwork/SKILL.md').exists())
         self.assertTrue((self.dest/'.opencode/skills/teamwork/SKILL.md').exists())
         self.assertTrue((self.dest/'tools/perf.py').exists())
@@ -134,6 +140,86 @@ class InstallerTests(unittest.TestCase):
         user_file.write_text('user notes')
         self.assertEqual(uninstall(self.dest), [])
         self.assertEqual(user_file.read_text(), 'user notes')
+
+    def test_v78_handoff_module_is_shipped_when_present(self):
+        self.call('opencode')
+        tools_dir = self.dest / 'tools'
+        for name in V78_MODULES:
+            source = ROOT / 'tools' / name
+            if source.is_file():
+                self.assertEqual((tools_dir / name).read_bytes(),
+                                 source.read_bytes(), name)
+            else:
+                self.assertFalse((tools_dir / name).exists(), name)
+        manifest = json.loads(
+            (self.dest / MANIFEST_RELATIVE).read_text(encoding='utf-8'))
+        for name in V78_MODULES:
+            relative = f'tools/{name}'
+            if (ROOT / 'tools' / name).is_file():
+                self.assertIn(relative, manifest['files'])
+
+    def test_v78_handoff_module_upgrades_with_manifest_ownership(self):
+        source = ROOT / 'tools' / 'ide_handoff.py'
+        self.call('opencode')
+        module = self.dest / 'tools' / 'ide_handoff.py'
+        if not source.is_file():
+            self.assertFalse(module.exists())
+            return
+        module.write_text('old generated handoff module', encoding='utf-8')
+        manifest_path = self.dest / MANIFEST_RELATIVE
+        manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+        manifest['files']['tools/ide_handoff.py'] = hashlib.sha256(
+            module.read_bytes()).hexdigest()
+        manifest_path.write_text(json.dumps(manifest), encoding='utf-8')
+        results = dict(self.call('opencode'))
+        self.assertEqual(results['tools/ide_handoff.py'], 'updated')
+        self.assertEqual(module.read_bytes(), source.read_bytes())
+        self.assertTrue(module.with_name('ide_handoff.py.bak').is_file())
+
+    def test_reinstall_preserves_user_memory_hooks_and_untracked_tools(self):
+        memory = self.dest / '.auto-orchestrator' / 'memory.sqlite3'
+        memory.parent.mkdir(parents=True)
+        memory.write_bytes(b'user memory placeholder')
+        user_tool = self.dest / 'tools' / 'my_helper.py'
+        user_tool.parent.mkdir(parents=True)
+        user_tool.write_text('print("mine")\n', encoding='utf-8')
+        cursor_hooks = self.dest / '.cursor' / 'hooks.json'
+        cursor_hooks.parent.mkdir(parents=True)
+        cursor_hooks.write_text('{"mine": true}\n', encoding='utf-8')
+        with self.assertRaises(Conflict):
+            self.call('cursor')
+        self.assertEqual(cursor_hooks.read_text(encoding='utf-8'),
+                         '{"mine": true}\n')
+        self.assertEqual(memory.read_bytes(), b'user memory placeholder')
+        self.assertEqual(user_tool.read_text(encoding='utf-8'),
+                         'print("mine")\n')
+        # A different platform can install without touching another
+        # platform's user-owned hooks or the shared memory file.
+        self.call('opencode')
+        self.assertEqual(cursor_hooks.read_text(encoding='utf-8'),
+                         '{"mine": true}\n')
+        self.assertEqual(memory.read_bytes(), b'user memory placeholder')
+        uninstall(self.dest)
+        self.assertEqual(memory.read_bytes(), b'user memory placeholder')
+        self.assertEqual(user_tool.read_text(encoding='utf-8'),
+                         'print("mine")\n')
+        self.assertEqual(cursor_hooks.read_text(encoding='utf-8'),
+                         '{"mine": true}\n')
+
+    def test_v78_obsolete_agent_file_is_pruned_only_when_managed(self):
+        self.call('cursor')
+        obsolete = self.dest / '.cursor' / 'agents' / 'old_v78_role.md'
+        obsolete.write_text('old generated role\n', encoding='utf-8')
+        manifest_path = self.dest / MANIFEST_RELATIVE
+        manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+        manifest['files']['.cursor/agents/old_v78_role.md'] = hashlib.sha256(
+            obsolete.read_bytes()).hexdigest()
+        manifest['created'].append('.cursor/agents/old_v78_role.md')
+        manifest_path.write_text(json.dumps(manifest), encoding='utf-8')
+        results = dict(self.call('cursor'))
+        self.assertEqual(results['.cursor/agents/old_v78_role.md'],
+                         'removed-obsolete')
+        self.assertFalse(obsolete.exists())
 
     def test_manifest_upgrade_replaces_untouched_generated_module(self):
         self.call('opencode')

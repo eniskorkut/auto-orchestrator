@@ -7,7 +7,8 @@ deliberately narrower than vendor marketing: a mark that a native client can
 spawn an agent does **not** mean an external orchestrator can spawn one, and a
 tool-call completion is not a child stop. The `teamwork_entry` section describes
 shipped entry files and native surfaces; it is not proof that a client loaded
-them or that a session was bound.
+them or that a session was bound. The `ide_ownership` section describes only
+local ownership/handoff coordination, not a native connection.
 
 Run ``python tools/capabilities.py show`` for a human-readable view or
 ``python tools/capabilities.py show --json`` for the exact machine-readable
@@ -182,6 +183,8 @@ TEAMWORK_ENTRY = {
             "native /teamwork-preview",
             "native /grill-me",
             ".agents/skills/ao-grill-me/SKILL.md",
+            ".agents/agents/*.md",
+            ".gemini/config/agents/*/agent.md",
             "universal_teamwork.py",
         ],
         "slash_commands": ["/teamwork-preview", "/grill-me"],
@@ -258,6 +261,103 @@ TEAMWORK_ENTRY_DISCLAIMER = (
     "surfaces. They do not prove that a client loaded the entry point, spawned "
     "an agent, bound a native session, cancelled it or resumed it."
 )
+
+# -- V7.8 IDE ownership --------------------------------------------------
+# Ownership is a local coordination record shared through project files. It
+# does not create a native child, does not attach to a native session and is
+# never a second supervisor. Cursor and Antigravity remain contract-only:
+# their native parent owns dispatch and permissions.
+IDE_OWNERSHIP_FIELDS = ("native_execution", "native_child_liveness",
+                        "stop_ack")
+
+IDE_OWNERSHIP_DESCRIPTION = (
+    "Per-client truth for local IDE ownership and handoff. A local ownership "
+    "file, fence or generation is coordination metadata, not a native "
+    "connection claim. No platform starts a second supervisor."
+)
+
+IDE_OWNERSHIP_DISCLAIMER = (
+    "IDE ownership describes what this repository can observe and record "
+    "locally. It does not prove that a native IDE is connected, that a child "
+    "is alive, that a stop was acknowledged by the client or that a handoff "
+    "completed inside the IDE."
+)
+
+IDE_OWNERSHIP = {
+    "schema_version": 1,
+    "description": IDE_OWNERSHIP_DESCRIPTION,
+    "disclaimer": IDE_OWNERSHIP_DISCLAIMER,
+    "fields": list(IDE_OWNERSHIP_FIELDS),
+    "ownership_transport": "local-project-file",
+    "owner_identity": "host-and-session-hash-only",
+    "owner_token_exposed": False,
+    "snapshots": "metadata-only",
+    "platforms": {
+        "codex": {
+            "native_execution": "observed-hook",
+            "native_child_liveness": "hook-pair-conditional",
+            "stop_ack": False,
+            "stop_ack_evidence": "observed-hook-pair",
+            "second_supervisor": False,
+            "native_lock": False,
+            "contract_only": False,
+            "connection_claimed": False,
+            "note": (
+                "SubagentStart/SubagentStop may prove one child only when the "
+                "project hooks are trusted and the IDs match. The parent Codex "
+                "session controls sandbox and approval; ownership remains a "
+                "local file lock."
+            ),
+        },
+        "opencode": {
+            "native_execution": "observed-plugin",
+            "native_child_liveness": "foreground-only",
+            "stop_ack": False,
+            "stop_ack_evidence": "foreground-tool-call",
+            "second_supervisor": False,
+            "native_lock": False,
+            "contract_only": False,
+            "connection_claimed": False,
+            "note": (
+                "The V2 plugin observes foreground subagent tool spans in "
+                "process. Background dispatch is not child liveness or a stop "
+                "acknowledgement, and the stream is not exposed externally."
+            ),
+        },
+        "cursor": {
+            "native_execution": "contract-only",
+            "native_child_liveness": "start-only",
+            "stop_ack": False,
+            "stop_ack_evidence": "matching-id-only",
+            "second_supervisor": False,
+            "native_lock": False,
+            "contract_only": True,
+            "connection_claimed": False,
+            "note": (
+                "Cursor remains contract-only: agent files and the universal "
+                "CLI are shipped, subagentStart may expose an ID, and a stop "
+                "must match it exactly. No managed session, no second "
+                "supervisor and no invented command are claimed."
+            ),
+        },
+        "antigravity": {
+            "native_execution": "contract-only",
+            "native_child_liveness": "no",
+            "stop_ack": False,
+            "stop_ack_evidence": "none",
+            "second_supervisor": False,
+            "native_lock": False,
+            "contract_only": True,
+            "connection_claimed": False,
+            "note": (
+                "Antigravity owns /teamwork-preview and /grill-me. Our layer "
+                "stores memory, contracts and handoffs only; session hooks do "
+                "not identify an individual child and no second supervisor is "
+                "started."
+            ),
+        },
+    },
+}
 
 FIELD_DESCRIPTIONS = {
     "native_spawn_exposed_to_external_orchestrator": (
@@ -687,6 +787,13 @@ def matrix(platform: str | None = None) -> dict:
         "teamwork_entry_descriptions": dict(TEAMWORK_ENTRY_DESCRIPTIONS),
         "teamwork_entry_disclaimer": TEAMWORK_ENTRY_DISCLAIMER,
         "platforms": platforms,
+        "ide_ownership": {
+            **copy.deepcopy(IDE_OWNERSHIP),
+            "platforms": {
+                key: copy.deepcopy(IDE_OWNERSHIP["platforms"][key])
+                for key in keys
+            },
+        },
         "managed_execution": {
             **copy.deepcopy(MANAGED_EXECUTION),
             "platforms": {
@@ -738,6 +845,18 @@ def render_text(platform: str | None = None) -> str:
             f"  {record['platform']}: {entry['status']} "
             f"(binding={limits['status']}, native_session_claimed="
             f"{str(limits['native_session_claimed']).lower()})"
+        )
+    lines.append("")
+    lines.append("IDE ownership (local coordination, not a native connection claim):")
+    for record in document["platforms"]:
+        ownership = document["ide_ownership"]["platforms"][record["platform"]]
+        lines.append(
+            f"  {record['platform']}: native_execution="
+            f"{ownership['native_execution']}, native_child_liveness="
+            f"{ownership['native_child_liveness']}, stop_ack="
+            f"{str(ownership['stop_ack']).lower()} "
+            f"({ownership['stop_ack_evidence']}), second_supervisor="
+            f"{str(ownership['second_supervisor']).lower()}"
         )
     lines.append("")
     for record in document["platforms"]:

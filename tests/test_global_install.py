@@ -89,6 +89,41 @@ class GlobalInstallTests(unittest.TestCase):
                 self.assertTrue((base/'assumption_guard.py').is_file())
 
 
+    def test_v78_handoff_module_is_installed_for_every_platform(self):
+        source = Path(__file__).resolve().parents[1] / 'tools' / 'ide_handoff.py'
+        self.run_install()
+        for base in (
+            self.home/'.codex/auto-orchestrator/tools',
+            self.home/'.config/opencode/auto-orchestrator/tools',
+            self.home/'.gemini/config/auto-orchestrator/tools',
+        ):
+            if source.is_file():
+                self.assertEqual((base/'ide_handoff.py').read_bytes(),
+                                 source.read_bytes())
+            else:
+                self.assertFalse((base/'ide_handoff.py').exists())
+        # Cursor is not part of this helper's platforms; install it separately.
+        execute(self.home, {'cursor'})
+        cursor_tools = self.home/'.cursor/auto-orchestrator/tools'
+        if source.is_file():
+            self.assertEqual((cursor_tools/'ide_handoff.py').read_bytes(),
+                             source.read_bytes())
+
+    def test_reinstall_preserves_user_files_outside_managed_integration(self):
+        self.run_install()
+        memory = self.home/'.auto-orchestrator/memory.sqlite3'
+        memory.parent.mkdir(parents=True, exist_ok=True)
+        memory.write_bytes(b'user memory')
+        hook_note = self.home/'.config/opencode/AGENTS.md'
+        before = hook_note.read_text(encoding='utf-8')
+        notes = self.run_install()
+        self.assertTrue(any('installed' in note for note in notes))
+        self.assertEqual(memory.read_bytes(), b'user memory')
+        self.assertIn('auto-orchestrator', hook_note.read_text(encoding='utf-8'))
+        self.assertNotEqual(before, '', 'the installer writes one managed block')
+        self.run_install(uninstall=True)
+        self.assertEqual(memory.read_bytes(), b'user memory')
+
     def test_global_antigravity_upgrade_prunes_old_grill_me_managed_copy(self):
         self.run_install()
         old = self.home/'.gemini/antigravity-cli/skills/grill-me/SKILL.md'

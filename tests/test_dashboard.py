@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from tools.dashboard import DashboardServer, Store
+from tools.dashboard import Catalog, DashboardServer, Store
 from tools.supervisor import Supervisor
 
 
@@ -228,6 +228,30 @@ class DashboardDataTests(unittest.TestCase):
         self.assertEqual(state["project"], "demo-project")
         self.assertGreaterEqual(state["overview"]["runs"], 4)
         self.assertEqual(before, sorted(p.name for p in self.root.iterdir()))
+
+    def test_demo_ide_ownership_is_labelled_and_native_stays_unknown(self):
+        catalog = Catalog.from_store(Store(self.root, demo=True))
+        try:
+            payload = catalog.ide(catalog.default_id)
+            memory = catalog.memory(catalog.default_id)
+            milestones = catalog.milestones(catalog.default_id)
+        finally:
+            catalog.close()
+        for item in (payload, memory["ide"], milestones["ide"]):
+            self.assertTrue(item["demo"])
+            self.assertEqual(item["source"], "demo")
+            self.assertEqual(item["ownership"]["state"], "demo")
+            self.assertEqual(item["last_ide"], "demo")
+            self.assertIsNone(item["active_ide"])
+            self.assertIsNone(item["previous_ide"])
+            self.assertIsNone(item["native"]["connected"])
+            self.assertFalse(item["native"]["claimed_live"])
+            self.assertEqual(item["next_action"]["code"], "demo")
+            self.assertFalse(item["stale_context"]["is_stale"])
+        self.assertEqual(payload["current"]["milestone_id"], "M2")
+        self.assertEqual(milestones["current_run_id"], "demo-project")
+        self.assertTrue(memory["demo"])
+        self.assertIn("DEMO", payload["next_action"]["label"].upper())
 
 
 class DashboardHTTPTests(unittest.TestCase):

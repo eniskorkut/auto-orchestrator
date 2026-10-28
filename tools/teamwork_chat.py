@@ -89,6 +89,7 @@ except ModuleNotFoundError:  # python tools/teamwork_chat.py
 
 STATE_DIR = teamwork_dir(".")
 ACTIVE = "active.json"
+NATIVE_ACTIVE = "native-active.json"
 REQUEST_DIR = "requests"
 MAX_REQUEST = 20000
 MAX_REQUEST_BYTES = MAX_REQUEST * 4
@@ -97,6 +98,8 @@ DEFAULT_MODEL = os.environ.get("AO_TEAMWORK_MODEL",
                                "opencode-go/deepseek-v4.1-flash")
 TERMINAL_RUNS = ("passed", "failed", "cancelled")
 HEARTBEAT_STALE_SECONDS = 300.0
+NATIVE_PLATFORMS = ("opencode", "codex", "cursor", "antigravity")
+APPROVAL_DIR = "approvals"
 RECOVERY_STATES = {
     "active", "runner_disconnected", "reconciling", "orphaned",
     "retry_ready", "resuming", "verifying", "recovered",
@@ -168,6 +171,165 @@ def _validate_plan_path(root: Path, value, run_id: str) -> Path:
     if not resolved.is_file() or resolved.is_symlink():
         raise ChatError("plan artifact is missing or is a symlink")
     return resolved
+
+
+def _approval_path(root: Path, run_id: str) -> Path:
+    return (root / ".auto-orchestrator" / "plans" / APPROVAL_DIR
+            / f"{_safe_run_id(run_id)}.json")
+
+
+def plan_digest(plan: dict) -> str:
+    """Digest the approved plan body, excluding the mutable approval block."""
+    body = {key: value for key, value in plan.items() if key != "approval"}
+    payload = json.dumps(body, sort_keys=True, separators=(",", ":"),
+                         ensure_ascii=False).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _pending_approval(plan: dict, platform: str | None = None) -> dict:
+    return {
+        "status": "pending",
+        "plan_sha256": plan_digest(plan),
+        "approver": None,
+        "approved_at": None,
+        "platform": platform,
+    }
+
+
+def _clean_approver(value) -> str:
+    if not isinstance(value, str):
+        raise ChatError("approver is required")
+    value = value.strip()
+    if not value or len(value) > 200 or any(ord(ch) < 32 for ch in value):
+        raise ChatError("approver must be a short single-line identity")
+    if value.lower() in ("auto", "agent", "system", "model", "recommended",
+                         "assistant", "llm"):
+        raise ChatError("plan approval requires an explicit human approver")
+    return value
+
+
+def _native_plan(plan: dict, run_id: str) -> dict:
+    if not isinstance(plan, dict) or plan.get("run_id") != run_id:
+        raise ChatError("plan artifact does not belong to this run")
+    if plan.get("execution_mode") != "native" or plan.get("native") is not True:
+        raise ChatError("plan is not a native execution plan")
+    return plan
+
+
+def verify_plan_approval(root: Path, plan: dict, run_id: str) -> dict:
+    """Return the stored approval only when it still covers the exact plan."""
+    plan = _native_plan(plan, run_id)
+    stored = read_json(_approval_path(root, run_id), None)
+    if not isinstance(stored, dict) or stored.get("status") != "approved":
+        raise ChatError(
+            "plan approval is required before native execution; run "
+            f"`approve-plan --run-id {run_id} --approver <user>`")
+    if stored.get("run_id") not in (None, run_id):
+        raise ChatError("stored plan approval belongs to another run")
+    approver = _clean_approver(stored.get("approver"))
+    approved_at = stored.get("approved_at")
+    if not isinstance(approved_at, (int, float)) or approved_at <= 0:
+        raise ChatError("stored plan approval has no valid timestamp")
+    expected = stored.get("plan_sha256")
+    if not isinstance(expected, str) or len(expected) != 64:
+        raise ChatError("stored plan approval has no valid digest")
+    actual = plan_digest(plan)
+    if expected != actual:
+        raise ChatError(
+            "plan digest does not match its approval; the plan changed after "
+            "approval. Create a new plan and approve it explicitly")
+    block = plan.get("approval")
+    if not isinstance(block, dict) or block.get("status") != "approved":
+        raise ChatError("plan artifact does not contain an approved block")
+    if block.get("plan_sha256") != actual:
+        raise ChatError("plan approval digest does not match the plan artifact")
+    if (block.get("approver") != approver
+            or block.get("approved_at") != approved_at):
+        raise ChatError("plan approval metadata does not match the stored approval")
+    return {
+        "status": "approved",
+        "approver": approver,
+        "approved_at": approved_at,
+        "plan_sha256": actual,
+        "platform": block.get("platform"),
+    }
+
+
+def approve_native_plan(root: Path, run_id: str, approver: str,
+                        platform: str | None = None) -> dict:
+    """Explicitly approve one immutable native plan digest."""
+    root = _root(str(root))
+    run_id = _safe_run_id(run_id)
+    approver = _clean_approver(approver)
+    with project_lock(root, timeout=10):
+        plan_path = _validate_plan_path(root, None, run_id)
+        plan = read_json(plan_path, None)
+        plan = _native_plan(plan, run_id)
+        actual = plan_digest(plan)
+        embedded = plan.get("approval")
+        if isinstance(embedded, dict) and embedded.get("status") == "approved":
+            if embedded.get("plan_sha256") != actual:
+                raise ChatError(
+                    "plan changed after approval; create and approve a new plan")
+            stored = read_json(_approval_path(root, run_id), None)
+            if (isinstance(stored, dict)
+                    and stored.get("status") == "approved"
+                    and stored.get("plan_sha256") == actual
+                    and stored.get("approver") == approver):
+                return {"run_id": run_id, "plan": str(plan_path), **stored}
+            raise ChatError("plan is already approved by a different approver")
+        if (isinstance(embedded, dict) and embedded.get("plan_sha256")
+                and embedded.get("plan_sha256") != actual):
+            raise ChatError(
+                "plan artifact was modified after planning; create a new plan")
+        approval = {
+            "run_id": run_id,
+            "status": "approved",
+            "approver": approver,
+            "approved_at": time.time(),
+            "plan_sha256": actual,
+            "platform": platform,
+        }
+        atomic_write_json(_approval_path(root, run_id), approval)
+        plan["approval"] = dict(approval)
+        _write_json(plan_path, plan)
+    return {"run_id": run_id, "plan": str(plan_path), **approval}
+
+
+def load_native_plan(root: Path, run_id: str) -> dict:
+    root = _root(str(root))
+    run_id = _safe_run_id(run_id)
+    plan_path = _validate_plan_path(root, None, run_id)
+    plan = read_json(plan_path, None)
+    return _native_plan(plan, run_id)
+
+
+def _native_plan_result(plan: dict, plan_path: Path, *, status: str,
+                        approval: dict, receipt: dict | None,
+                        platform: str) -> dict:
+    return {
+        "status": status,
+        "execution": "native",
+        "execution_mode": "native",
+        "execution_provider": platform,
+        "native": True,
+        "native_platform": platform,
+        "plan_only": status == "plan_ready",
+        "run_id": plan["run_id"],
+        "mode": plan["work_mode"],
+        "plan": str(plan_path),
+        "plan_sha256": approval.get("plan_sha256"),
+        "approval": approval,
+        "approved": approval.get("status") == "approved",
+        "assumption_guard": receipt,
+        "requirements_contract": plan.get("requirements_contract"),
+        "contract_status": ("confirmed" if plan.get("requirements_contract")
+                            else "absent"),
+        "note": ("Native plan is inspectable but not executed by this CLI. "
+                 "No provider, runner or PID was started. Approve the plan "
+                 "explicitly, dispatch native subagents, then record evidence "
+                 "with native-report. Release the IDE handoff explicitly."),
+    }
 
 
 def _request_text(root: Path, args) -> str:
@@ -535,9 +697,13 @@ def _plan_contract(root: Path, plan: dict) -> dict | None:
     return contract
 
 
-def start(args) -> dict:
+def start(args, *, initialize: bool = True,
+          check_active: bool = True) -> dict:
     root = _root(args.root)
     _require_repository(root)
+    native = bool(getattr(args, "native", False))
+    if native and getattr(args, "plan", None):
+        raise ChatError("start accepts either --native or --plan, not both")
     mode = args.mode
     if mode not in ("solo", "auto", "fast", "balanced", "rigorous"):
         raise ChatError("mode must be solo, auto, fast, balanced or rigorous")
@@ -546,28 +712,29 @@ def start(args) -> dict:
     token = os.urandom(16).hex()
     with project_lock(root, timeout=10):
         active = _active(root)
-        if project_writer_held(root):
-            raise ChatError(
-                "another Teamwork writer is active for this project; "
-                "wait for it to finish or hand off the project"
-            )
-        old_run_id = active.get("run_id")
-        if _owner_process_alive(active) or (
-                isinstance(old_run_id, str) and lease_held(root, old_run_id)):
-            raise ChatError(
-                f"active teamwork run {old_run_id} still owns a live runner; "
-                "use status/resume instead of starting a duplicate"
-            )
-        if active.get("run_id"):
-            try:
-                old_state = _engine_status(root, active["run_id"])
-            except TeamworkError:
-                old_state = None
-            if old_state is not None and old_state.get("status") not in TERMINAL_RUNS:
+        if check_active:
+            if project_writer_held(root):
                 raise ChatError(
-                    f"unfinished teamwork run {active['run_id']} exists; "
-                    "use resume instead of starting a duplicate"
+                    "another Teamwork writer is active for this project; "
+                    "wait for it to finish or hand off the project"
                 )
+            old_run_id = active.get("run_id")
+            if _owner_process_alive(active) or (
+                    isinstance(old_run_id, str) and lease_held(root, old_run_id)):
+                raise ChatError(
+                    f"active teamwork run {old_run_id} still owns a live runner; "
+                    "use status/resume instead of starting a duplicate"
+                )
+            if active.get("run_id"):
+                try:
+                    old_state = _engine_status(root, active["run_id"])
+                except TeamworkError:
+                    old_state = None
+                if old_state is not None and old_state.get("status") not in TERMINAL_RUNS:
+                    raise ChatError(
+                        f"unfinished teamwork run {active['run_id']} exists; "
+                        "use resume instead of starting a duplicate"
+                    )
         provider = getattr(args, "provider", None)
         codex_sandbox = getattr(args, "codex_sandbox", "read-only")
         platform = getattr(args, "origin_platform", "unknown") or "unknown"
@@ -595,12 +762,23 @@ def start(args) -> dict:
                    else guard["receipt"])
         if codex_sandbox not in ("read-only", "workspace-write"):
             raise ChatError("codex_sandbox must be read-only or workspace-write")
-        if provider is None:
+        if native:
+            if platform not in NATIVE_PLATFORMS:
+                raise ChatError(
+                    "native execution requires platform opencode, codex, "
+                    "cursor or antigravity")
+            # The deterministic planner only knows the two managed provider
+            # identifiers; the native plan is rewritten below so no provider
+            # process is implied or launched.
+            provider = "codex" if platform == "codex" else "opencode"
+        elif provider is None:
             if platform in ("codex", "cursor", "antigravity"):
                 raise ChatError(
                     f"no managed execution adapter is selected for {platform}; "
-                    "use the platform's native agents, or pass --provider "
-                    "opencode explicitly to opt in to the OpenCode bridge"
+                    "use `start --native` for the platform's native subagents, "
+                    "or pass --provider opencode explicitly to opt in to the "
+                    "managed OpenCode bridge. Managed start never falls back "
+                    "to another provider silently"
                 )
             provider = "opencode"
         if provider not in ("opencode", "codex"):
@@ -623,19 +801,38 @@ def start(args) -> dict:
         except (TeamworkPlannerError, ValueError) as exc:
             raise ChatError(str(exc)) from exc
         plan["origin_platform"] = platform
-        plan["execution_provider"] = provider
+        plan["execution_mode"] = "native" if native else "managed"
+        plan["execution_provider"] = platform if native else provider
         plan["assumption_guard"] = receipt
         plan["guard_receipt"] = receipt
+        if native:
+            plan["native"] = True
+            plan["native_platform"] = platform
+            # Native sandbox/approval belong to the parent IDE session, not to
+            # a provider plan. Do not publish managed provider policy fields.
+            for task in plan.get("tasks", []):
+                if isinstance(task, dict):
+                    task["provider"] = platform
+                    task.pop("sandbox", None)
+                    task.pop("approval_policy", None)
+            plan["approval"] = _pending_approval(plan, platform)
         plan_only = getattr(args, "grill_mode", "auto") == "plan-only"
-        if plan_only:
+        if plan_only and not native:
             plan["plan_only"] = True
         plan_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         _write_json(plan_path, plan)
-        engine = TeamworkEngine(root)
-        try:
-            engine.init(plan)
-        finally:
-            engine.close()
+        if initialize:
+            engine = TeamworkEngine(root)
+            try:
+                engine.init(plan)
+            finally:
+                engine.close()
+        if native:
+            approval = plan["approval"]
+            return _native_plan_result(
+                plan, plan_path,
+                status="native_plan_ready" if initialize else "plan_ready",
+                approval=approval, receipt=receipt, platform=platform)
         if plan_only:
             return {
                 "status": "planned", "run_id": run_id,
@@ -672,6 +869,51 @@ def start(args) -> dict:
                             else "absent"),
         "note": "Use status/agents/milestones; cancel is a local signal only.",
     }
+
+
+def prepare_native_plan(args) -> dict:
+    """Write an inspectable native plan with a pending approval block."""
+    setattr(args, "native", True)
+    return start(args, initialize=False, check_active=False)
+
+
+def start_native_plan(args) -> dict:
+    """Accept an explicitly approved native plan without starting a runner."""
+    root = _root(args.root)
+    _require_repository(root)
+    run_id = getattr(args, "plan", None) or getattr(args, "run_id", None)
+    if not run_id:
+        raise ChatError("--plan requires a run id")
+    run_id = _safe_run_id(run_id)
+    with project_lock(root, timeout=10):
+        plan = load_native_plan(root, run_id)
+        approval = verify_plan_approval(root, plan, run_id)
+        _plan_contract(root, plan)
+        engine = TeamworkEngine(root)
+        try:
+            engine.init(plan)
+        finally:
+            engine.close()
+        plan["approval"] = dict(approval)
+        _write_json(_plan_path(root, run_id), plan)
+        # Native runs have no managed runner record (no PID, token or
+        # process). This pointer only tells readers which native plan is the
+        # current work so a handoff snapshot can carry run/task state.
+        _write_json(_state_path(root, NATIVE_ACTIVE), {
+            "version": 1,
+            "run_id": run_id,
+            "plan": str(_plan_path(root, run_id)),
+            "mode": plan.get("work_mode"),
+            "status": "native",
+            "execution": "native",
+            "platform": plan.get("native_platform"),
+            "updated_at": time.time(),
+        })
+    return _native_plan_result(
+        plan, _plan_path(root, run_id), status="native_plan_ready",
+        approval=approval, receipt=plan.get("assumption_guard"),
+        platform=plan.get("native_platform") or plan.get("execution_provider")
+        or plan.get("origin_platform") or "unknown")
 
 
 def plan_provider(active: dict) -> str | None:
@@ -943,6 +1185,10 @@ def main(argv=None) -> int:
     start_p.add_argument("--grill-mode", default="auto",
                          choices=["off", "auto", "required", "plan-only"])
     start_p.add_argument("--max-seconds", type=float, default=7200)
+    start_p.add_argument("--native", action="store_true")
+    start_p.add_argument("--origin-platform", default="unknown",
+                         choices=["opencode", "codex", "cursor",
+                                  "antigravity", "unknown"])
     sub.add_parser("request-path")
     for name in ("status", "agents", "milestones", "cancel", "resume"):
         command = sub.add_parser(name)

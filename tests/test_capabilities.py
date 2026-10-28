@@ -157,7 +157,11 @@ class CapabilityMatrixTests(unittest.TestCase):
             "opencode": [".opencode/commands/teamwork.md",
                          ".opencode/commands/grill-me.md",
                          ".opencode/skills/teamwork/SKILL.md"],
-            "antigravity": [".agents/skills/ao-grill-me/SKILL.md"],
+            "antigravity": [".agents/skills/ao-grill-me/SKILL.md",
+                            ".agents/agents/auto_planner.md",
+                            ".agents/agents/auto_implementer.md",
+                            ".agents/agents/auto_tester.md",
+                            ".agents/agents/auto_reviewer.md"],
             "cursor": [".cursor/agents/auto_planner.md",
                        ".cursor/agents/auto_implementer.md",
                        ".cursor/agents/auto_tester.md",
@@ -221,6 +225,50 @@ class CapabilityMatrixTests(unittest.TestCase):
         for role in ("planner", "implementer", "tester", "reviewer"):
             self.assertTrue(any(role in item for item in cursor["entry_points"]), role)
 
+    def test_ide_ownership_is_separate_and_never_claims_a_native_connection(self):
+        document = capabilities.matrix()
+        ownership = document["ide_ownership"]
+        self.assertEqual(ownership["schema_version"], 1)
+        self.assertEqual(set(ownership["fields"]),
+                         set(capabilities.IDE_OWNERSHIP_FIELDS))
+        self.assertEqual(ownership["ownership_transport"],
+                         "local-project-file")
+        self.assertEqual(ownership["owner_identity"],
+                         "host-and-session-hash-only")
+        self.assertFalse(ownership["owner_token_exposed"])
+        self.assertTrue(ownership["disclaimer"])
+        self.assertEqual(set(ownership["platforms"]),
+                         set(capabilities.PLATFORM_ORDER))
+        for platform, record in ownership["platforms"].items():
+            with self.subTest(platform=platform):
+                self.assertEqual(set(record) >= set(capabilities.IDE_OWNERSHIP_FIELDS),
+                                 True)
+                self.assertFalse(record["second_supervisor"], platform)
+                self.assertFalse(record["native_lock"], platform)
+                self.assertFalse(record["connection_claimed"], platform)
+                self.assertIs(record["stop_ack"], False, platform)
+                self.assertTrue(record["stop_ack_evidence"])
+                self.assertTrue(record["note"])
+                self.assertNotIn(record["native_execution"], ("yes", "true"))
+        for platform in ("cursor", "antigravity"):
+            record = ownership["platforms"][platform]
+            self.assertEqual(record["native_execution"], "contract-only")
+            self.assertTrue(record["contract_only"])
+            self.assertFalse(record["second_supervisor"])
+        self.assertFalse(ownership["platforms"]["codex"]["contract_only"])
+        self.assertEqual(ownership["platforms"]["codex"]["native_execution"],
+                         "observed-hook")
+        self.assertEqual(ownership["platforms"]["opencode"]["native_execution"],
+                         "observed-plugin")
+        # The ownership section is filtered with the rest of the matrix.
+        filtered = capabilities.matrix("cursor")["ide_ownership"]["platforms"]
+        self.assertEqual(list(filtered), ["cursor"])
+        # It is a defensive copy, like every other section.
+        filtered["cursor"]["second_supervisor"] = True
+        self.assertFalse(
+            capabilities.matrix()["ide_ownership"]["platforms"]["cursor"]
+            ["second_supervisor"])
+
     def test_platform_filter_and_unknown_platform(self):
         document = capabilities.matrix("CODEX")
         self.assertEqual(len(document["platforms"]), 1)
@@ -269,6 +317,10 @@ class CapabilityMatrixTests(unittest.TestCase):
         self.assertIn("Teamwork entry points", text)
         self.assertIn("codex: native-skill", text)
         self.assertIn("antigravity: native-slash", text)
+        self.assertIn("IDE ownership", text)
+        self.assertIn("cursor: native_execution=contract-only", text)
+        self.assertIn("second_supervisor=false", text)
+        self.assertIn("stop_ack=false", text)
 
     def test_cli_rejects_unknown_platform(self):
         stderr = io.StringIO()

@@ -334,10 +334,13 @@ def project_lock(root: Path, *, timeout: float = 5.0):
     acquired = False
     try:
         handle = open(path, "a+b")
-        handle.seek(0)
-        if handle.read(1) == b"":
+        # Windows byte-range locks are mandatory: another process holding the
+        # lock makes a read of that byte fail with PermissionError. Ensure the
+        # lock file has one byte by checking its size, then lock byte 0.
+        if handle.seek(0, os.SEEK_END) == 0:
             handle.write(b"\0")
             handle.flush()
+        handle.seek(0)
         deadline = time.monotonic() + max(0.0, float(timeout))
         while True:
             try:
@@ -389,10 +392,13 @@ def runner_lease(root, run_id: str, *, timeout: float = 0.0):
     acquired = False
     try:
         handle = open(path, "a+b")
-        handle.seek(0)
-        if handle.read(1) == b"":
+        # Windows byte-range locks are mandatory: another process holding the
+        # lock makes a read of that byte fail with PermissionError. Ensure the
+        # lock file has one byte by checking its size, then lock byte 0.
+        if handle.seek(0, os.SEEK_END) == 0:
             handle.write(b"\0")
             handle.flush()
+        handle.seek(0)
         deadline = time.monotonic() + max(0.0, float(timeout))
         while True:
             try:
@@ -452,10 +458,13 @@ def project_writer_lease(root, *, timeout: float = 0.0):
     acquired = False
     try:
         handle = open(path, "a+b")
-        handle.seek(0)
-        if handle.read(1) == b"":
+        # Windows byte-range locks are mandatory: another process holding the
+        # lock makes a read of that byte fail with PermissionError. Ensure the
+        # lock file has one byte by checking its size, then lock byte 0.
+        if handle.seek(0, os.SEEK_END) == 0:
             handle.write(b"\0")
             handle.flush()
+        handle.seek(0)
         deadline = time.monotonic() + max(0.0, float(timeout))
         while True:
             try:
@@ -523,9 +532,19 @@ def atomic_write_json(path: Path, value: dict) -> None:
     fd = os.open(str(temporary), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
         os.write(fd, (json.dumps(value, indent=2, ensure_ascii=False) + "\n").encode("utf-8"))
+        os.fsync(fd)
     finally:
         os.close(fd)
     os.replace(temporary, path)
+    if os.name == "posix":
+        try:
+            directory_fd = os.open(str(path.parent), os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+        except OSError:
+            pass
 
 
 def update_active(root, run_id: str, *, expected_token: str | None = None,

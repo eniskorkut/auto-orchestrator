@@ -79,6 +79,65 @@ test('teamwork 2.0 mode, execution and contract labels are translated', () => {
   I18n.setLanguage('en', { persist: false, announce: false });
 });
 
+test('IDE ownership labels are translated and distinguish unknown from released', () => {
+  const keys = [
+    'ide.eyebrow', 'ide.title', 'ide.activeIde', 'ide.previousIde', 'ide.lastIde',
+    'ide.fence', 'ide.fenceUnknown', 'ide.owner', 'ide.ownerUnknown',
+    'ide.handoff', 'ide.handoffNone', 'ide.handoffRoute', 'ide.handoffAge',
+    'ide.handoffDigest', 'ide.driftYes', 'ide.driftNo', 'ide.driftUnknown',
+    'ide.current', 'ide.currentRun', 'ide.currentMilestone', 'ide.currentTask',
+    'ide.currentNone', 'ide.nextAction', 'ide.requirements', 'ide.question',
+    'ide.questionWhy', 'ide.questionRationale', 'ide.questionAlternatives',
+    'ide.recovery', 'ide.ownerProcess', 'ide.blocked', 'ide.orphaned',
+    'ide.stale', 'ide.staleUnknown', 'ide.nativeUnknown', 'ide.demo',
+    'ide.snapshots', 'ide.state.demo', 'ide.state.unknown',
+    'ide.requirementsStatus.verified', 'ide.requirementsStatus.partial',
+    'ide.requirementsStatus.review_needed', 'ide.requirementsStatus.failed',
+    'ide.requirementsStatus.not_run', 'ide.requirementsStatus.unknown',
+  ];
+  for (const key of keys) {
+    assert.ok(I18n.dictionary.en[key], `missing EN translation for ${key}`);
+    assert.ok(I18n.dictionary.tr[key], `missing TR translation for ${key}`);
+  }
+  for (const code of ['resolve_recovery', 'review_handoff_drift', 'answer_grill_me',
+    'request_review', 'verify_requirements', 'continue_milestone', 'start_milestone',
+    'confirm_ownership', 'none', 'demo']) {
+    assert.ok(I18n.dictionary.en[`ide.nextAction.${code}`], `missing EN ${code}`);
+    assert.ok(I18n.dictionary.tr[`ide.nextAction.${code}`], `missing TR ${code}`);
+  }
+  assert.equal(I18n.t('ide.activeIde', { platform: 'cursor' }), 'active IDE: cursor');
+  assert.equal(I18n.t('ide.previousIde', { platform: 'codex' }), 'previous IDE: codex');
+  assert.equal(I18n.t('ide.state.unknown'), 'unknown');
+  assert.equal(I18n.t('ide.nativeUnknown'),
+    'Native connection unknown — no client evidence was reported');
+  I18n.setLanguage('tr', { persist: false, announce: false });
+  assert.equal(I18n.t('ide.activeIde', { platform: 'cursor' }), 'etkin IDE: cursor');
+  assert.equal(I18n.t('ide.requirementsStatus.review_needed'), 'review gerekli');
+  for (const key of keys) {
+    const rendered = I18n.t(key, {
+      platform: 'cursor', host: 'abc', session: 'def', fence: 2, generation: 3,
+      source: 'codex', target: 'cursor', age: '2m', digest: 'abc', state: 'unknown',
+      count: 2, reasons: 'head_mismatch', why: 'W', rationale: 'R',
+      run: 'r1', status: 'verifying', milestone: 'M2', task: 'api',
+    });
+    assert.doesNotMatch(rendered, /\{\w+\}/, `TR ${key} must not leak a placeholder`);
+  }
+  I18n.setLanguage('en', { persist: false, announce: false });
+});
+
+test('IDE ownership UI uses text nodes, not HTML, and keeps native unknown', () => {
+  const app = readFileSync(join(assets, 'app.js'), 'utf8');
+  for (const className of ['ide-ownership', 'ide-state-chip', 'ide-handoff-drift',
+    'ide-requirements', 'ide-question', 'ide-native']) {
+    assert.match(app, new RegExp(className), `missing ${className}`);
+  }
+  assert.match(app, /ide\.nativeUnknown/);
+  assert.match(app, /payload\?\.ide/);
+  assert.match(app, /ide\.requirementsStatus\./);
+  assert.doesNotMatch(app, /native\.connected\s*===?\s*true/);
+  assert.doesNotMatch(app, /Native connection (?:is )?(?:live|connected)/i);
+});
+
 test('status vocabulary covers every required evidence status and alias', () => {
   const required = [
     'idle',

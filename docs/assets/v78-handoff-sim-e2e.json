@@ -1,0 +1,256 @@
+{
+  "schema_version": 1,
+  "kind": "auto-orchestrator-v78-handoff-e2e",
+  "version": "7.8",
+  "mode": "simulated",
+  "live_ides": [],
+  "native_surfaces": {
+    "codex": "simulated",
+    "opencode": "simulated",
+    "cursor": "simulated",
+    "antigravity": "simulated"
+  },
+  "seed": 7,
+  "generated_at": 1793166756.898091,
+  "python": "3.11.15",
+  "os": "darwin",
+  "project": "$PROJECT",
+  "scenarios": [
+    {
+      "id": "sequential-codex-opencode-codex",
+      "ok": true,
+      "seconds": 1.675,
+      "steps": [
+        {
+          "name": "codex activates ownership",
+          "ok": true,
+          "seconds": 0.06
+        },
+        {
+          "name": "codex writes an inspectable native plan",
+          "ok": true,
+          "seconds": 0.183
+        },
+        {
+          "name": "user approves the plan explicitly",
+          "ok": true,
+          "seconds": 0.061
+        },
+        {
+          "name": "codex starts the approved plan natively",
+          "ok": true,
+          "seconds": 0.224
+        },
+        {
+          "name": "codex prepares a handoff for opencode",
+          "ok": true,
+          "seconds": 0.276
+        },
+        {
+          "name": "cursor inspects context read-only while opencode owns",
+          "ok": true,
+          "seconds": 0.173
+        },
+        {
+          "name": "cursor cannot take ownership from a live opencode owner",
+          "ok": true,
+          "seconds": 0.062
+        },
+        {
+          "name": "opencode continues the same approved plan",
+          "ok": true,
+          "seconds": 0.227
+        },
+        {
+          "name": "opencode hands ownership back to codex",
+          "ok": true,
+          "seconds": 0.282
+        }
+      ],
+      "detail": {}
+    },
+    {
+      "id": "grill-me-mid-switch",
+      "ok": true,
+      "seconds": 1.512,
+      "steps": [
+        {
+          "name": "codex starts a Grill-Me interview",
+          "ok": true,
+          "seconds": 0.097
+        },
+        {
+          "name": "user answers two questions",
+          "ok": true,
+          "seconds": 0.126
+        },
+        {
+          "name": "opencode resumes the interview at the open question",
+          "ok": true,
+          "seconds": 0.334
+        },
+        {
+          "name": "opencode finishes and approves the interview",
+          "ok": true,
+          "seconds": 0.427
+        },
+        {
+          "name": "approval and interview survive the switch back",
+          "ok": true,
+          "seconds": 0.337
+        }
+      ],
+      "detail": {
+        "interview_id": "iv_87762e3a8e0bc6d1",
+        "contract_id": null
+      }
+    },
+    {
+      "id": "ownership-race",
+      "ok": true,
+      "seconds": 0.202,
+      "steps": [
+        {
+          "name": "four concurrent ide activate calls",
+          "ok": true
+        }
+      ],
+      "detail": {
+        "winner": "codex",
+        "losers": [
+          "opencode",
+          "cursor",
+          "antigravity"
+        ]
+      }
+    },
+    {
+      "id": "dirty-worktree-transfer",
+      "ok": true,
+      "seconds": 0.408,
+      "steps": [
+        {
+          "name": "dirty worktree transferred with allow_dirty",
+          "ok": true
+        }
+      ],
+      "detail": {
+        "changed_files": [
+          "README.md",
+          "feature.py"
+        ]
+      }
+    },
+    {
+      "id": "head-drift-refusal",
+      "ok": true,
+      "seconds": 0.568,
+      "steps": [
+        {
+          "name": "accept refuses HEAD drift",
+          "ok": true
+        },
+        {
+          "name": "explicit recovery clears the stale handoff",
+          "ok": true
+        }
+      ],
+      "detail": {}
+    },
+    {
+      "id": "crash-recovery",
+      "ok": true,
+      "seconds": 0.441,
+      "steps": [
+        {
+          "name": "stale heartbeat is unknown, not dead",
+          "ok": true
+        },
+        {
+          "name": "automatic takeover is refused",
+          "ok": true
+        },
+        {
+          "name": "recovery without evidence is refused",
+          "ok": true
+        },
+        {
+          "name": "explicit recovery records unknown liveness",
+          "ok": true
+        }
+      ],
+      "detail": {}
+    },
+    {
+      "id": "no-foreign-process",
+      "ok": true,
+      "seconds": 0.723,
+      "steps": [
+        {
+          "name": "native start spawns no provider or runner",
+          "ok": true
+        },
+        {
+          "name": "native self-report is evidence, not verification",
+          "ok": true
+        }
+      ],
+      "detail": {
+        "task_id": "build"
+      }
+    },
+    {
+      "id": "opencode-cursor-opencode",
+      "ok": true,
+      "seconds": 0.738,
+      "steps": [
+        {
+          "name": "opencode -> cursor ownership transfer",
+          "ok": true
+        },
+        {
+          "name": "cursor -> opencode ownership transfer",
+          "ok": true
+        }
+      ],
+      "detail": {
+        "handoffs": [
+          "ho_cfa48ec244753388820587f6",
+          "ho_1d1b2bd9d2baf4e6f19f28ae"
+        ]
+      }
+    },
+    {
+      "id": "codex-antigravity-codex",
+      "ok": true,
+      "seconds": 0.743,
+      "steps": [
+        {
+          "name": "codex -> antigravity ownership transfer",
+          "ok": true
+        },
+        {
+          "name": "antigravity -> codex ownership transfer",
+          "ok": true
+        }
+      ],
+      "detail": {
+        "handoffs": [
+          "ho_0fbc4bf3019bafabc7bea934",
+          "ho_caba004e71ce166a2ca3fe26"
+        ]
+      }
+    }
+  ],
+  "summary": {
+    "total": 9,
+    "passed": 9,
+    "failed": 0,
+    "duration_seconds": 7.011
+  },
+  "notes": [
+    "No model, provider or IDE process was started.",
+    "Files under .auto-orchestrator/ are excluded from the dirty digest.",
+    "Live IDE evidence is recorded separately and never merged here."
+  ]
+}

@@ -195,6 +195,8 @@ class UniversalTeamworkTests(unittest.TestCase):
                 max_seconds=10, grill=False, grill_mode="auto",
                 interview_id=None, provider=None))
         self.assertIn("no managed execution adapter", str(raised.exception))
+        self.assertIn("--native", str(raised.exception))
+        self.assertIn("managed", str(raised.exception))
         self.assertFalse((self.root / ".auto-orchestrator" / "plans").exists())
 
     def test_start_requires_request_without_approved_interview(self):

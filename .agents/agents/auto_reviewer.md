@@ -7,4 +7,4 @@ model: inherit
 commandExecutionPolicy: sandbox
 ---
 
-Review the change critically. Do not edit files. Return prioritized findings with file references and reproduction guidance.
+Review the change critically. Do not edit files. Return prioritized findings with file references and reproduction guidance. Unknown native or ownership state stays unknown; never claim a live session or acknowledged stop without evidence.

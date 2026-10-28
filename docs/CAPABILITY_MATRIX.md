@@ -228,3 +228,85 @@ actually exists.
 Completion engine separates milestone pass from requirements verification.
 Only real test/subprocess evidence can verify behavioral criteria; missing tests
 or independent review remain `needs_review`/`not_verified`.
+
+## V7.8 — IDE ownership, handoff and dashboard evidence
+
+`python tools/capabilities.py show --json` now exposes an `ide_ownership`
+section. It is separate from `capabilities`, `teamwork_entry` and
+`managed_execution`: it answers what this repository can observe about which
+native client holds the local coordination record, never whether a native
+client is connected.
+
+| Platform | `native_execution` | `native_child_liveness` | `stop_ack` | `stop_ack_evidence` | Second supervisor |
+|---|---|---|---|---|---|
+| Codex | `observed-hook` | `hook-pair-conditional` | `false` | `observed-hook-pair` | `false` |
+| OpenCode V2 | `observed-plugin` | `foreground-only` | `false` | `foreground-tool-call` | `false` |
+| Cursor | `contract-only` | `start-only` | `false` | `matching-id-only` | `false` |
+| Antigravity | `contract-only` | `no` | `false` | `none` | `false` |
+
+`stop_ack` is a strict boolean on every platform: this repository cannot make
+a native client acknowledge a stop request. `stop_ack_evidence` names the
+strongest local observation (a matching hook pair, a foreground tool call, a
+matching ID or none) without upgrading it to an acknowledgement.
+
+Every platform entry also states `connection_claimed: false`,
+`native_lock: false` and `second_supervisor: false`. The section itself sets
+`ownership_transport: local-project-file`,
+`owner_identity: host-and-session-hash-only` and
+`owner_token_exposed: false`. Cursor and Antigravity are contract-only: they
+ship agent files and the universal CLI contract, but this repository does not
+launch, bind, cancel or resume their native subagents. Antigravity keeps its
+native `/teamwork-preview` and `/grill-me`; the portable interview remains
+`ao-grill-me` so it cannot shadow the native command.
+
+### Dashboard ownership evidence
+
+`GET /api/projects/{project_id}/ide`, the memory endpoint and the milestones
+endpoint expose the same bounded ownership block. It shows:
+
+- active IDE, previous IDE and last recorded IDE as separate values;
+- local ownership state, fence and generation;
+- owner host/session **hashes only** — no raw owner token, session ID or host;
+- handoff age, source, target, digest and drift when the handoff module
+  reports them;
+- current run/milestone/task, requirements completion (`verified`, `partial`,
+  `review_needed`, `failed`, `not_run` or `unknown`), recovery/blocked state,
+  stale-context reasons and a next recommended action;
+- the open Grill-Me question with why, rationale and alternatives;
+- `native.connected: null` unless independent client evidence exists. A local
+  lock file is not a native handshake, so the dashboard renders that value as
+  unknown.
+
+When `tools/ide_handoff.py` is absent, unreadable or raises, the block reports
+`source: "unavailable"`, `state: "unknown"` and explicit `unknowns` entries
+instead of guessing. Demo projects stay labelled `demo`; ownership evidence is
+never fabricated for them.
+
+The installers ship `ide_handoff.py` with the existing optional-module rule,
+keep user files, hooks and memory untouched, and prune only byte-identical
+managed integration files. No installer or dashboard code starts a second
+supervisor or opens a native session.
+
+### Live sequential handoff observed on this machine
+
+`tools/v78_live_handoff_e2e.py` executed the real CLIs in a temporary git
+project on 2026-10-27 (macOS, Python 3.11.15). Evidence:
+`docs/assets/v78-live-handoff.json`.
+
+| Surface | Observed | Label |
+|---|---|---|
+| Codex `codex-cli 0.164.0` | `codex exec` wrote a file, then recovered `next_action` from `ide status` after a second handoff and wrote the final file | `live-verified` for the sequential loop |
+| OpenCode `v2.1.1` | `opencode run --standalone --auto` recovered `next_action` from `ide status` and wrote the marker with its own tool | `live-verified` for the sequential loop |
+| Cursor | no `cursor-agent`/`cursor` CLI on this machine | `contract-only` |
+| Antigravity | no CLI agent entry on this machine; native `/teamwork-preview` and `/grill-me` remain vendor-authoritative | `contract-only` |
+
+Native verification is separate from native self-report: `native-verify` runs
+the approved test command itself and binds the real exit code, commit, contract
+digest and run/task to the Completion Engine. `native-audit` records a
+declared-role review against the same HEAD; it is not a cryptographic
+attestation. Self-report alone stays `verified: false`.
+
+What this does **not** prove: native child liveness, a native stop
+acknowledgement, per-child supervision, Cursor/Antigravity execution, or model
+quality. Those remain exactly as described in the table above. One scripted
+run is not a benchmark and no human time-saving number is claimed.

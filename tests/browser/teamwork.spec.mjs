@@ -250,6 +250,82 @@ test('office milestone strip opens the matching board milestone', async ({ page 
   await expect(page.locator('.milestone-card.selected')).toContainText('M2');
 });
 
+test('IDE ownership panel separates active, previous and last IDE without leaking owner secrets', async ({ page }) => {
+  await page.route('**/api/projects/*/milestones', async (route) => {
+    const response = await route.fetch();
+    const payload = await response.json();
+    payload.ide = {
+      available: true, source: 'ide_handoff', demo: false,
+      active_ide: 'cursor', previous_ide: 'codex', last_ide: 'cursor',
+      ownership: {
+        state: 'handoff', record_present: true,
+        owner: { platform: 'cursor', host_hash: 'host12345678', session_hash: 'sess12345678' },
+        previous_owner: { platform: 'codex', host_hash: 'host12345678', session_hash: 'olds12345678' },
+        fence: 4, generation: 9,
+      },
+      handoff: {
+        source: 'codex', target: 'cursor', digest: 'abcdef1234567890',
+        drift: true, age_seconds: 125,
+      },
+      current: {
+        run_id: 'demo-project', run_status: 'running', milestone_id: 'M2',
+        milestone_status: 'verifying', task_id: 'api', task_state: 'completed',
+      },
+      next_action: { code: 'review_handoff_drift', label: 'Review the handoff drift before continuing' },
+      requirements_completion: {
+        status: 'review_needed', fully_verified: false, not_verified: 2,
+      },
+      grill_me: {
+        question: 'Which IDE should own M3?',
+        why: 'Ownership must be explicit before a native handoff.',
+        rationale: 'A fenced owner record prevents two supervisors.',
+        alternatives: ['Stay in Cursor', 'Return to Codex'],
+      },
+      recovery: { state: 'handoff_prepared', blocked: false, owner_process: 'alive' },
+      stale_context: { is_stale: true, reasons: ['head_mismatch'] },
+      native: { connected: null, evidence: 'unknown', claimed_live: false },
+      unknowns: ['generation_unknown', 'native_connection_not_observed'],
+    };
+    await route.fulfill({ response, json: payload });
+  });
+  const projectId = await demoProjectId(page, DEMO.ai);
+  await page.goto(`/#/p/${projectId}/board`, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.ide-ownership');
+  await expect(page.locator('.ide-active')).toHaveText('active IDE: cursor');
+  await expect(page.locator('.ide-previous')).toHaveText('previous IDE: codex');
+  await expect(page.locator('.ide-last')).toHaveText('last IDE: cursor');
+  await expect(page.locator('.ide-fence')).toContainText('fence 4');
+  await expect(page.locator('.ide-fence')).toContainText('generation 9');
+  await expect(page.locator('.ide-owner')).toContainText('host12345678');
+  await expect(page.locator('.ide-owner')).toContainText('sess12345678');
+  await expect(page.locator('.ide-handoff-route')).toContainText('codex → cursor');
+  await expect(page.locator('.ide-handoff-age')).toContainText('2m');
+  await expect(page.locator('.ide-handoff-drift')).toContainText('context drift detected');
+  await expect(page.locator('.ide-current-milestone')).toContainText('M2');
+  await expect(page.locator('.ide-current-task')).toContainText('api');
+  await expect(page.locator('.ide-next')).toContainText('Review the handoff drift');
+  await expect(page.locator('.ide-requirements')).toContainText('review needed');
+  await expect(page.locator('.ide-question')).toContainText('Which IDE should own M3?');
+  await expect(page.locator('.ide-question-why')).toContainText('Ownership must be explicit');
+  await expect(page.locator('.ide-question-alternatives')).toContainText('Stay in Cursor');
+  await expect(page.locator('.ide-stale')).toContainText('head_mismatch');
+  await expect(page.locator('.ide-native')).toContainText('Native connection unknown');
+  await expect(page.locator('.ide-ownership')).not.toContainText('owner_token');
+  await expect(page.locator('.ide-ownership')).not.toContainText('ses_raw');
+});
+
+test('demo IDE ownership stays labelled and explicitly unknown', async ({ page }) => {
+  const projectId = await demoProjectId(page, DEMO.ai);
+  await page.goto(`/#/p/${projectId}/board`, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.ide-ownership');
+  await expect(page.locator('.ide-ownership')).toContainText('DEMO DATA');
+  await expect(page.locator('.ide-active')).toHaveText('active IDE: unknown');
+  await expect(page.locator('.ide-previous')).toHaveText('previous IDE: unknown');
+  await expect(page.locator('.ide-native')).toContainText('Native connection unknown');
+  await expect(page.locator('.ide-recovery')).toContainText('Recovery: demo');
+  await expect(page.locator('.ide-fence')).toHaveText('fence / generation unknown');
+});
+
 test('milestone panel stays usable on a narrow screen', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const projectId = await demoProjectId(page, DEMO.ai);

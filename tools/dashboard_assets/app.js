@@ -1867,6 +1867,235 @@
     );
   }
 
+  function ideStateLabel(value) {
+    const state = value || 'unknown';
+    return t(`ide.state.${state}`);
+  }
+
+  function renderIdeOwnership() {
+    const payload = state.milestones;
+    const ide = payload?.ide;
+    if (!ide) return null;
+    const ownership = ide.ownership || {};
+    const owner = ownership.owner || null;
+    const handoff = ide.handoff || null;
+    const current = ide.current || {};
+    const next = ide.next_action || {};
+    const requirements = ide.requirements_completion || {};
+    const question = ide.grill_me || null;
+    const recovery = ide.recovery || {};
+    const stale = ide.stale_context || {};
+    const demo = Boolean(ide.demo || payload?.demo);
+    const stateLabel = ideStateLabel(ownership.state);
+    const requirementStatus = requirements.status || 'unknown';
+    const requirementWarning = ['partial', 'review_needed', 'failed'].includes(requirementStatus);
+    const drift = handoff ? handoff.drift : null;
+    const driftText = drift === true
+      ? t('ide.driftYes')
+      : (drift === false ? t('ide.driftNo') : t('ide.driftUnknown'));
+    const actionKey = `ide.nextAction.${next.code || 'none'}`;
+    const actionText = t(actionKey);
+    const actionLabel = actionText === actionKey
+      ? (next.label || t('ide.nextAction.none'))
+      : actionText;
+    const platform = (value) => value || t('ide.unknown');
+    const activeLabel = t('ide.activeIde', { platform: platform(ide.active_ide) });
+    const previousLabel = t('ide.previousIde', { platform: platform(ide.previous_ide) });
+    const lastLabel = t('ide.lastIde', { platform: platform(ide.last_ide) });
+    const fenceKnown = ownership.fence != null
+      && Number.isFinite(Number(ownership.fence));
+    const generationKnown = ownership.generation != null
+      && Number.isFinite(Number(ownership.generation));
+    const fenceLabel = fenceKnown
+      ? t('ide.fence', {
+        fence: ownership.fence,
+        generation: generationKnown ? ownership.generation : t('ide.unknown'),
+      })
+      : t('ide.fenceUnknown');
+    const ownerKnown = Boolean(owner && (owner.platform || owner.host_hash || owner.session_hash));
+    const ownerLabel = ownerKnown
+      ? t('ide.owner', {
+        platform: platform(owner.platform),
+        host: owner.host_hash || t('ide.unknown'),
+        session: owner.session_hash || t('ide.unknown'),
+      })
+      : t('ide.ownerUnknown');
+    const handoffLabel = handoff
+      ? t('ide.handoffRoute', {
+        source: platform(handoff.source),
+        target: platform(handoff.target),
+      })
+      : t('ide.handoffNone');
+    const handoffAge = handoff && handoff.age_seconds != null
+      ? t('ide.handoffAge', { age: fmtDuration(handoff.age_seconds) })
+      : t('ide.unknown');
+    const handoffDigest = handoff && handoff.digest
+      ? t('ide.handoffDigest', { digest: shortId(handoff.digest, 12) })
+      : null;
+    const currentNodes = [];
+    if (current.run_id) {
+      currentNodes.push(h('span', {
+        class: 'ide-current-run',
+        text: t('ide.currentRun', {
+          run: shortId(current.run_id, 18),
+          status: current.run_status || t('ide.unknown'),
+        }),
+      }));
+    }
+    if (current.milestone_id) {
+      currentNodes.push(h('span', {
+        class: 'ide-current-milestone',
+        text: t('ide.currentMilestone', {
+          milestone: current.milestone_id,
+          status: milestoneStatusLabel(current.milestone_status || 'planned'),
+        }),
+      }));
+    }
+    if (current.task_id) {
+      currentNodes.push(h('span', {
+        class: 'ide-current-task',
+        text: t('ide.currentTask', {
+          task: current.task_id,
+          status: current.task_state || t('ide.unknown'),
+        }),
+      }));
+    }
+    if (!currentNodes.length) {
+      currentNodes.push(h('span', { class: 'ide-current-none', text: t('ide.currentNone') }));
+    }
+    const alternatives = question?.alternatives || [];
+    return h('div', {
+      class: 'ide-ownership',
+      'data-state': ownership.state || 'unknown',
+      'data-source': ide.source || 'unknown',
+      'data-demo': String(demo),
+    },
+      h('div', { class: 'ide-ownership-head' },
+        h('div', {},
+          h('div', { class: 'eyebrow', text: t('ide.eyebrow') }),
+          h('strong', { text: t('ide.title') }),
+        ),
+        h('div', { class: 'ide-meta' },
+          demo ? h('span', { class: 'demo-chip', text: t('ide.demo') }) : null,
+          h('span', {
+            class: `ide-state-chip${['blocked', 'stale'].includes(ownership.state) ? ' warning' : ''}`,
+            'data-state': ownership.state || 'unknown',
+            text: stateLabel,
+          }),
+          h('span', { class: 'ide-source', text: t('ide.source', {
+            source: ide.source || t('ide.unknown'),
+          }) }),
+        ),
+      ),
+      h('div', { class: 'ide-ides' },
+        h('span', { class: 'ide-active', text: activeLabel }),
+        h('span', { class: 'ide-previous', text: previousLabel }),
+        h('span', { class: 'ide-last', text: lastLabel }),
+        h('span', {
+          class: 'ide-fence',
+          text: fenceLabel,
+        }),
+      ),
+      h('div', { class: 'ide-owner' },
+        h('span', { class: 'ide-owner-label', text: ownerLabel }),
+      ),
+      h('div', { class: 'ide-handoff' },
+        h('span', { class: 'memory-label', text: t('ide.handoff') }),
+        h('span', { class: 'ide-handoff-route', text: handoffLabel }),
+        h('span', { class: 'ide-handoff-age', text: handoffAge }),
+        handoffDigest ? h('span', { class: 'ide-handoff-digest', text: handoffDigest }) : null,
+        h('span', {
+          class: `ide-handoff-drift${drift === true ? ' warning' : ''}`,
+          'data-drift': drift == null ? 'unknown' : String(drift),
+          text: driftText,
+        }),
+      ),
+      h('div', { class: 'ide-current' },
+        h('span', { class: 'memory-label', text: t('ide.current') }),
+        ...currentNodes,
+      ),
+      h('div', { class: 'ide-next' },
+        h('span', { class: 'memory-label', text: t('ide.nextAction') }),
+        h('strong', { text: actionLabel }),
+      ),
+      h('div', {
+        class: `ide-requirements${requirementWarning ? ' warning' : ''}`,
+        'data-status': requirementStatus,
+      },
+        h('span', { class: 'memory-label', text: t('ide.requirements') }),
+        h('strong', {
+          text: t(`ide.requirementsStatus.${requirementStatus}`),
+        }),
+        requirements.not_verified != null
+          ? h('span', {
+            class: 'ide-requirements-count',
+            text: t('memory.contractNotVerified', { count: requirements.not_verified }),
+          })
+          : null,
+      ),
+      question
+        ? h('div', { class: 'ide-question' },
+          h('span', { class: 'memory-label', text: t('ide.question') }),
+          h('strong', { text: question.question || t('ide.questionNone') }),
+          question.why
+            ? h('p', { class: 'ide-question-why', text: t('ide.questionWhy', { why: question.why }) })
+            : null,
+          question.rationale
+            ? h('p', { class: 'ide-question-rationale', text: t('ide.questionRationale', { rationale: question.rationale }) })
+            : null,
+          alternatives.length
+            ? h('div', { class: 'ide-question-alternatives' },
+              h('span', { class: 'memory-label', text: t('ide.questionAlternatives') }),
+              h('ul', {}, ...alternatives.map((item) => h('li', { text: item }))),
+            )
+            : null,
+        )
+        : null,
+      h('div', { class: 'ide-health' },
+        h('span', {
+          class: `ide-recovery${recovery.blocked ? ' warning' : ''}`,
+          'data-blocked': String(Boolean(recovery.blocked)),
+          text: t('ide.recovery', {
+            state: recovery.state || t('ide.unknown'),
+          }),
+        }),
+        recovery.owner_process
+          ? h('span', {
+            class: 'ide-owner-process',
+            text: t('ide.ownerProcess', { state: recovery.owner_process }),
+          })
+          : null,
+        recovery.blocked
+          ? h('span', { class: 'ide-blocked', text: t('ide.blocked') })
+          : null,
+        recovery.orphaned_sessions
+          ? h('span', {
+            class: 'ide-orphaned',
+            text: t('ide.orphaned', { count: recovery.orphaned_sessions }),
+          })
+          : null,
+        h('span', {
+          class: `ide-stale${stale.is_stale === true ? ' warning' : ''}`,
+          'data-stale': stale.is_stale == null ? 'unknown' : String(stale.is_stale),
+          text: stale.is_stale == null
+            ? t('ide.staleUnknown')
+            : (stale.is_stale
+              ? t('ide.stale', {
+                reasons: (stale.reasons || []).join(', ') || t('memory.none'),
+              })
+              : t('ide.stale', { reasons: t('memory.none') })),
+        }),
+        h('span', { class: 'ide-native', text: t('ide.nativeUnknown') }),
+        ide.snapshot_count
+          ? h('span', {
+            class: 'ide-snapshots',
+            text: t('ide.snapshots', { count: ide.snapshot_count }),
+          })
+          : null,
+      ),
+    );
+  }
+
   function modeChip(run) {
     const mode = run?.mode_label || run?.work_mode || 'auto';
     return h('span', {
@@ -2101,6 +2330,8 @@
         }
         const memoryPanel = renderProjectMemory();
         if (memoryPanel) boardHost.append(memoryPanel);
+        const idePanel = renderIdeOwnership();
+        if (idePanel) boardHost.append(idePanel);
       }
     }
     if (officeHost) {

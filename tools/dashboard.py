@@ -90,6 +90,10 @@ ACTIVE_WINDOW = 180.0
 STATE_WORKERS = max(1, min(os.cpu_count() or 1, 8))
 DETAIL_CACHE_LIMIT = 100
 WORKTREE_TTL = 6.0
+IDE_PLATFORMS = ("codex", "opencode", "cursor", "antigravity")
+IDE_OWNERSHIP_STATES = (
+    "active", "handoff", "released", "stale", "blocked", "unknown", "demo",
+)
 
 _ASSET_CACHE: dict[str, tuple[int, int, bytes, bytes | None]] = {}
 _ASSET_LOCK = threading.Lock()
@@ -1168,6 +1172,860 @@ def _mode_label(value) -> str:
     return "auto"
 
 
+# -- V7.8 IDE ownership and handoff -------------------------------------
+# The handoff module owns native coordination. The dashboard only reads a
+# bounded, sanitized snapshot; it never opens a native session, signals a
+# process or upgrades a local lock record into a "connected" claim.
+IDE_OWNERSHIP_STATE_ALIASES = {
+    "active": "active", "owned": "active", "held": "active",
+    "claimed": "active", "locked": "active", "leased": "active",
+    "transferred": "active",
+    "handoff": "handoff", "handing_off": "handoff",
+    "handoff_pending": "handoff", "pending_handoff": "handoff",
+    "handoff_prepared": "handoff", "prepared": "handoff",
+    "transfer": "handoff", "transferring": "handoff",
+    "released": "released", "free": "released", "idle": "released",
+    "inactive": "released", "unlocked": "released", "none": "released",
+    "stale": "stale", "expired": "stale", "abandoned": "stale",
+    "blocked": "blocked", "conflict": "blocked", "recovery": "blocked",
+    "recovery_required": "blocked", "recovery_failed": "blocked",
+    "orphaned": "blocked",
+}
+
+
+def _ide_handoff_module():
+    """Load the optional read-only handoff module; absence stays unknown."""
+    try:
+        from tools import ide_handoff  # type: ignore
+        return ide_handoff
+    except Exception:
+        pass
+    try:
+        import ide_handoff  # type: ignore
+        return ide_handoff
+    except Exception:
+        return None
+
+
+def _bounded_text(value, limit: int = 300):
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    return text[:limit] if text else None
+
+
+def _platform_label(value):
+    if not isinstance(value, str):
+        return None
+    key = value.strip().lower()
+    for known in IDE_PLATFORMS:
+        if key == known or key.startswith(known + " ") or key.startswith(known + "-"):
+            return known
+    return None
+
+
+def _hash_excerpt(value):
+    """Return a short stable hash; never echo a raw host/session/token value."""
+    text = _bounded_text(value, 512)
+    if text is None:
+        return None
+    if re.fullmatch(r"[0-9a-fA-F]{16,64}", text):
+        return text[:12].lower()
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
+
+
+def _digest_excerpt(value):
+    """Return a bounded digest token; never hash an already-safe digest."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return str(value)[:32]
+    text = _bounded_text(value, 128)
+    if text is None:
+        return None
+    if re.fullmatch(r"[A-Za-z0-9_.:+/=-]{1,128}", text):
+        return text
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:32]
+
+
+def _bounded_int(value):
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value >= 0 else None
+    if isinstance(value, float) and math.isfinite(value) and value >= 0:
+        return int(value)
+    if isinstance(value, str) and value.isdigit():
+        return int(value)
+    return None
+
+
+def _first_value(mapping, keys):
+    if not isinstance(mapping, dict):
+        return None
+    for key in keys:
+        if key in mapping and mapping[key] is not None:
+            return mapping[key]
+    return None
+
+
+def _canonical_ownership_state(value):
+    text = _bounded_text(value, 60)
+    if text is None:
+        return None
+    key = re.sub(r"[\s-]+", "_", text.lower())
+    return IDE_OWNERSHIP_STATE_ALIASES.get(key)
+
+
+def _safe_hash_field(value):
+    """Pass through a declared hash field; hash raw fields separately."""
+    text = _bounded_text(value, 128)
+    if text is None:
+        return None
+    if re.fullmatch(r"[A-Za-z0-9_.:-]{8,128}", text):
+        return text
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
+
+
+def _owner_view(value):
+    if isinstance(value, str):
+        platform = _platform_label(value)
+        if platform is None:
+            return None
+        return {"platform": platform, "host_hash": None,
+                "session_hash": None}
+    if not isinstance(value, dict):
+        return None
+    platform = _platform_label(_first_value(
+        value, ("platform", "ide", "client", "owner_platform", "host_platform")))
+    host = _first_value(value, ("host_hash", "host", "hostname", "machine",
+                                "machine_hash", "node", "device"))
+    session = _first_value(value, ("session_hash", "session_id_hash",
+                                   "session_id", "session", "owner_session",
+                                   "conversation_hash", "conversation_id"))
+    host_hash = _safe_hash_field(value.get("host_hash"))
+    if host_hash is None:
+        host_hash = _hash_excerpt(host)
+    session_hash = _safe_hash_field(
+        value.get("session_hash") or value.get("session_id_hash"))
+    if session_hash is None:
+        session_hash = _hash_excerpt(session)
+    view = {
+        "platform": platform,
+        "host_hash": host_hash,
+        "session_hash": session_hash,
+    }
+    if not any(view.values()):
+        return None
+    return view
+
+
+def _handoff_view(raw, snapshot=None):
+    if not isinstance(raw, dict):
+        return None
+    snapshot = snapshot if isinstance(snapshot, dict) else {}
+    source = _platform_label(_first_value(
+        raw, ("source", "from", "source_platform", "from_platform", "origin",
+              "source_ide")))
+    if source is None:
+        source = _platform_label(snapshot.get("source_ide"))
+    target = _platform_label(_first_value(
+        raw, ("target", "to", "target_platform", "to_platform",
+              "destination", "target_ide")))
+    if target is None:
+        target = _platform_label(snapshot.get("target_ide"))
+    digest = _digest_excerpt(_first_value(
+        raw, ("digest", "sha256", "context_digest", "handoff_digest",
+              "snapshot_digest")))
+    if digest is None:
+        digest = _digest_excerpt(snapshot.get("digest"))
+    drift_raw = _first_value(
+        raw, ("drift", "digest_drift", "context_drift", "drifted"))
+    if isinstance(drift_raw, dict):
+        drift_raw = _first_value(drift_raw, ("drift", "changed", "mismatch"))
+    if isinstance(drift_raw, str):
+        normalized = drift_raw.strip().lower()
+        if normalized in ("none", "clean", "match", "matches", "no_drift",
+                          "unchanged", "false"):
+            drift_raw = False
+        elif normalized in ("drift", "drifted", "dirty", "mismatch",
+                            "changed", "true"):
+            drift_raw = True
+    drift = drift_raw if isinstance(drift_raw, bool) else None
+    created_at = _number(_first_value(
+        raw, ("created_at", "handed_off_at", "at", "time", "updated_at",
+              "timestamp")))
+    if created_at is None:
+        created_at = _number(snapshot.get("created_at"))
+    age_seconds = (max(0, int(time.time() - created_at))
+                   if created_at is not None and created_at > 0 else None)
+    direct_age = _bounded_int(_first_value(
+        raw, ("age_seconds", "age", "handoff_age_seconds")))
+    if direct_age is not None:
+        age_seconds = direct_age
+    state = _canonical_ownership_state(_first_value(
+        raw, ("state", "status", "handoff_state")))
+    view = {
+        "handoff_id": _bounded_text(_first_value(
+            raw, ("handoff_id", "id")), 80),
+        "state": state,
+        "source": source,
+        "target": target,
+        "digest": digest,
+        "drift": drift,
+        "created_at": created_at,
+        "age_seconds": age_seconds,
+    }
+    return view if any(value is not None for value in view.values()) else None
+
+
+def _snapshot_views(raw):
+    if not isinstance(raw, list):
+        return [], 0
+    rows = []
+    for item in raw[:20]:
+        if isinstance(item, dict):
+            row = {
+                "platform": _platform_label(_first_value(
+                    item, ("platform", "ide", "client", "owner_platform"))),
+                "source": _platform_label(_first_value(
+                    item, ("source_ide", "source", "from"))),
+                "target": _platform_label(_first_value(
+                    item, ("target_ide", "target", "to"))),
+                "state": _canonical_ownership_state(_first_value(
+                    item, ("state", "status", "handoff_state"))),
+                "generation": _bounded_int(_first_value(
+                    item, ("generation", "gen", "fence_generation"))),
+                "digest": _digest_excerpt(_first_value(
+                    item, ("digest", "sha256", "context_digest",
+                          "snapshot_digest"))),
+                "created_at": _number(_first_value(
+                    item, ("created_at", "at", "time", "updated_at"))),
+            }
+            if any(value is not None for value in row.values()):
+                rows.append(row)
+        elif isinstance(item, str):
+            digest = _digest_excerpt(item)
+            if digest is not None:
+                rows.append({"digest": digest})
+    return rows, len(raw)
+
+
+def _reason_codes(raw, limit=8):
+    codes = []
+    for item in (raw.get("reasons") or [])[:limit]:
+        if isinstance(item, dict):
+            code = _bounded_text(item.get("code"), 80)
+        else:
+            code = _bounded_text(item, 80)
+        if code is not None and code not in codes:
+            codes.append(code)
+    return codes
+
+
+def _liveness_view(raw):
+    liveness = raw.get("liveness")
+    liveness = liveness if isinstance(liveness, dict) else {}
+    owner = liveness.get("owner")
+    owner = owner if isinstance(owner, dict) else {}
+    leases = liveness.get("leases")
+    leases = leases if isinstance(leases, dict) else {}
+    return {
+        "owner_process": _bounded_text(owner.get("status"), 40),
+        "owner_reason": _bounded_text(owner.get("reason"), 80),
+        "leases_held": leases.get("held") is True,
+        "unknown_live": liveness.get("unknown_live") is True,
+        "reasons": [code for code in _reason_codes(liveness)
+                    if code not in ("heartbeat_fresh", "pid_verified",
+                                    "no_owner")],
+    }
+
+
+def _recovery_view(raw):
+    if not isinstance(raw, dict):
+        raw = {}
+    state = _bounded_text(_first_value(
+        raw, ("state", "status", "recovery_state")), 80)
+    blocked_raw = _first_value(raw, ("blocked", "is_blocked"))
+    blocked = blocked_raw is True
+    connected = _first_value(raw, ("owner_connected", "connected"))
+    diagnostics = []
+    for item in (raw.get("diagnostics") or [])[:6]:
+        if isinstance(item, dict):
+            text = _bounded_text(item.get("code"), 180)
+        else:
+            text = _bounded_text(item, 180)
+        if text is not None:
+            diagnostics.append(text)
+    return {
+        "state": state,
+        "blocked": blocked,
+        "owner_connected": connected if isinstance(connected, bool) else None,
+        "diagnostics": diagnostics,
+    }
+
+
+def _ide_ownership_snapshot(root: Path) -> dict:
+    """Read the optional handoff status; every missing field stays unknown."""
+    base = {
+        "available": False,
+        "source": "unavailable",
+        "state": "unknown",
+        "record_present": False,
+        "active_ide": None,
+        "previous_ide": None,
+        "owner": None,
+        "previous_owner": None,
+        "fence": None,
+        "generation": None,
+        "handoff": None,
+        "recovery": {"state": None, "blocked": False,
+                     "owner_connected": None, "diagnostics": []},
+        "snapshots": [],
+        "snapshot_count": 0,
+        "stale": None,
+        "diagnostics": ["ide_handoff_unavailable",
+                        "ownership_record_absent"],
+    }
+    module = _ide_handoff_module()
+    if module is None:
+        return base
+    status = getattr(module, "status", None)
+    if not callable(status):
+        base["diagnostics"] = ["ide_handoff_status_missing"]
+        return base
+    try:
+        raw = status(root)
+    except Exception as exc:  # A broken optional module must not break the UI.
+        base["diagnostics"] = ["ide_handoff_status_error"]
+        base["error"] = type(exc).__name__
+        return base
+    if not isinstance(raw, dict):
+        base["diagnostics"] = ["ide_handoff_status_invalid"]
+        return base
+    base["available"] = True
+    base["source"] = "ide_handoff"
+    base["diagnostics"] = []
+    ownership = raw.get("ownership")
+    ownership = ownership if isinstance(ownership, dict) else {}
+    owner_raw = (_first_value(ownership, ("owner", "current_owner", "active_owner"))
+                 or _first_value(raw, ("owner", "current_owner", "active_owner")))
+    previous_raw = (_first_value(ownership, ("previous_owner", "previous",
+                                             "last_owner"))
+                    or _first_value(raw, ("previous_owner", "previous",
+                                          "last_owner", "previous_platform")))
+    state_raw = (_first_value(ownership, ("state", "ownership_state", "status"))
+                 or _first_value(raw, ("ownership_state", "state", "status"))
+                 or (raw.get("ownership") if isinstance(raw.get("ownership"), str)
+                     else None))
+    base["state"] = _canonical_ownership_state(state_raw) or "unknown"
+    base["owner"] = _owner_view(owner_raw)
+    base["previous_owner"] = _owner_view(previous_raw)
+    base["fence"] = _bounded_int(_first_value(
+        ownership, ("fence", "fence_token"))
+        if ownership else None)
+    if base["fence"] is None:
+        base["fence"] = _bounded_int(_first_value(
+            raw, ("fence", "fence_token")))
+    base["generation"] = _bounded_int(_first_value(
+        ownership, ("generation", "gen"))
+        if ownership else None)
+    if base["generation"] is None:
+        base["generation"] = _bounded_int(_first_value(
+            raw, ("generation", "gen")))
+    snapshot_raw = raw.get("snapshot")
+    snapshot_raw = (snapshot_raw if isinstance(snapshot_raw, dict)
+                    and not snapshot_raw.get("error") else {})
+    base["handoff"] = _handoff_view(_first_value(
+        raw, ("handoff", "current_handoff", "last_handoff")), snapshot_raw)
+    liveness = _liveness_view(raw)
+    recovery = _recovery_view(raw.get("recovery"))
+    recovery["state"] = (recovery.get("state")
+                         or _bounded_text(raw.get("status"), 80)
+                         or base["state"])
+    if base["state"] == "blocked" or raw.get("state") in (
+            "blocked", "recovery_required"):
+        recovery["blocked"] = True
+    recovery["owner_process"] = liveness["owner_process"]
+    recovery["leases_held"] = liveness["leases_held"]
+    recovery["unknown_live"] = liveness["unknown_live"]
+    diagnostics = list(recovery.get("diagnostics") or [])
+    for code in _reason_codes(raw):
+        if code not in diagnostics:
+            diagnostics.append(code)
+    for code in liveness["reasons"]:
+        if code not in diagnostics:
+            diagnostics.append(code)
+    recovery["diagnostics"] = diagnostics[:8]
+    base["recovery"] = recovery
+    snapshots, count = _snapshot_views(_first_value(
+        raw, ("snapshots", "history", "handoff_snapshots")))
+    if not snapshots and snapshot_raw:
+        snapshots = [{
+            "platform": _platform_label(snapshot_raw.get("target_ide")),
+            "source": _platform_label(snapshot_raw.get("source_ide")),
+            "target": _platform_label(snapshot_raw.get("target_ide")),
+            "state": None,
+            "generation": None,
+            "digest": _digest_excerpt(snapshot_raw.get("digest")),
+            "created_at": _number(snapshot_raw.get("created_at")),
+        }]
+        count = 1
+    base["snapshots"] = snapshots
+    base["snapshot_count"] = count
+    # An absent ownership file yields a synthetic fence=0 record. Do not
+    # present that placeholder as a real fence.
+    ownership_path = raw.get("ownership_path")
+    if isinstance(ownership_path, str) and ownership_path:
+        try:
+            candidate = Path(ownership_path)
+            if not candidate.is_absolute():
+                candidate = root / candidate
+            present = candidate.is_file()
+        except OSError:
+            present = False
+        base["record_present"] = bool(present)
+        if not present:
+            # The module returns a synthetic record when no file exists.
+            # Never present that placeholder as a released/owned state or a
+            # real fence.
+            base["state"] = "unknown"
+            base["owner"] = None
+            base["previous_owner"] = None
+            base["previous_ide"] = None
+            base["fence"] = None
+            base["generation"] = None
+            base["handoff"] = None
+            base["diagnostics"] = list(dict.fromkeys(
+                base["diagnostics"] + ["ownership_record_absent"]))
+            base["recovery"] = {**(base.get("recovery") or {}),
+                                "state": "unknown",
+                                "owner_connected": None}
+    else:
+        base["record_present"] = bool(base["owner"])
+    stale_raw = raw.get("stale")
+    if isinstance(stale_raw, dict):
+        reasons = stale_raw.get("reasons")
+        base["stale"] = {
+            "is_stale": bool(stale_raw.get("is_stale")),
+            "reasons": [text for text in (
+                _bounded_text(item, 120) for item in (reasons or [])[:8])
+                if text is not None],
+        }
+    elif isinstance(stale_raw, bool):
+        base["stale"] = {"is_stale": stale_raw, "reasons": []}
+    elif isinstance(stale_raw, list):
+        base["stale"] = {
+            "is_stale": True,
+            "reasons": [text for text in (
+                _bounded_text(item, 120) for item in stale_raw[:8])
+                if text is not None],
+        }
+    elif isinstance(stale_raw, str):
+        reason = _bounded_text(stale_raw, 120)
+        base["stale"] = {"is_stale": True,
+                         "reasons": [reason] if reason else []}
+    elif liveness["owner_process"] == "dead":
+        base["stale"] = {"is_stale": True,
+                         "reasons": ["owner_process_not_alive"]}
+    if base["state"] in ("active", "handoff") and base["owner"]:
+        base["active_ide"] = base["owner"].get("platform")
+    previous = (base["previous_owner"] or {}).get("platform")
+    if previous is None and base["handoff"]:
+        source = base["handoff"].get("source")
+        if source and source != base["active_ide"]:
+            previous = source
+    base["previous_ide"] = previous
+    return base
+
+
+def _canonical_requirement_status(status, fully_verified, contract_status):
+    if status in ("verified",) or fully_verified is True:
+        return "verified"
+    if status == "needs_review":
+        return "review_needed"
+    if status in ("partially_verified", "implemented_unverified"):
+        return "partial"
+    if status in ("failed", "blocked"):
+        return "failed"
+    if status in ("not_started", "not_run", None):
+        if contract_status == "verified":
+            return "verified"
+        if contract_status == "partially_verified":
+            return "partial"
+        if contract_status in ("not_verified", "invalidated"):
+            return "review_needed"
+        if contract_status == "failed":
+            return "failed"
+        return "not_run"
+    return "unknown"
+
+
+def _requirements_completion(run, memory):
+    value = run.get("requirements") if isinstance(run, dict) else None
+    value = value if isinstance(value, dict) else {}
+    memory = memory if isinstance(memory, dict) else {}
+    contract_status = memory.get("contract_status") or "not_run"
+    status = _canonical_requirement_status(
+        value.get("status"), value.get("fully_verified"), contract_status)
+    passed = _bounded_int(value.get("passed"))
+    not_verified = _bounded_int(value.get("not_verified"))
+    critical = _bounded_int(value.get("critical_unverified"))
+    if value:
+        fully_verified = value.get("fully_verified")
+    else:
+        fully_verified = memory.get("contract_fully_verified")
+        not_verified = (not_verified
+                        if not_verified is not None
+                        else _bounded_int(memory.get("contract_not_verified")))
+    return {
+        "status": status,
+        "fully_verified": (True if status == "verified" else
+                           (False if status in ("partial", "review_needed",
+                                                "failed") else
+                            (fully_verified if isinstance(fully_verified, bool)
+                             else None))),
+        "passed": passed,
+        "not_verified": not_verified,
+        "critical_unverified": critical,
+        "source": ("requirements" if value else
+                   ("contract" if contract_status != "not_run" else "unknown")),
+    }
+
+
+def _current_work(milestones, memory):
+    runs = []
+    if isinstance(milestones, dict):
+        raw_runs = milestones.get("runs")
+        if isinstance(raw_runs, list):
+            runs = [item for item in raw_runs if isinstance(item, dict)]
+        elif milestones.get("run_id"):
+            runs = [milestones]
+    current_run = None
+    if runs:
+        current_id = (milestones or {}).get("current_run_id")
+        current_run = next(
+            (item for item in runs if item.get("run_id") == current_id),
+            runs[0])
+    milestone = None
+    task = None
+    if current_run:
+        values = [item for item in (current_run.get("milestones") or [])
+                  if isinstance(item, dict)]
+        milestone = next(
+            (item for item in values
+             if item.get("status") in ("running", "verifying", "repairing",
+                                       "ready")), None)
+        if milestone is None:
+            milestone = next(
+                (item for item in values
+                 if item.get("status") in ("planned", "pending")), None)
+        if milestone is None and values:
+            milestone = values[-1]
+        if milestone:
+            tasks = [item for item in (milestone.get("tasks") or [])
+                     if isinstance(item, dict)]
+            task = next(
+                (item for item in tasks
+                 if item.get("state") in ("running", "cancel_requested")), None)
+            if task is None:
+                task = next(
+                    (item for item in tasks if item.get("state") == "pending"),
+                    None)
+    if current_run is None:
+        last_milestone = (memory or {}).get("last_milestone")
+        return {
+            "run_id": None, "run_status": None,
+            "milestone_id": last_milestone, "milestone_status": None,
+            "task_id": None, "task_state": None,
+            "source": "memory" if last_milestone else "unknown",
+            "known": bool(last_milestone),
+        }
+    return {
+        "run_id": current_run.get("run_id"),
+        "run_status": current_run.get("status"),
+        "milestone_id": (milestone or {}).get("id"),
+        "milestone_status": (milestone or {}).get("status"),
+        "task_id": (task or {}).get("id"),
+        "task_state": (task or {}).get("state"),
+        "source": "milestones",
+        "known": bool(milestone),
+    }
+
+
+def _grill_me_view(memory):
+    active = (memory or {}).get("active_interview")
+    active = active if isinstance(active, dict) else {}
+    question = active.get("question") or (memory or {}).get("question")
+    if not isinstance(question, dict):
+        return None
+    alternatives = []
+    for item in (question.get("alternatives") or [])[:8]:
+        if isinstance(item, dict):
+            label = _bounded_text(item.get("label") or item.get("text"), 160)
+        else:
+            label = _bounded_text(item, 160)
+        if label is not None:
+            alternatives.append(label)
+    options = []
+    for item in (question.get("options") or [])[:8]:
+        if not isinstance(item, dict):
+            continue
+        label = _bounded_text(item.get("label") or item.get("text"), 160)
+        if label is None:
+            continue
+        options.append({"label": label,
+                        "recommended": bool(item.get("recommended"))})
+    if not alternatives:
+        alternatives = [item["label"] for item in options]
+    return {
+        "interview_id": active.get("interview_id"),
+        "question_id": question.get("question_id"),
+        "status": question.get("status") or active.get("status"),
+        "question": _bounded_text(question.get("question"), 400),
+        "why": _bounded_text(question.get("why"), 600),
+        "rationale": _bounded_text(question.get("rationale"), 600),
+        "alternatives": alternatives,
+        "options": options,
+        "age_seconds": (active.get("age_seconds")
+                        if isinstance(active.get("age_seconds"), (int, float))
+                        and not isinstance(active.get("age_seconds"), bool)
+                        else None),
+    }
+
+
+def _merge_stale_context(ownership, memory):
+    stale = (memory or {}).get("stale")
+    stale = stale if isinstance(stale, dict) else {}
+    reasons = [str(item)[:120] for item in (stale.get("reasons") or [])[:8]]
+    is_stale = stale.get("is_stale")
+    source = "memory"
+    base = ownership.get("stale")
+    if isinstance(base, dict):
+        for item in base.get("reasons") or []:
+            if item not in reasons:
+                reasons.append(str(item)[:120])
+        base_stale = base.get("is_stale")
+        if isinstance(base_stale, bool):
+            is_stale = bool(is_stale) or base_stale
+        source = "ide_handoff+memory" if source == "memory" else "ide_handoff"
+    return {
+        "is_stale": is_stale if isinstance(is_stale, bool) else None,
+        "reasons": reasons[:8],
+        "source": source if isinstance(is_stale, bool) else "unknown",
+    }
+
+
+def _merge_recovery(ownership, run, memory):
+    base = dict(ownership.get("recovery") or {})
+    state = base.get("state")
+    blocked = bool(base.get("blocked"))
+    connected = base.get("owner_connected")
+    orphaned = 0
+    if isinstance(run, dict):
+        run_state = run.get("recovery_state")
+        if run_state:
+            state = run_state
+        if isinstance(run.get("owner_connected"), bool):
+            connected = run.get("owner_connected")
+        orphaned = _bounded_int(run.get("orphaned_managed_sessions")) or 0
+        if run_state in ("blocked", "orphaned", "recovery_failed"):
+            blocked = True
+        if run.get("status") in ("failed", "cancelled"):
+            blocked = True
+    return {
+        "state": state,
+        "blocked": blocked,
+        "owner_connected": connected if isinstance(connected, bool) else None,
+        "owner_process": base.get("owner_process"),
+        "leases_held": bool(base.get("leases_held")),
+        "unknown_live": bool(base.get("unknown_live")),
+        "requirements_blocked": bool(memory and (memory.get("blockers") or [])),
+        "orphaned_sessions": orphaned,
+        "diagnostics": list(base.get("diagnostics") or [])[:6],
+    }
+
+
+def _fallback_handoff(memory):
+    handoff = (memory or {}).get("handoff")
+    if not isinstance(handoff, dict):
+        return None
+    payload = handoff.get("payload")
+    payload = payload if isinstance(payload, dict) else {}
+    created_at = _number(handoff.get("created_at"))
+    return {
+        "state": None,
+        "source": _platform_label(handoff.get("platform")),
+        "target": None,
+        "digest": _digest_excerpt(handoff.get("handoff_id")),
+        "drift": None,
+        "created_at": created_at,
+        "age_seconds": (max(0, int(time.time() - created_at))
+                        if created_at is not None and created_at > 0 else None),
+        "evidence": "project_memory",
+        "summary": _bounded_text(payload.get("context_summary"), 240),
+    }
+
+
+def _next_recommended_action(ownership, current, grill, requirements,
+                             recovery, handoff):
+    code = None
+    if recovery.get("blocked"):
+        code = "resolve_recovery"
+    elif isinstance((handoff or {}).get("drift"), bool) and handoff["drift"]:
+        code = "review_handoff_drift"
+    elif grill and grill.get("question"):
+        code = "answer_grill_me"
+    elif requirements.get("status") == "review_needed":
+        code = "request_review"
+    elif requirements.get("status") in ("partial", "failed"):
+        code = "verify_requirements"
+    elif current.get("run_status") in ("passed", "completed"):
+        code = ("none" if requirements.get("status") == "verified"
+                else "verify_requirements")
+    elif current.get("task_state") in ("running", "cancel_requested"):
+        code = "continue_milestone"
+    elif current.get("milestone_status") in ("planned", "pending", "ready"):
+        code = "start_milestone"
+    elif current.get("run_id"):
+        code = "continue_milestone"
+    elif ownership.get("record_present") or ownership.get("active_ide"):
+        code = "start_milestone"
+    else:
+        code = "confirm_ownership"
+    labels = {
+        "resolve_recovery": "Resolve the blocked or interrupted run before continuing",
+        "review_handoff_drift": "Review the handoff drift before continuing",
+        "answer_grill_me": "Answer the open Grill-Me question",
+        "request_review": "Request independent review for the remaining criteria",
+        "verify_requirements": "Verify the remaining requirements with real evidence",
+        "continue_milestone": "Continue the current milestone",
+        "start_milestone": "Start or plan the next milestone",
+        "confirm_ownership": "Confirm IDE ownership; no handoff record is available",
+        "none": "No action is required by the current evidence",
+    }
+    return {"code": code, "label": labels[code]}
+
+
+def _ide_context(root, *, demo=False, memory=None, milestones=None) -> dict:
+    memory = memory if isinstance(memory, dict) else {}
+    root = Path(root)
+    runs = []
+    if isinstance(milestones, dict):
+        raw_runs = milestones.get("runs")
+        if isinstance(raw_runs, list):
+            runs = [item for item in raw_runs if isinstance(item, dict)]
+        elif milestones.get("run_id"):
+            runs = [milestones]
+    current_id = (milestones or {}).get("current_run_id")
+    active_run = (next((item for item in runs
+                        if item.get("run_id") == current_id),
+                       runs[0] if runs else None))
+    if demo:
+        ownership = {
+            "available": False, "source": "demo", "state": "demo",
+            "active_ide": None, "previous_ide": None, "owner": None,
+            "previous_owner": None, "fence": None, "generation": None,
+            "handoff": None,
+            "recovery": {"state": "demo", "blocked": False,
+                         "owner_connected": None, "diagnostics": []},
+            "snapshots": [], "snapshot_count": 0, "stale": None,
+            "diagnostics": ["demo_synthetic"],
+        }
+    else:
+        ownership = _ide_ownership_snapshot(root)
+    current = _current_work(milestones, memory)
+    requirements = _requirements_completion(active_run or {}, memory)
+    grill = _grill_me_view(memory) if not demo else None
+    recovery = _merge_recovery(ownership, active_run, memory)
+    handoff = ownership.get("handoff") or _fallback_handoff(memory)
+    stale = _merge_stale_context(ownership, memory)
+    if demo:
+        last_ide = "demo"
+        previous_ide = None
+        recovery = {"state": "demo", "blocked": False,
+                    "owner_connected": None, "orphaned_sessions": 0,
+                    "diagnostics": ["demo_synthetic"]}
+        handoff = None
+        stale = {"is_stale": False, "reasons": [], "source": "demo"}
+    else:
+        last_ide = (memory.get("last_ide")
+                    or (ownership.get("owner") or {}).get("platform")
+                    or ownership.get("previous_ide")
+                    or (handoff or {}).get("target"))
+        previous_ide = ownership.get("previous_ide")
+        if previous_ide is None and handoff:
+            source = handoff.get("source")
+            if source and source != ownership.get("active_ide"):
+                previous_ide = source
+    next_action = _next_recommended_action(
+        ownership, current, grill, requirements, recovery, handoff)
+    if demo:
+        next_action = {
+            "code": "demo",
+            "label": "Synthetic demo data; no native ownership evidence",
+        }
+    unknowns = list(ownership.get("diagnostics") or [])[:6]
+    if ownership.get("active_ide") is None:
+        unknowns.append("active_ide_unknown")
+    if ownership.get("previous_ide") is None:
+        unknowns.append("previous_ide_unknown")
+    if ownership.get("fence") is None:
+        unknowns.append("fence_unknown")
+    if ownership.get("generation") is None:
+        unknowns.append("generation_unknown")
+    if handoff and handoff.get("drift") is None:
+        unknowns.append("handoff_drift_unknown")
+    if current.get("task_id") is None:
+        unknowns.append("current_task_unknown")
+    if requirements.get("status") in ("not_run", "unknown"):
+        unknowns.append("requirements_completion_unknown")
+    return {
+        "available": bool(ownership.get("available")),
+        "source": ownership.get("source"),
+        "demo": demo,
+        "record_present": bool(ownership.get("record_present")),
+        "active_ide": ownership.get("active_ide"),
+        "previous_ide": previous_ide,
+        "last_ide": last_ide,
+        "ownership": {
+            "state": ownership.get("state"),
+            "record_present": bool(ownership.get("record_present")),
+            "owner": ownership.get("owner"),
+            "previous_owner": ownership.get("previous_owner"),
+            "fence": ownership.get("fence"),
+            "generation": ownership.get("generation"),
+        },
+        # Flat aliases keep the API readable for clients that do not want the
+        # nested ownership object.
+        "ownership_state": ownership.get("state"),
+        "fence": ownership.get("fence"),
+        "generation": ownership.get("generation"),
+        "handoff": handoff,
+        "current": current,
+        "next_action": next_action,
+        "requirements_completion": requirements,
+        "grill_me": grill,
+        "recovery": recovery,
+        "stale_context": stale,
+        "snapshots": ownership.get("snapshots") or [],
+        "snapshot_count": ownership.get("snapshot_count") or 0,
+        # A local ownership file is not a native handshake. This stays
+        # explicitly unknown until a client produces independent evidence.
+        "native": {
+            "connected": None,
+            "evidence": "unknown",
+            "claimed_live": False,
+        },
+        "native_connected": None,
+        "requirements_status": requirements.get("status"),
+        "blocked": bool(recovery.get("blocked")),
+        "stale": (stale.get("is_stale") if isinstance(
+            stale.get("is_stale"), bool) else None),
+        "unknowns": list(dict.fromkeys(unknowns)),
+    }
+
+
 def _read_bounded_json(path: Path, *, limit: int = 131072):
     try:
         if path.is_symlink() or not path.is_file() or path.stat().st_size > limit:
@@ -1837,6 +2695,24 @@ class Catalog:
         }
 
     def memory(self, project_id: str) -> dict:
+        payload = self._memory_raw(project_id)
+        context = self._project_ide_context(project_id, memory=payload)
+        payload["ownership"] = context["ownership"]
+        payload["ownership_state"] = context["ownership"]["state"]
+        payload["ide"] = context
+        payload["ide_ownership"] = context
+        payload["ide_handoff"] = context["handoff"]
+        payload["native_connected"] = None
+        payload["active_ide"] = context["active_ide"]
+        payload["previous_ide"] = context["previous_ide"]
+        payload["fence"] = context["fence"]
+        payload["generation"] = context["generation"]
+        payload["next_action"] = context["next_action"]
+        payload["requirements_completion"] = context["requirements_completion"]
+        payload["stale_context"] = context["stale_context"]
+        return payload
+
+    def _memory_raw(self, project_id: str) -> dict:
         entry = self._entry(project_id)
         if entry.store.demo:
             return self._empty_memory(
@@ -1936,7 +2812,62 @@ class Catalog:
                 project_id, "Project memory could not be read.",
                 error=str(exc)[:300])
 
+    def _project_ide_context(self, project_id: str, *, memory=None,
+                             milestones=None) -> dict:
+        entry = self._entry(project_id)
+        return _ide_context(
+            Path(entry.store.root),
+            demo=bool(entry.store.demo or self.demo),
+            memory=memory, milestones=milestones)
+
+    def ide(self, project_id: str) -> dict:
+        """Read-only IDE ownership/handoff evidence for one project."""
+        entry = self._entry(project_id)
+        if entry.error:
+            raise DashboardError(entry.error)
+        return self._project_ide_context(
+            project_id,
+            memory=self._memory_raw(project_id),
+            milestones=self._milestones_raw(project_id))
+
     def milestones(self, project_id: str, run_id: str | None = None) -> dict:
+        payload = self._milestones_raw(project_id, run_id)
+        context = self._project_ide_context(
+            project_id, memory=self._memory_raw(project_id),
+            milestones=payload)
+        if run_id is not None:
+            payload["ide"] = context
+            payload["ide_ownership"] = context
+            payload["ownership"] = context["ownership"]
+            payload["ownership_state"] = context["ownership"]["state"]
+            payload["ide_handoff"] = context["handoff"]
+            payload["native_connected"] = None
+            payload["active_ide"] = context["active_ide"]
+            payload["previous_ide"] = context["previous_ide"]
+            payload["last_ide"] = context["last_ide"]
+            payload["fence"] = context["fence"]
+            payload["generation"] = context["generation"]
+            payload["next_action"] = context["next_action"]
+            payload["requirements_completion"] = context["requirements_completion"]
+            payload["stale_context"] = context["stale_context"]
+            return payload
+        payload["ide"] = context
+        payload["ide_ownership"] = context
+        payload["ownership"] = context["ownership"]
+        payload["ownership_state"] = context["ownership"]["state"]
+        payload["ide_handoff"] = context["handoff"]
+        payload["native_connected"] = None
+        payload["active_ide"] = context["active_ide"]
+        payload["previous_ide"] = context["previous_ide"]
+        payload["last_ide"] = context["last_ide"]
+        payload["fence"] = context["fence"]
+        payload["generation"] = context["generation"]
+        payload["next_action"] = context["next_action"]
+        payload["requirements_completion"] = context["requirements_completion"]
+        payload["stale_context"] = context["stale_context"]
+        return payload
+
+    def _milestones_raw(self, project_id: str, run_id: str | None = None) -> dict:
         entry = self._entry(project_id)
         if entry.store.demo:
             payload = _demo_milestones(project_id, entry.project.get("theme", "ai"))
@@ -2532,6 +3463,13 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if len(parts) == 2 and parts[1] == "memory":
             try:
                 return self._json(catalog.memory(project_id))
+            except DashboardError as exc:
+                return self._project_failure(project_id, exc)
+            except (OSError, ValueError, sqlite3.Error) as exc:
+                return self._error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+        if len(parts) == 2 and parts[1] in ("ide", "ownership"):
+            try:
+                return self._json(catalog.ide(project_id))
             except DashboardError as exc:
                 return self._project_failure(project_id, exc)
             except (OSError, ValueError, sqlite3.Error) as exc:
