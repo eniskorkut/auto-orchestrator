@@ -2081,6 +2081,89 @@ def native_report(args) -> dict:
     }, ownership)
 
 
+
+# -- V8.0 native dispatch -------------------------------------------------
+DISPATCH_ACTIONS = ("create", "request", "confirm", "start", "permission",
+                    "complete", "collect", "verify", "fail", "cancel",
+                    "recover", "status")
+
+
+def native_dispatch_command(args) -> dict:
+    root = _root(args.root)
+    platform = _native_platform(args)
+    action = getattr(args, "dispatch_action", None)
+    if action not in DISPATCH_ACTIONS:
+        raise UniversalError("unknown native-dispatch action")
+    try:
+        from tools import native_dispatch
+    except ModuleNotFoundError:
+        import native_dispatch  # type: ignore
+    run_id = _run_id(getattr(args, "run_id", None) or "")
+    if action == "status":
+        return {"status": "ok", "platform": platform,
+                "dispatch": native_dispatch.status(root, run_id=run_id or None),
+                "read_only": True}
+    ownership = _claim_ownership(root, platform, run_id=run_id,
+                                 action=f"native-dispatch {action}")
+    dispatch_id = getattr(args, "dispatch_id", None)
+    if action == "create":
+        task_id = _run_id(getattr(args, "task_id", None) or "")
+        result = native_dispatch.create(
+            root, run_id=run_id, task_id=task_id,
+            role=getattr(args, "role", None) or "implementer",
+            ide=platform,
+            owner_session_id=getattr(args, "owner_session_id", None) or platform,
+            read_scope=getattr(args, "read_scope", None) or [],
+            write_scope=getattr(args, "write_scope", None) or [],
+            dependencies=getattr(args, "dependency", None) or [],
+            parent_agent_id=getattr(args, "parent_agent_id", None))
+        return _with_ownership({"status": "created", "dispatch": result},
+                               ownership)
+    if not dispatch_id:
+        raise UniversalError("native-dispatch requires --dispatch-id")
+    if action == "request":
+        result = native_dispatch.request(root, dispatch_id, run_id=run_id)
+    elif action == "confirm":
+        result = native_dispatch.confirm(
+            root, dispatch_id, run_id=run_id,
+            native_child_ref=getattr(args, "native_child_ref", None))
+    elif action == "start":
+        result = native_dispatch.start(
+            root, dispatch_id, run_id=run_id,
+            native_child_ref=getattr(args, "native_child_ref", None))
+    elif action == "permission":
+        result = native_dispatch.permission(
+            root, dispatch_id, run_id=run_id,
+            waiting=bool(getattr(args, "waiting", False)))
+    elif action == "complete":
+        result = native_dispatch.complete(
+            root, dispatch_id, run_id=run_id,
+            result_ref=getattr(args, "result_ref", None) or "")
+    elif action == "collect":
+        result = native_dispatch.collect(
+            root, dispatch_id, run_id=run_id,
+            evidence_ref=getattr(args, "evidence_ref", None) or "",
+            output_dir=getattr(args, "output_dir", None))
+    elif action == "verify":
+        result = native_dispatch.verify(
+            root, dispatch_id, run_id=run_id,
+            verification_run_id=getattr(args, "verification_run_id", None) or "",
+            evidence_ref=getattr(args, "evidence_ref", None) or "")
+    elif action == "fail":
+        result = native_dispatch.fail(
+            root, dispatch_id, run_id=run_id,
+            reason=getattr(args, "reason", None) or "failed")
+    elif action == "cancel":
+        result = native_dispatch.cancel(
+            root, dispatch_id, run_id=run_id,
+            reason=getattr(args, "reason", None) or "cancelled")
+    else:
+        result = native_dispatch.recover(
+            root, dispatch_id, run_id=run_id,
+            reason=getattr(args, "reason", None) or "explicit recovery")
+    return _with_ownership({"status": result.get("state"),
+                            "dispatch": result}, ownership)
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", default=".")
@@ -2179,6 +2262,25 @@ def main(argv=None) -> int:
     context_p.add_argument("--request")
     context_p.add_argument("--selection-budget", type=int, default=900)
     context_p.add_argument("--module", action="append")
+    dispatch_p = sub.add_parser("native-dispatch")
+    dispatch_p.add_argument("dispatch_action", choices=list(DISPATCH_ACTIONS))
+    dispatch_p.add_argument("--run-id", required=True)
+    dispatch_p.add_argument("--dispatch-id")
+    dispatch_p.add_argument("--task-id")
+    dispatch_p.add_argument("--role")
+    dispatch_p.add_argument("--owner-session-id")
+    dispatch_p.add_argument("--parent-agent-id")
+    dispatch_p.add_argument("--read-scope", action="append")
+    dispatch_p.add_argument("--write-scope", action="append")
+    dispatch_p.add_argument("--dependency", action="append")
+    dispatch_p.add_argument("--native-child-ref")
+    dispatch_p.add_argument("--result-ref")
+    dispatch_p.add_argument("--evidence-ref")
+    dispatch_p.add_argument("--output-dir")
+    dispatch_p.add_argument("--verification-run-id")
+    dispatch_p.add_argument("--waiting", action="store_true")
+    dispatch_p.add_argument("--reason")
+
     brief_p = sub.add_parser("brief")
     brief_p.add_argument("--run-id")
     handoff_p = sub.add_parser("handoff")
@@ -2297,7 +2399,7 @@ def main(argv=None) -> int:
             "native-report": native_report, "native-verify": native_verify,
             "native-audit": native_audit, "context": context,
             "handoff": handoff, "pause": pause, "grill": grill,
-            "brief": brief,
+            "brief": brief, "native-dispatch": native_dispatch_command,
             "memory": memory_command, "ide": ide,
             "status": lambda a: delegate(a, "status"),
             "agents": lambda a: delegate(a, "agents"),
