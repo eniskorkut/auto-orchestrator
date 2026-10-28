@@ -171,24 +171,38 @@ owner credential and an explicit handoff.
 `native-verify` is the verifier, not the agent:
 
 1. load the approved native plan and its requirements contract;
-2. run the approved test command with `subprocess` and capture the real exit
-   code;
-3. optionally parse JUnit XML or pytest JSON (`tools/test_evidence.py`),
-   rejecting DOCTYPE/ENTITY, oversized, symlinked and malformed evidence;
-4. bind HEAD, contract id/version/digest, run/task/attempt and changed files;
-5. feed `completion_engine.evaluate_completion` with the real test result and
+2. create a unique `verification_run_id` and an isolated `0700` output
+   directory under `.auto-orchestrator/verification/runs/<id>/`; pass
+   `AO_VERIFICATION_RUN_ID`, `AO_VERIFICATION_OUTPUT_DIR` and
+   `AO_VERIFICATION_RESULTS` to the child;
+3. run a **typed** test runner (`python -m unittest|pytest`, `pytest`,
+   `node --test`, `npm test`, `go test`, `cargo test`, `make test|check`) with
+   a resolved executable, no shell, and process-group cleanup on timeout;
+4. require a structured result filename (plain name only) that did not exist
+   before the run and was written after it started; parse it **after**
+   completion, reject symlinks, empty files, empty test lists, stale mtimes,
+   and exit-code contradictions;
+5. bind HEAD, contract id/version/digest, run/task/attempt and changed files;
+6. feed `completion_engine.evaluate_completion` with the real test result and
    any recorded reviews;
-6. write `.auto-orchestrator/verification/<run>-<task>-*.json` plus a project
-   memory observation.
+7. write `.auto-orchestrator/verification/<run>-<task>-*.json` (version 2) plus
+   a project memory observation.
 
 A dirty worktree or a test command that leaves changes behind forces
-`verified_completion: false` (merged-tree gate). A native self-report alone
-stays `verified: false`. `native-audit` records a reviewer verdict bound to the
-same HEAD; independence is labelled `declared_role_separation`, not a
-cryptographic attestation.
+`verified_completion: false` (merged-tree gate). A pre-existing passing JUnit
+file is never reused; an unrelated exit-0 command cannot borrow stale results.
+A native self-report alone stays `verified: false`.
 
-Structured results with a failure while the command exited 0 are refused as
-inconsistent.
+### Review independence
+
+`native-audit` writes Review Evidence v2: `reviewed_task_id`, criterion ids,
+commit, contract digest, role, verdict and an independence level. `declared`
+is audit evidence only and never satisfies a `review_required` criterion;
+`accepted` requires an explicit `--accepted-by` human/tool identity. `observed`
+is reserved for a verified native lifecycle record and is not accepted from a
+CLI flag. The Completion Engine filters reviews by the reviewed task (not the
+reviewer task), criterion, commit and contract, and rejects a review whose
+reviewer identity equals the implementer identity.
 
 ### 3.4 Capability detection
 
