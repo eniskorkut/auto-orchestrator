@@ -820,10 +820,113 @@ def _balanced_plan(pattern, text, model):
     return milestones, tasks
 
 
+INTEGRITY_POLICIES = ("development", "demo", "benchmark")
+
+
+def _scope_contract(request, plan, contract):
+    tasks = plan.get("tasks") or []
+    scope = sorted({path for task in tasks for path in task.get("write_scope") or []})
+    deliverables = [str(task.get("id")) for task in tasks
+                    if isinstance(task.get("id"), str)][:40]
+    requirements = []
+    if isinstance(contract, dict):
+        requirements = [
+            str(item.get("text"))[:500] for item in
+            (contract.get("acceptance_criteria") or [])
+            if isinstance(item, dict) and item.get("text")][:60]
+    return {
+        "objective": _request_text(request)[:500],
+        "in_scope": scope[:60],
+        "non_goals": [
+            "Changes outside the confirmed write scopes",
+            "Secrets, credentials or production data",
+            "Unapproved dependency or schema changes",
+        ],
+        "requirements": requirements,
+        "deliverables": deliverables,
+        "rollback": [
+            "Revert the run's commits on the integration branch.",
+            "Discard the run's worktrees and scratch directories.",
+            "Project memory and approved contracts are append-only audit records.",
+        ],
+        "constraints": list((contract or {}).get("constraints") or [])[:40]
+        if isinstance(contract, dict) else [],
+    }
+
+
+def _file_ownership(plan):
+    manifest = []
+    for task in plan.get("tasks") or []:
+        if not isinstance(task, dict):
+            continue
+        manifest.append({
+            "task_id": task.get("id"),
+            "role": task.get("role"),
+            "milestone": task.get("milestone"),
+            "write_scope": list(task.get("write_scope") or []),
+            "depends_on": list(task.get("depends_on") or []),
+            "exclusive": True,
+        })
+    return manifest
+
+
+def _scope_key(path):
+    return str(path).replace("\\", "/").strip("/")
+
+
+def _scopes_overlap(left, right):
+    for a in left:
+        for b in right:
+            a, b = _scope_key(a), _scope_key(b)
+            if not a or not b:
+                continue
+            if a == b or a.startswith(b + "/") or b.startswith(a + "/"):
+                return True
+    return False
+
+
+def _ownership_conflicts(plan):
+    tasks = [task for task in plan.get("tasks") or []
+             if isinstance(task, dict)]
+    by_id = {task.get("id"): task for task in tasks}
+
+    def depends_on(start, target, seen=None):
+        seen = seen or set()
+        if start in seen:
+            return False
+        seen.add(start)
+        task = by_id.get(start)
+        if not isinstance(task, dict):
+            return False
+        for dependency in task.get("depends_on") or []:
+            if dependency == target or depends_on(dependency, target, seen):
+                return True
+        return False
+
+    conflicts = []
+    for index, left in enumerate(tasks):
+        for right in tasks[index + 1:]:
+            if ((left.get("milestone") or "") != (right.get("milestone") or "")):
+                continue
+            if (depends_on(left.get("id"), right.get("id"))
+                    or depends_on(right.get("id"), left.get("id"))):
+                continue
+            if _scopes_overlap(left.get("write_scope") or [],
+                               right.get("write_scope") or []):
+                conflicts.append({
+                    "left": left.get("id"),
+                    "right": right.get("id"),
+                    "milestone": left.get("milestone"),
+                    "scopes": sorted(set(left.get("write_scope") or [])
+                                     & set(right.get("write_scope") or [])),
+                })
+    return conflicts
+
+
 def plan_request(request, *, run_id, project_id=None, max_parallel=3,
                  model=None, pattern=None, mode=None, repo_profile=None,
                  provider="opencode", requirements_contract=None,
-                 codex_sandbox="read-only"):
+                 codex_sandbox="read-only", integrity_policy="development"):
     """Return a deterministic rich teamwork plan for ``request``."""
     try:
         run_id = identifier(run_id)
@@ -855,6 +958,9 @@ def plan_request(request, *, run_id, project_id=None, max_parallel=3,
             raise TeamworkPlannerError("model must be a single-line value")
     if provider not in ("opencode", "codex"):
         raise TeamworkPlannerError("provider must be opencode or codex")
+    if integrity_policy not in INTEGRITY_POLICIES:
+        raise TeamworkPlannerError(
+            "integrity_policy must be development, demo or benchmark")
     if pattern is not None and pattern not in PATTERNS:
         raise TeamworkPlannerError("Unknown teamwork pattern")
     if mode is not None and mode not in WORK_MODES:
@@ -990,7 +1096,29 @@ def plan_request(request, *, run_id, project_id=None, max_parallel=3,
         ],
         "milestones": milestones,
         "tasks": tasks,
+        "plan_version": 2,
+        "scope_contract": _scope_contract(request, {"tasks": tasks}, contract),
+        "file_ownership": _file_ownership({"tasks": tasks}),
+        "ownership_conflicts": _ownership_conflicts({"tasks": tasks}),
+        "integrity_policy": integrity_policy,
+        "adaptive_decision": (
+            {
+                "requested_mode": assessment.get("requested_mode"),
+                "chosen_mode": assessment.get("mode"),
+                "score": assessment.get("score"),
+                "confidence": assessment.get("confidence"),
+                "reason": assessment.get("reason"),
+                "factors": assessment.get("factors"),
+                "safety_upgrade": assessment.get("safety_upgrade"),
+                "auto_floor": assessment.get("auto_floor"),
+            } if isinstance(assessment, dict) else None),
     }
+    if plan["ownership_conflicts"] and effective_parallel > 1:
+        ids = ", ".join(
+            f"{item['left']}~{item['right']}"
+            for item in plan["ownership_conflicts"][:5])
+        raise TeamworkPlannerError(
+            "concurrent tasks share a write scope without a dependency: " + ids)
     if contract is not None:
         _apply_requirements_contract(tasks, contract)
         plan["requirements_contract"] = contract

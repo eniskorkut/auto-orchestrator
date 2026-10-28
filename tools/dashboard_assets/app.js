@@ -1882,6 +1882,13 @@
     const current = ide.current || {};
     const next = ide.next_action || {};
     const requirements = ide.requirements_completion || {};
+    const verification = ide.verification || null;
+    const integrity = ide.integrity || null;
+    const verificationState = verification
+      ? (verification.verified ? 'verified'
+        : (verification.aggregate_status || 'not_run'))
+      : 'unknown';
+    const verificationLabel = t(`ide.verificationStatus.${verificationState}`);
     const question = ide.grill_me || null;
     const recovery = ide.recovery || {};
     const stale = ide.stale_context || {};
@@ -2017,6 +2024,32 @@
       h('div', { class: 'ide-next' },
         h('span', { class: 'memory-label', text: t('ide.nextAction') }),
         h('strong', { text: actionLabel }),
+      ),
+      h('div', {
+        class: 'ide-verification',
+        'data-state': verificationState,
+      },
+        h('span', { class: 'memory-label', text: t('ide.verification') }),
+        h('strong', { text: verificationLabel }),
+        verification?.commit
+          ? h('span', {
+            class: 'ide-verification-commit',
+            text: t('ide.commit', { commit: String(verification.commit).slice(0, 8) }),
+          })
+          : null,
+      ),
+      h('div', { class: 'ide-integrity' },
+        h('span', { class: 'memory-label', text: t('ide.integrity') }),
+        h('strong', { text: integrity?.integrity_policy || t('ide.unknown') }),
+        integrity?.chosen_mode
+          ? h('span', {
+            class: 'ide-integrity-mode',
+            text: t('ide.mode', {
+              mode: integrity.chosen_mode,
+              score: integrity.risk_score == null ? t('ide.unknown') : integrity.risk_score,
+            }),
+          })
+          : null,
       ),
       h('div', {
         class: `ide-requirements${requirementWarning ? ' warning' : ''}`,

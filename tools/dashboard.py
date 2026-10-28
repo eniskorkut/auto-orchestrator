@@ -1465,6 +1465,60 @@ def _recovery_view(raw):
     }
 
 
+
+def _latest_artifact(directory: Path, pattern: str):
+    """Read the newest bounded JSON artifact; never raise into the UI."""
+    try:
+        if directory.is_symlink() or not directory.is_dir():
+            return None
+        files = [path for path in directory.glob(pattern)
+                 if path.is_file() and not path.is_symlink()]
+        if not files:
+            return None
+        path = max(files, key=lambda item: item.stat().st_mtime_ns)
+        if path.stat().st_size > 262_144:
+            return None
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _verification_evidence(root: Path) -> dict | None:
+    value = _latest_artifact(
+        Path(root) / ".auto-orchestrator" / "verification", "*.json")
+    if value is None:
+        return None
+    result = value.get("result") if isinstance(value.get("result"), dict) else {}
+    return {
+        "verified": bool(value.get("verified")),
+        "aggregate_status": result.get("aggregate_status"),
+        "commit": value.get("commit"),
+        "exit_code": value.get("exit_code"),
+        "merged_tree_clean": value.get("merged_tree_clean"),
+        "recorded_at": value.get("recorded_at"),
+    }
+
+
+def _plan_integrity(root: Path) -> dict | None:
+    value = _latest_artifact(
+        Path(root) / ".auto-orchestrator" / "plans", "*.json")
+    if value is None:
+        return None
+    adaptive = value.get("adaptive_decision")
+    adaptive = adaptive if isinstance(adaptive, dict) else {}
+    scope = value.get("scope_contract")
+    scope = scope if isinstance(scope, dict) else {}
+    return {
+        "run_id": value.get("run_id"),
+        "integrity_policy": value.get("integrity_policy"),
+        "plan_version": value.get("plan_version"),
+        "chosen_mode": adaptive.get("chosen_mode"),
+        "risk_score": adaptive.get("score"),
+        "reason": adaptive.get("reason"),
+        "objective": scope.get("objective"),
+    }
+
 def _ide_ownership_snapshot(root: Path) -> dict:
     """Read the optional handoff status; every missing field stays unknown."""
     base = {
@@ -1484,9 +1538,13 @@ def _ide_ownership_snapshot(root: Path) -> dict:
         "snapshots": [],
         "snapshot_count": 0,
         "stale": None,
+        "verification": None,
+        "integrity": None,
         "diagnostics": ["ide_handoff_unavailable",
                         "ownership_record_absent"],
     }
+    base["verification"] = _verification_evidence(root)
+    base["integrity"] = _plan_integrity(root)
     module = _ide_handoff_module()
     if module is None:
         return base

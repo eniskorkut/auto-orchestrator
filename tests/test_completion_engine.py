@@ -129,8 +129,10 @@ class CompletionContractMixin:
     def evaluate(self, contract, **kwargs):
         kwargs.setdefault("changed_files", ["auth/session.py"])
         kwargs.setdefault("commit_sha", self.head)
-        kwargs.setdefault("reviews", [{"role": "reviewer", "verdict": "pass",
-                                       "task_id": "review"}])
+        kwargs.setdefault("reviews", [{
+            "role": "reviewer", "verdict": "pass", "task_id": "review",
+            "reviewer_agent_id": "reviewer-agent",
+            "independence_level": "observed"}])
         return evaluate_completion(self.root, contract, **kwargs)
 
 

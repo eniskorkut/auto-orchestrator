@@ -74,6 +74,7 @@ are read-only and always allowed. Mutating commands reject a foreign owner.
 
 ```bash
 python3.11 tools/universal_teamwork.py --root . --platform opencode ide status
+python3.11 tools/universal_teamwork.py --root . --platform opencode brief
 python3.11 tools/universal_teamwork.py --root . --platform opencode \
   ide prepare --target-platform codex --confirm-idle user \
   --summary "next action"

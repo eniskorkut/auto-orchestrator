@@ -310,3 +310,87 @@ What this does **not** prove: native child liveness, a native stop
 acknowledgement, per-child supervision, Cursor/Antigravity execution, or model
 quality. Those remain exactly as described in the table above. One scripted
 run is not a benchmark and no human time-saving number is claimed.
+
+## V7.9 — runtime IDE capability detection
+
+`python tools/capabilities.py show --detect` (or `show --detect --json`) adds a
+read-only, locally probed `detection` block to the static matrix. The default
+`show` and `show --json` output is unchanged, and `--no-detect` makes that
+choice explicit. The detector writes no files and makes no direct network
+request of its own; the installed CLI may contact its own service for
+`--version`/`--list-models`. Detection does not launch an IDE agent, open a
+native session or read a credential store.
+
+Detection block shape:
+
+```json
+{
+  "schema_version": 1,
+  "kind": "ide-capability-detection",
+  "generated_at": 1793168420.353,
+  "platforms": {"codex": {}, "opencode": {}, "cursor": {}, "antigravity": {}},
+  "evidence": "local-probe"
+}
+```
+
+Each platform object contains exactly these twelve fields. `null` means “not
+tested or not observable”; `false` means a local probe established the
+negative; `true` means the probe observed the positive.
+
+| Field | Meaning | How it is established |
+|---|---|---|
+| `installed` | The client is installed on this machine | PATH executable, candidate Cursor binary, or `/Applications/Antigravity.app` |
+| `version_detected` | Exact version token reported by the CLI | Bounded `--version` probe; only a version token is retained |
+| `cli_available` | A usable CLI entry point exists | `shutil.which`; for Cursor, `cursor agent --version`/`--help` support |
+| `authenticated` | The CLI is authenticated | Codex `codex login status`, OpenCode `opencode auth list`, Cursor `cursor agent --list-models`; `null` when the probe is unavailable or ambiguous |
+| `skill_discovered` | The project Teamwork skill file is present | Project files under `root` |
+| `command_discovered` | A project command/slash file is present | Project files under `root`; native-only commands are not locally discoverable |
+| `native_agent_available` | Native agent definition files are present | `.codex/agents`, `.opencode/agents`, `.cursor/agents`, `.agents/agents` |
+| `lifecycle_observable` | A lifecycle observer was actually exercised | `null` unless a live session is observed; `false` when no observer file exists |
+| `child_completion_authoritative` | Authoritative per-child completion is established | `null` without live lifecycle evidence; never inferred from dispatch |
+| `handoff_supported` | A sequential handoff was live-verified | `true` only for a platform in the V7.8 `live_ides` evidence |
+| `grill_supported` | A project Grill-Me surface is present | Shared skill or platform command file under `root` |
+| `live_e2e_verified` | A live handoff was recorded | `true` only for a platform listed in `docs/assets/v78-live-handoff.json` |
+
+### Probes
+
+| Platform | Local probes | Auth probe |
+|---|---|---|
+| Codex | `shutil.which("codex")`; `codex --version`; `.codex/skills/teamwork/SKILL.md`; `.codex/agents/*.toml`; `.agents/skills/grill-me` | `codex login status`; “Logged in” ⇒ `true`, “Not logged in”/login marker ⇒ `false` |
+| OpenCode | `shutil.which("opencode")`; `opencode --version`; `.opencode/commands/teamwork.md`; `.opencode/skills/teamwork`; `adapters/opencode-v2/auto_orchestrator.js` | `opencode auth list`; “stored”/API-key marker ⇒ `true`, “No credentials”/“not authenticated” ⇒ `false`, empty ⇒ `null` |
+| Cursor | PATH `cursor-agent`/`cursor`, `~/.local/bin/cursor-agent`, `/Applications/Cursor.app/Contents/Resources/app/bin/cursor`; `cursor agent --version` or `cursor agent --help` support check | `cursor agent --list-models` with a short timeout. Exit 0 with a model list ⇒ `true`; an “Authentication required”/login marker ⇒ `false`; timeout or unclear ⇒ `null`. No `--api-key` is passed. |
+| Antigravity | `/Applications/Antigravity.app`; PATH `antigravity` | none. No CLI ⇒ `cli_available: false`, `authenticated: null`, `lifecycle_observable: false`, `live_e2e_verified: false`; native commands are unobservable |
+
+Probe subprocesses receive an environment with `*_API_KEY`, `*_AUTH_TOKEN`,
+`CURSOR_AUTH_TOKEN`, `OPENAI_API_KEY` and similar variables removed. Raw
+stdout/stderr is discarded after matching; only a bounded version token is
+persisted. Timeouts default to 5 seconds and are clamped to 30 seconds, and the
+Cursor auth probe is capped at 5 seconds.
+
+### Detected on this machine (2026-10-28, macOS)
+
+| Platform | `installed` | CLI / version | `authenticated` | Label |
+|---|---|---|---|---|
+| Codex | `true` | `codex` via PATH; `0.164.0` | `true` | detected and authenticated; V7.8/V7.9 live handoff evidence |
+| OpenCode | `true` | `opencode` via PATH; `v2.1.1` | `true` | detected and authenticated; V7.8/V7.9 live handoff evidence |
+| Cursor | `true` | `/Applications/Cursor.app/Contents/Resources/app/bin/cursor agent`; `2026.10.22-27dcf5f` | `false` | **blocked** — CLI found, `cursor agent --list-models` exited 1 with “Authentication required”. It is not contract-only-without-CLI on this machine. |
+| Antigravity | `true` (`/Applications/Antigravity.app`) | no PATH CLI; `version_detected: null` | `null` | **blocked** — app present, no CLI agent entry; native commands unobservable |
+
+`live_e2e_verified` is `true` only for Codex and OpenCode because
+`docs/assets/v78-live-handoff.json` lists them in `live_ides`. That is prior
+V7.8 evidence, not a V7.9 execution: detection did not re-run either handoff,
+did not prompt an IDE and did not claim Cursor or Antigravity execution.
+Cursor and Antigravity remain `false` for `live_e2e_verified` and `null` for
+`handoff_supported`.
+
+### Limits
+
+Detection is environment evidence, not a native-session contract. It cannot
+prove that hooks or plugins were trusted/loaded, that a native agent was
+spawned, that a lifecycle event will fire, that a child stopped, or that a
+handoff completed inside the IDE. Those questions stay `null` unless a live
+session is observed. `native_agent_available` means agent-definition files were
+found under the project root, not that the client exposes them; Antigravity’s
+native `/teamwork-preview` and `/grill-me` remain vendor-authoritative and are
+not locally observable. The static matrix above remains the contract source of
+truth, and V7.9 detection does not upgrade any capability row.

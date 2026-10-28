@@ -10,18 +10,25 @@ from __future__ import annotations
 
 import argparse
 import copy
+import hashlib
 import inspect
 import json
 import os
+import secrets
+import shlex
+import shutil
+import signal
+import sqlite3
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
 try:
-    from tools import assumption_guard, teamwork_chat
+    from tools import assumption_guard, teamwork_chat, test_evidence
     from tools.grill_me import GrillError, GrillMeEngine
-    from tools.project_identity import ensure_project_identity
+    from tools.project_identity import ensure_project_identity, read_project_identity
     from tools.project_memory import MemoryError, ProjectMemory
     from tools.run_owner import atomic_write_json, read_json, teamwork_dir
     from tools.teamwork import TeamworkError
@@ -31,10 +38,11 @@ try:
         context_selector = None  # type: ignore
 except ModuleNotFoundError:
     import assumption_guard  # type: ignore
+    import test_evidence  # type: ignore
     import git_memory_hook  # type: ignore
     import teamwork_chat  # type: ignore
     from grill_me import GrillError, GrillMeEngine  # type: ignore
-    from project_identity import ensure_project_identity  # type: ignore
+    from project_identity import ensure_project_identity, read_project_identity  # type: ignore
     from project_memory import MemoryError, ProjectMemory  # type: ignore
     from run_owner import atomic_write_json, read_json, teamwork_dir  # type: ignore
     from teamwork import TeamworkError  # type: ignore
@@ -90,7 +98,8 @@ def _chat_args(root, *, command, request=None, request_file=None,
                request_stdin=False, mode="auto", run_id=None, model=None,
                max_seconds=7200, origin_platform="unknown", provider=None,
                interview_id=None, grill_mode="auto", guard_receipt=None,
-               codex_sandbox="read-only", native=False, plan=None):
+               codex_sandbox="read-only", native=False, plan=None,
+               integrity_policy="development"):
     return type("Args", (), {
         "root": str(root), "command": command, "request": request,
         "request_file": request_file, "request_stdin": request_stdin,
@@ -99,6 +108,7 @@ def _chat_args(root, *, command, request=None, request_file=None,
         "provider": provider, "interview_id": interview_id,
         "grill_mode": grill_mode, "guard_receipt": guard_receipt,
         "codex_sandbox": codex_sandbox, "native": native, "plan": plan,
+        "integrity_policy": integrity_policy,
     })()
 
 
@@ -508,7 +518,9 @@ def start(args) -> dict:
         interview_id=interview_id, grill_mode=grill_mode,
         guard_receipt=guard["receipt"],
         codex_sandbox=getattr(args, "codex_sandbox", "read-only"),
-        native=native))
+        native=native,
+        integrity_policy=getattr(args, "integrity_policy",
+                                 "development") or "development"))
     result["platform"] = platform
     result.setdefault("assumption_guard", guard["receipt"])
     return _with_ownership(result, ownership)
@@ -532,7 +544,9 @@ def plan(args) -> dict:
             origin_platform=platform,
             interview_id=getattr(args, "interview_id", None),
             grill_mode=getattr(args, "grill_mode", "auto") or "auto",
-            native=True))
+            native=True,
+            integrity_policy=getattr(args, "integrity_policy",
+                                     "development") or "development"))
     except teamwork_chat.ChatError as exc:
         raise UniversalError(str(exc)) from exc
     result["platform"] = platform
@@ -695,6 +709,195 @@ def pause(args) -> dict:
 GRILL_READ_ONLY = frozenset({"next", "summary", "status"})
 
 
+
+
+def _readonly_memory_brief(root, project_id):
+    """Read the brief fields with SQLite mode=ro; never create or migrate."""
+    empty = {"interview": None, "requirements": {"confirmed": 0,
+             "blocking": 0, "blocking_ids": []}, "decisions": []}
+    path = root / ".auto-orchestrator" / "memory.sqlite3"
+    if path.is_symlink() or not path.is_file():
+        return empty
+    try:
+        connection = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True,
+                                     timeout=2)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA query_only=ON")
+    except (sqlite3.Error, OSError, ValueError):
+        return empty
+    try:
+        tables = {row[0] for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        interview = None
+        if "interviews" in tables:
+            row = connection.execute(
+                "SELECT interview_id,request_summary,status FROM interviews "
+                "WHERE project_id=? AND status IN ('open','blocked','ready') "
+                "ORDER BY updated_at DESC LIMIT 1",
+                (project_id,)).fetchone()
+            if row is not None:
+                interview = {"interview_id": row["interview_id"],
+                             "objective": row["request_summary"],
+                             "status": row["status"]}
+                if "interview_questions" in tables:
+                    question = connection.execute(
+                        "SELECT question_id,question_key FROM "
+                        "interview_questions WHERE interview_id=? AND "
+                        "status='open' ORDER BY ordinal LIMIT 1",
+                        (row["interview_id"],)).fetchone()
+                    if question is not None:
+                        interview["question_id"] = question["question_id"]
+                        interview["question_key"] = question["question_key"]
+        requirements = dict(empty["requirements"])
+        if "requirements" in tables:
+            for row in connection.execute(
+                    "SELECT status,COUNT(*) AS total FROM requirements "
+                    "WHERE project_id=? GROUP BY status", (project_id,)):
+                if row["status"] == "confirmed":
+                    requirements["confirmed"] = int(row["total"])
+                elif row["status"] == "unresolved_blocking":
+                    requirements["blocking"] = int(row["total"])
+            requirements["blocking_ids"] = [
+                row["requirement_id"] for row in connection.execute(
+                    "SELECT requirement_id FROM requirements WHERE "
+                    "project_id=? AND status='unresolved_blocking' "
+                    "ORDER BY updated_at DESC LIMIT 10", (project_id,))]
+        decisions = []
+        if "decisions" in tables:
+            decisions = [
+                {"decision_id": row["decision_id"], "topic": row["topic"],
+                 "decision": row["decision"]}
+                for row in connection.execute(
+                    "SELECT decision_id,topic,decision FROM decisions WHERE "
+                    "project_id=? AND status='confirmed' ORDER BY updated_at "
+                    "DESC LIMIT 10", (project_id,))]
+        return {"interview": interview, "requirements": requirements,
+                "decisions": decisions}
+    except sqlite3.Error:
+        return empty
+    finally:
+        connection.close()
+
+def brief(args) -> dict:
+    """Read-only continuity brief for a new IDE session.
+
+    It never takes ownership and never writes project state. The caller still
+    needs an explicit handoff/release/accept to gain write authority.
+    """
+    root = _root(args.root)
+    platform = _platform(args)
+    identity = read_project_identity(root) or {
+        "project_id": None, "project_uuid": None}
+    ownership_full = _ownership_status(root, platform)
+    ownership = {key: ownership_full.get(key) for key in (
+        "available", "platform", "state", "status", "owner_platform",
+        "owner_id", "fence", "active", "foreign", "read_only")}
+    ownership["previous_owner"] = (
+        (ownership_full.get("snapshot") or {}).get("previous_owner"))
+    module = _ide_handoff_module()
+    snapshot = None
+    run_state = {}
+    if module is not None:
+        try:
+            payload = _handoff_call(module, "status", root)
+            snapshot = ((payload.get("result") or {}).get("snapshot")
+                        if isinstance(payload.get("result"), dict)
+                        else payload.get("snapshot"))
+        except UniversalError:
+            snapshot = None
+        try:
+            run_state = module._run_state(root, identity)
+        except Exception:  # noqa: BLE001 - optional read-only helper
+            run_state = {}
+    memory_view = _readonly_memory_brief(root, identity["project_id"])
+    interview = memory_view["interview"]
+    requirements = memory_view["requirements"]
+    decisions = memory_view["decisions"]
+    blocking = requirements["blocking_ids"]
+    verified = None
+    run_id = (snapshot or {}).get("run_id") or run_state.get("run_id")
+    if isinstance(run_id, str):
+        directory = root / ".auto-orchestrator" / "verification"
+        if directory.is_dir():
+            files = sorted(directory.glob(f"{run_id}-*.json"))
+            if files:
+                try:
+                    record = json.loads(files[-1].read_text(encoding="utf-8"))
+                    verified = {
+                        "verified": bool(record.get("verified")),
+                        "aggregate_status": (record.get("result") or {}).get(
+                            "aggregate_status"),
+                        "commit": record.get("commit"),
+                        "exit_code": record.get("exit_code"),
+                        "evidence": files[-1].relative_to(root).as_posix(),
+                    }
+                except (OSError, ValueError):
+                    verified = None
+    next_action = (snapshot or {}).get("next_action")
+    steps = []
+    if ownership.get("foreign"):
+        steps.append(
+            f"Ownership is held by {ownership.get('owner_platform')}; ask that "
+            "session to hand off or inspect read-only.")
+    elif ownership.get("active"):
+        steps.append("This IDE already holds ownership; continue the run.")
+    else:
+        steps.append("Take ownership with `ide activate` before any write.")
+    if next_action:
+        steps.append("Next action from the handoff: " + str(next_action)[:400])
+    if interview and interview.get("question_id"):
+        steps.append("Answer the open Grill-Me question: "
+                     + str(interview["question_id"]))
+    if run_state.get("failed_tests"):
+        steps.append("Re-run the failing tests: " + ", ".join(
+            run_state["failed_tests"][:5]))
+    if blocking:
+        steps.append("Resolve blocking requirements: " + ", ".join(
+            str(item) for item in blocking[:5]))
+    if verified is not None and not verified["verified"]:
+        steps.append("Verification is not complete; run native-verify after "
+                     "committing the change.")
+    return {
+        "platform": platform,
+        "project_id": identity["project_id"],
+        "project_uuid": identity["project_uuid"],
+        "ownership": ownership,
+        "active_ide": ownership.get("owner_platform"),
+        "previous_ide": (snapshot or {}).get("source_ide")
+        if snapshot else (ownership.get("previous_owner") or {}).get("ide"),
+        "run": {
+            "run_id": run_id,
+            "mode": run_state.get("mode") or (snapshot or {}).get("mode"),
+            "status": run_state.get("run_status")
+            or (snapshot or {}).get("run_status"),
+            "milestone_id": run_state.get("milestone_id")
+            or (snapshot or {}).get("milestone_id"),
+            "task_id": run_state.get("task_id")
+            or (snapshot or {}).get("task_id"),
+            "completed_tasks": run_state.get("completed_tasks")
+            or (snapshot or {}).get("completed_tasks") or [],
+            "pending_tasks": run_state.get("pending_tasks")
+            or (snapshot or {}).get("pending_tasks") or [],
+            "failed_tests": run_state.get("failed_tests")
+            or (snapshot or {}).get("failed_tests") or [],
+        },
+        "objective": ((interview or {}).get("objective") or ""),
+        "next_action": next_action,
+        "open_question": (snapshot or {}).get("open_question")
+        or (interview or {}).get("question_id"),
+        "requirements": {
+            "confirmed": requirements["confirmed"],
+            "blocking": len(blocking),
+            "blocking_ids": list(blocking[:10]),
+        },
+        "confirmed_decisions": list(decisions)[:10],
+        "verification": verified,
+        "resume_steps": steps,
+        "read_only": True,
+        "note": ("This brief does not grant write authority and does not "
+                 "replay another IDE's chat session."),
+    }
+
 def grill(args) -> dict:
     root = _root(args.root)
     platform = _platform(args)
@@ -717,11 +920,13 @@ def grill(args) -> dict:
             result = {"question": engine.next_question(args.interview_id)}
         elif args.grill_command == "answer":
             result = engine.answer(args.question_id, option=args.option,
-                                   text=args.text)
+                                   text=args.text,
+                                   reason=getattr(args, "reason", None))
         elif args.grill_command == "skip":
             result = engine.skip(args.question_id)
         elif args.grill_command == "back":
-            result = engine.back(args.question_id)
+            result = engine.back(args.question_id,
+                                 reason=getattr(args, "reason", None))
         elif args.grill_command == "cancel":
             result = {"interview": engine.cancel()}
         elif args.grill_command == "summary":
@@ -1157,6 +1362,11 @@ REVIEW_ROLES = ("reviewer", "auditor", "challenger", "success-auditor")
 
 
 def _verification_command(value, contract, plan):
+    """Resolve a command and enforce a typed test-runner allowlist.
+
+    Substring checks are not enough: ``python -c "print('test')"`` must never
+    count as a test command. Only real runner shapes are accepted.
+    """
     command = value
     if not command and isinstance(contract, dict):
         command = contract.get("verification_command")
@@ -1165,20 +1375,113 @@ def _verification_command(value, contract, plan):
     if not isinstance(command, str) or not command.strip():
         raise UniversalError(
             "native-verify needs a verification command on the contract, the "
-            "plan or --command")
+            "plan or --verification-command")
     command = command.strip()
     if len(command) > 500 or any(char in command for char in SHELL_METACHARACTERS):
         raise UniversalError("verification command is unsafe or too long")
     try:
-        from tools import completion_engine
-    except ModuleNotFoundError:
-        import completion_engine  # type: ignore
-    argv = completion_engine._argv(command)
-    if not argv or not completion_engine._is_test_command(command):
+        argv = shlex.split(command, posix=(os.name != "nt"))
+    except ValueError as exc:
+        raise UniversalError("verification command is not parseable") from exc
+    if os.name == "nt":
+        argv = [token.strip('"') for token in argv]
+    if not argv:
+        raise UniversalError("verification command is empty")
+    executable = Path(argv[0]).name.lower()
+    if executable.endswith(".exe"):
+        executable = executable[:-4]
+    allowed = False
+    if executable in ("python", "python3", "python3.11", "python3.12",
+                      "python3.13", "py"):
+        allowed = (len(argv) >= 3 and argv[1] == "-m"
+                   and argv[2] in ("unittest", "pytest"))
+    elif executable in ("pytest", "py.test"):
+        allowed = True
+    elif executable == "node":
+        allowed = len(argv) >= 2 and argv[1] == "--test"
+    elif executable == "npm":
+        allowed = (len(argv) >= 2 and argv[1] == "test") or (
+            len(argv) >= 3 and argv[1] == "run"
+            and argv[2] in ("test", "check"))
+    elif executable == "go":
+        allowed = len(argv) >= 2 and argv[1] == "test"
+    elif executable == "cargo":
+        allowed = len(argv) >= 2 and argv[1] == "test"
+    elif executable == "make":
+        allowed = len(argv) >= 2 and argv[1] in ("test", "check")
+    if not allowed:
         raise UniversalError(
-            "native-verify only runs test commands; agent prose is not "
+            "native-verify only runs a recognized test runner "
+            "(unittest/pytest/node --test/npm test/go test/cargo test/"
+            "make test); agent prose or an interpreter expression is not "
             "verification")
+    resolved = argv[0]
+    if not os.path.isabs(resolved):
+        resolved = shutil.which(argv[0])
+        if not resolved:
+            raise UniversalError("verification executable was not found")
+    elif not os.path.isfile(resolved):
+        raise UniversalError("verification executable does not exist")
+    argv[0] = resolved
     return command, argv
+
+
+def _run_bounded(argv, *, cwd, env, timeout):
+    """Run a child with a bounded transcript and process-group cleanup."""
+    process = subprocess.Popen(
+        argv, cwd=str(cwd), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        env=env, start_new_session=(os.name != "nt"))
+    chunks = {"stdout": b"", "stderr": b"", "total": 0}
+    lock = threading.Lock()
+
+    def reader(stream, key):
+        tail = b""
+        while True:
+            block = stream.read(65536)
+            if not block:
+                break
+            with lock:
+                chunks["total"] += len(block)
+            tail = (tail + block)[-200_000:]
+        with lock:
+            chunks[key] = tail
+
+    threads = [
+        threading.Thread(target=reader, args=(process.stdout, "stdout"),
+                         daemon=True),
+        threading.Thread(target=reader, args=(process.stderr, "stderr"),
+                         daemon=True),
+    ]
+    for thread in threads:
+        thread.start()
+    timed_out = False
+    try:
+        process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        try:
+            if os.name != "nt":
+                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+            else:
+                process.kill()
+        except (OSError, ProcessLookupError):
+            pass
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            pass
+    for thread in threads:
+        thread.join(timeout=5)
+    stdout = chunks["stdout"].decode("utf-8", "replace")
+    stderr = chunks["stderr"].decode("utf-8", "replace")
+    return {
+        "exit_code": 124 if timed_out else process.returncode,
+        "stdout": stdout,
+        "stderr": stderr,
+        "timed_out": timed_out,
+        "output_bytes": chunks["total"],
+        "output_tail": (stdout + stderr)[-200_000:],
+    }
 
 
 def _git_changed_paths(root):
@@ -1190,7 +1493,7 @@ def _git_changed_paths(root):
     return [item["path"] for item in state.get("changed_files") or []]
 
 
-def _load_native_reviews(root, run_id, task_id, commit):
+def _load_native_reviews(root, run_id, task_id, commit, contract_sha=None):
     directory = Path(root) / ".auto-orchestrator" / "reviews"
     if directory.is_symlink() or not directory.is_dir():
         return []
@@ -1204,12 +1507,31 @@ def _load_native_reviews(root, run_id, task_id, commit):
             continue
         if not isinstance(value, dict):
             continue
-        if value.get("run_id") != run_id or value.get("task_id") != task_id:
+        reviewed = value.get("reviewed_task_id") or value.get("task_id")
+        if value.get("run_id") != run_id or reviewed != task_id:
             continue
         if value.get("commit") and value["commit"] != commit:
             continue
+        if (contract_sha and value.get("contract_sha256")
+                and value["contract_sha256"] != contract_sha):
+            continue
         reviews.append(value)
     return reviews
+
+
+def _native_report_identity(root, run_id, task_id):
+    directory = Path(root) / ".auto-orchestrator" / "teamwork" / "native-reports"
+    if directory.is_symlink() or not directory.is_dir():
+        return None
+    files = sorted(directory.glob(f"{run_id}-{task_id}-*.json"))
+    if not files:
+        return None
+    try:
+        value = json.loads(files[-1].read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    owner = value.get("owner") if isinstance(value.get("owner"), dict) else {}
+    return owner.get("owner_id") or value.get("platform")
 
 
 def _review_projection(reviews):
@@ -1217,14 +1539,22 @@ def _review_projection(reviews):
     for item in reviews:
         role = item.get("role")
         if role in REVIEW_ROLES and item.get("verdict") in ("pass", "fail"):
+            level = item.get("independence_level") or "declared"
             result.append({
-                "task_id": item.get("task_id"),
+                "reviewed_task_id": item.get("reviewed_task_id")
+                or item.get("task_id"),
+                "reviewer_task_id": item.get("reviewer_task_id"),
+                "reviewer_agent_id": item.get("reviewer_agent_id"),
+                "reviewer_session_id": item.get("reviewer_session_id"),
                 "role": role,
                 "verdict": item["verdict"],
-                "independent": item.get("independent") is not False,
-                "commit": item.get("commit"),
+                "independent": level in ("observed", "accepted"),
+                "independence_level": level,
+                "verification_status": item.get("verification_status"),
+                "commit": item.get("commit") or item.get("commit_sha"),
+                "contract_sha256": item.get("contract_sha256"),
                 "reviewer": item.get("reviewer"),
-                "criteria": list(item.get("criteria") or []),
+                "criterion_ids": list(item.get("criterion_ids") or []),
             })
     return result
 
@@ -1250,19 +1580,71 @@ def native_verify(args) -> dict:
     timeout = getattr(args, "timeout", None) or 900
     if type(timeout) not in (int, float) or timeout <= 0 or timeout > 3600:
         raise UniversalError("timeout must be between 1 and 3600 seconds")
+    verification_run_id = "vr_" + secrets.token_hex(8)
+    run_dir = (Path(root) / ".auto-orchestrator" / "verification" / "runs" /
+               verification_run_id)
+    run_dir.mkdir(parents=True, exist_ok=False, mode=0o700)
+    results_file = getattr(args, "results_file", None)
+    results_path = None
+    results_sha256 = None
+    results_error = None
+    if results_file:
+        name = str(results_file)
+        if (not name or name in (".", "..") or os.path.isabs(name)
+                or "/" in name or "\\" in name):
+            raise UniversalError(
+                "--results-file must be a plain filename; the runner writes "
+                "it inside the per-verification output directory")
+        results_path = run_dir / name
+        if results_path.exists() or results_path.is_symlink():
+            raise UniversalError(
+                "verification result file already exists before the run; "
+                "stale evidence is not accepted")
+        # Substitute after tokenization so spaces in the project path do not
+        # split the executable or arguments.
+        argv = [token.replace("{results_file}", str(results_path)).replace(
+            "{output_dir}", str(run_dir)) for token in argv]
+    env = dict(os.environ)
+    env["AO_VERIFICATION_RUN_ID"] = verification_run_id
+    env["AO_VERIFICATION_OUTPUT_DIR"] = str(run_dir)
+    if results_path is not None:
+        env["AO_VERIFICATION_RESULTS"] = str(results_path)
     started = time.time()
     changed_before = _git_changed_paths(root)
-    try:
-        process = subprocess.run(
-            argv, cwd=str(root), capture_output=True, text=True,
-            timeout=timeout, env=dict(os.environ))
-        exit_code = process.returncode
-        output = (process.stdout or "") + (process.stderr or "")
-    except subprocess.TimeoutExpired as exc:
-        exit_code = 124
-        output = (exc.stdout or "") if isinstance(exc.stdout, str) else ""
-    except OSError as exc:
-        raise UniversalError(f"verification command could not run: {exc}") from exc
+    run = _run_bounded(argv, cwd=root, env=env, timeout=float(timeout))
+    finished = time.time()
+    exit_code = run["exit_code"]
+    output = run["stdout"] + run["stderr"]
+    structured = None
+    if results_path is not None:
+        try:
+            if results_path.is_symlink():
+                raise test_evidence.TestEvidenceError(
+                    "verification result must not be a symlink")
+            if not results_path.is_file():
+                raise test_evidence.TestEvidenceError(
+                    "verification command produced no result file")
+            stat = results_path.stat()
+            if stat.st_size <= 0:
+                raise test_evidence.TestEvidenceError(
+                    "verification result file is empty")
+            if stat.st_mtime + 2 < started:
+                raise test_evidence.TestEvidenceError(
+                    "verification result file is stale")
+            payload = results_path.read_bytes()
+            results_sha256 = hashlib.sha256(payload).hexdigest()
+            structured = test_evidence.parse_file(
+                results_path, getattr(args, "results_format", None))
+            if not structured["tests"]:
+                raise test_evidence.TestEvidenceError(
+                    "verification result has no tests")
+            if structured["totals"]["failed"] and exit_code == 0:
+                raise test_evidence.TestEvidenceError(
+                    "structured results report failures but the command "
+                    "exited 0")
+        except test_evidence.TestEvidenceError as exc:
+            results_error = str(exc)
+            structured = None
     try:
         from tools import completion_engine
     except ModuleNotFoundError:
@@ -1270,12 +1652,19 @@ def native_verify(args) -> dict:
     head = completion_engine._head_sha(root)
     if not head:
         raise UniversalError("native verification requires a git commit")
-    passed_signals = completion_engine.parse_passed_test_signals(output)
-    all_signals = completion_engine.parse_test_signals(output)
+    if structured is not None:
+        passed_signals = structured["passed_names"]
+        all_signals = [item["name"] for item in structured["tests"]]
+    else:
+        passed_signals = completion_engine.parse_passed_test_signals(output)
+        all_signals = completion_engine.parse_test_signals(output)
     changed_after = _git_changed_paths(root)
     # The verification command itself must not become implementation evidence.
     changed = changed_before
-    reviews = _load_native_reviews(root, run_id, task_id, head)
+    reviews = _load_native_reviews(
+        root, run_id, task_id, head,
+        (contract or {}).get("sha256") if isinstance(contract, dict) else None)
+    implementer_identity = _native_report_identity(root, run_id, task_id)
     result = completion_engine.evaluate_completion(
         root, contract, plan=plan, run_id=run_id, task_id=task_id,
         changed_files=changed, commits=[head],
@@ -1287,7 +1676,9 @@ def native_verify(args) -> dict:
             "source": "native-verify",
         }],
         reviews=_review_projection(reviews),
-        commit_sha=head, head_sha=head, expected_commit=head)
+        commit_sha=head, head_sha=head, expected_commit=head,
+        implementer_identity=implementer_identity)
+    integrity_policy = plan.get("integrity_policy") or "development"
     merged_tree_clean = not changed_before and not changed_after
     if not merged_tree_clean:
         # Merged-tree gate: a dirty worktree means the test result is not
@@ -1301,9 +1692,29 @@ def native_verify(args) -> dict:
             reasons.append(
                 "dirty worktree: commit the change and re-run native-verify")
         result["reasons"] = reasons
+    if integrity_policy != "development":
+        result["verified_completion"] = False
+        result["fully_verified"] = False
+        result["integrity_policy"] = integrity_policy
+        reasons = list(result.get("reasons") or [])
+        reasons.append(
+            f"integrity policy '{integrity_policy}' does not certify "
+            "production completion")
+        result["reasons"] = reasons
+    evidence_failed = results_path is not None and structured is None
+    verified = (bool(result.get("verified_completion"))
+                and merged_tree_clean and integrity_policy == "development"
+                and not evidence_failed)
+    status = "verified" if verified else (
+        "results_missing" if evidence_failed else
+        "command_failed" if exit_code != 0 else
+        "dirty_tree" if not merged_tree_clean else
+        "policy_unverified" if integrity_policy != "development" else
+        (result.get("aggregate_status") or "needs_review"))
     record = {
-        "version": 1,
+        "version": 2,
         "kind": "native-verification",
+        "verification_run_id": verification_run_id,
         "run_id": run_id,
         "task_id": task_id,
         "platform": platform,
@@ -1311,12 +1722,24 @@ def native_verify(args) -> dict:
         "command": command,
         "argv": argv,
         "exit_code": exit_code,
-        "duration_seconds": round(time.time() - started, 3),
+        "timed_out": run["timed_out"],
+        "output_bytes": run["output_bytes"],
+        "started_at": started,
+        "finished_at": finished,
+        "duration_seconds": round(finished - started, 3),
         "commit": head,
         "contract_id": (contract or {}).get("contract_id"),
         "contract_version": (contract or {}).get("contract_version"),
         "contract_sha256": (contract or {}).get("sha256"),
         "plan_sha256": approval.get("plan_sha256"),
+        "integrity_policy": integrity_policy,
+        "results_format": structured["format"] if structured else "stdout",
+        "results_file": str(results_path) if results_path else None,
+        "results_sha256": results_sha256,
+        "results_error": results_error,
+        "results_totals": structured["totals"] if structured else None,
+        "failed_tests": structured["failed_names"] if structured else [],
+        "skipped_tests": structured["skipped_names"] if structured else [],
         "passed_signals": passed_signals[:completion_engine.MAX_TEST_SIGNALS],
         "observed_signals": all_signals[:completion_engine.MAX_TEST_SIGNALS],
         "output_tail": output[-4000:],
@@ -1328,8 +1751,8 @@ def native_verify(args) -> dict:
         "reviews": _review_projection(reviews),
         "review_count": len(reviews),
         "result": result,
-        "verified": bool(result.get("verified_completion"))
-        and merged_tree_clean,
+        "status": status,
+        "verified": verified,
         "completion_recorded": False,
         "note": ("This command ran a real test command. It does not mark the "
                  "task complete; Supervisor acceptance and independent review "
@@ -1357,8 +1780,7 @@ def native_verify(args) -> dict:
     except Exception:
         observation = None
     return _with_ownership({
-        "status": "verified" if record["verified"] else result.get(
-            "aggregate_status") or "needs_review",
+        "status": record["status"],
         "verified_completion": record["verified"],
         "aggregate_status": result.get("aggregate_status"),
         "run_id": run_id,
@@ -1370,6 +1792,8 @@ def native_verify(args) -> dict:
         "contract_sha256": record["contract_sha256"],
         "criteria": result.get("criteria"),
         "review_count": len(reviews),
+        "verification_run_id": verification_run_id,
+        "results_error": results_error,
         "evidence": str(path),
         "observation_id": (observation or {}).get("observation_id"),
         "completion_recorded": False,
@@ -1417,21 +1841,47 @@ def native_audit(args) -> dict:
             raise UniversalError("native-audit evidence must be a regular file")
         evidence_refs.append(str(path.resolve().relative_to(root.resolve())))
     criteria = list(getattr(args, "criteria", None) or [])
+    integrity_policy = plan.get("integrity_policy") or "development"
+    level = getattr(args, "independence", None) or "declared"
+    accepted_by = (getattr(args, "accepted_by", None) or "").strip()
+    if level not in ("declared", "accepted"):
+        raise UniversalError(
+            "native-audit independence must be declared or accepted; "
+            "observed requires a verified native lifecycle record")
+    if level == "accepted" and not accepted_by:
+        raise UniversalError(
+            "an accepted review requires --accepted-by with the human or "
+            "trusted tool identity")
+    reviewer_session = getattr(args, "reviewer_session_id", None)
+    reviewer_agent = getattr(args, "reviewer_agent_id", None)
     record = {
-        "version": 1,
+        "version": 2,
+        "review_id": "rv_" + secrets.token_hex(8),
         "run_id": run_id,
+        "reviewed_task_id": task_id,
+        "reviewer_task_id": getattr(args, "reviewer_task_id", None),
         "task_id": task_id,
         "role": role,
         "reviewer": reviewer.strip(),
+        "reviewer_agent_id": reviewer_agent,
+        "reviewer_session_id": reviewer_session,
         "verdict": verdict,
+        "criterion_ids": criteria,
         "criteria": criteria,
         "commit": head,
+        "commit_sha": head,
         "contract_id": (contract or {}).get("contract_id"),
         "contract_sha256": (contract or {}).get("sha256"),
         "plan_sha256": approval.get("plan_sha256"),
+        "integrity_policy": integrity_policy,
         "evidence_refs": evidence_refs,
-        "independence": "declared_role_separation",
-        "independent": True,
+        "independence_level": level,
+        "independence": "user_accepted" if level == "accepted"
+        else "declared_role_separation",
+        "independent": level == "accepted",
+        "verification_status": "user_accepted" if level == "accepted"
+        else "declared_only",
+        "accepted_by": accepted_by or None,
         "platform": platform,
         "reviewed_at": time.time(),
     }
@@ -1447,9 +1897,12 @@ def native_audit(args) -> dict:
         "task_id": task_id,
         "commit": head,
         "review": str(path),
-        "independence": record["independence"],
-        "note": ("Declared role separation, not a cryptographic attestation. "
-                 "native-verify consumes this review with the real test run."),
+        "independence_level": level,
+        "verification_status": record["verification_status"],
+        "note": ("A declared review is audit evidence, not proof of "
+                 "independent execution. Only an explicit accepted review "
+                 "satisfies a review-required criterion; native-verify still "
+                 "runs the real tests."),
     }, ownership)
 
 def _validate_ttl(value):
@@ -1655,6 +2108,8 @@ def main(argv=None) -> int:
                          help="explicit managed execution provider; required "
                               "to opt in from Codex/Cursor/Antigravity")
     start_p.add_argument("--max-seconds", type=float, default=7200)
+    start_p.add_argument("--integrity-policy", default="development",
+                         choices=["development", "demo", "benchmark"])
     start_p.add_argument("--native", action="store_true",
                          help="write a native plan/engine state; never spawn "
                               "a provider, runner or PID")
@@ -1674,6 +2129,8 @@ def main(argv=None) -> int:
     plan_p.add_argument("--grill-mode", default="auto",
                         choices=["off", "auto", "required", "plan-only"])
     plan_p.add_argument("--max-seconds", type=float, default=7200)
+    plan_p.add_argument("--integrity-policy", default="development",
+                        choices=["development", "demo", "benchmark"])
 
     approve_p = sub.add_parser("approve-plan")
     approve_p.add_argument("--run-id", required=True)
@@ -1683,6 +2140,9 @@ def main(argv=None) -> int:
     verify_p.add_argument("--run-id", required=True)
     verify_p.add_argument("--task-id", required=True)
     verify_p.add_argument("--verification-command", dest="verification_command")
+    verify_p.add_argument("--results-file",
+                          help="JUnit XML or pytest JSON from the real run")
+    verify_p.add_argument("--results-format", choices=["junit", "pytest-json"])
     verify_p.add_argument("--timeout", type=float, default=900)
 
     audit_p = sub.add_parser("native-audit")
@@ -1694,6 +2154,12 @@ def main(argv=None) -> int:
     audit_p.add_argument("--role", default="reviewer",
                          choices=list(REVIEW_ROLES))
     audit_p.add_argument("--criteria", action="append")
+    audit_p.add_argument("--reviewer-task-id")
+    audit_p.add_argument("--reviewer-agent-id")
+    audit_p.add_argument("--reviewer-session-id")
+    audit_p.add_argument("--independence", choices=["declared", "accepted"],
+                         default="declared")
+    audit_p.add_argument("--accepted-by")
     audit_p.add_argument("--commit")
     audit_p.add_argument("--evidence", action="append")
 
@@ -1713,6 +2179,8 @@ def main(argv=None) -> int:
     context_p.add_argument("--request")
     context_p.add_argument("--selection-budget", type=int, default=900)
     context_p.add_argument("--module", action="append")
+    brief_p = sub.add_parser("brief")
+    brief_p.add_argument("--run-id")
     handoff_p = sub.add_parser("handoff")
     handoff_p.add_argument("--limit", type=int, default=2400)
     pause_p = sub.add_parser("pause")
@@ -1807,10 +2275,14 @@ def main(argv=None) -> int:
     ga.add_argument("--question-id", required=True)
     ga.add_argument("--option")
     ga.add_argument("--text")
+    ga.add_argument("--reason",
+                    help="bounded provenance for an answer change")
     ga.add_argument("--platform", default=argparse.SUPPRESS)
     for name in ("skip", "back"):
         gp = grill_sub.add_parser(name)
         gp.add_argument("--question-id", required=True)
+        if name == "back":
+            gp.add_argument("--reason")
         gp.add_argument("--platform", default=argparse.SUPPRESS)
     gi = grill_sub.add_parser("import-native")
     gi.add_argument("--file", required=True,
@@ -1825,6 +2297,7 @@ def main(argv=None) -> int:
             "native-report": native_report, "native-verify": native_verify,
             "native-audit": native_audit, "context": context,
             "handoff": handoff, "pause": pause, "grill": grill,
+            "brief": brief,
             "memory": memory_command, "ide": ide,
             "status": lambda a: delegate(a, "status"),
             "agents": lambda a: delegate(a, "agents"),

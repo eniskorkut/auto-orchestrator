@@ -338,10 +338,32 @@ def validate_teamwork_plan(plan):
     repo_profile = plan.get("repo_profile")
     if repo_profile is not None and not isinstance(repo_profile, dict):
         raise TeamworkError("repo_profile must be an object")
+    plan_version = plan.get("plan_version", 1)
+    if plan_version not in (1, 2):
+        raise TeamworkError("plan_version must be 1 or 2")
+    integrity_policy = plan.get("integrity_policy")
+    if integrity_policy is not None and integrity_policy not in (
+            "development", "demo", "benchmark"):
+        raise TeamworkError("integrity_policy is invalid")
+    for field in ("scope_contract", "adaptive_decision"):
+        value = plan.get(field)
+        if value is not None and not isinstance(value, dict):
+            raise TeamworkError(f"{field} must be an object")
+    for field in ("file_ownership", "ownership_conflicts"):
+        value = plan.get(field)
+        if value is not None and (not isinstance(value, list)
+                                  or len(value) > 200):
+            raise TeamworkError(f"{field} must be a bounded array")
     normalized = {
         "run_id": run_id,
         "pattern": pattern,
         "work_mode": work_mode,
+        "plan_version": plan_version,
+        "integrity_policy": integrity_policy,
+        "scope_contract": plan.get("scope_contract"),
+        "adaptive_decision": plan.get("adaptive_decision"),
+        "file_ownership": plan.get("file_ownership"),
+        "ownership_conflicts": plan.get("ownership_conflicts"),
         "risk_assessment": risk_assessment,
         "request": request,
         "repo_profile": repo_profile,

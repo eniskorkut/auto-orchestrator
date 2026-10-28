@@ -1,4 +1,4 @@
-# Auto-Orchestrator — Native Multi-Agent Coordination (V7.8)
+# Auto-Orchestrator — Native Multi-Agent Coordination (V7.9)
 
 Portable, opt-in native-subagent coordination for **OpenCode**, **Codex**, **Cursor**, and **Google Antigravity**. Platform-native runtime capabilities and proof strength differ.
 
@@ -300,6 +300,48 @@ adds a small, conservative long-tail domain ontology and
 skill selection rates. None of this proves live IDE reliability or speedup
 until matched native runs are repeated. See
 [execution reliability](docs/V64_RELIABILITY.md).
+
+## V7.9 — Advanced Intelligent Teamwork
+
+V7.9 builds on the V7.8 ownership release gate with deeper verification and continuity:
+
+- **Teamwork 3.0 plan artifact:** the plan now carries `scope_contract`
+  (objective, in-scope paths, non-goals, requirements, deliverables, rollback,
+  constraints), a `file_ownership` manifest, an `ownership_conflicts` check
+  that refuses concurrent tasks sharing a write scope without a dependency,
+  `integrity_policy` (`development`/`demo`/`benchmark`) and an
+  `adaptive_decision` block with the AUTO risk score, chosen mode and reason.
+- **Continuity brief:** `brief` is a read-only, bounded summary for a new IDE
+  session — active/previous IDE, run/milestone/task, completed/pending tasks,
+  failed tests, open Grill-Me question, next action, verification state and
+  explicit resume steps. It never takes ownership or writes project state.
+- **Verified Completion 3.0 evidence:** `native-verify` runs the approved test
+  command itself, accepts structured JUnit XML or pytest JSON, refuses
+  inconsistent evidence, binds commit/contract/run/task and enforces a
+  merged-tree gate (a dirty worktree stays evidence, never `verified`).
+  `native-audit` records a declared-role review against the same HEAD.
+- **Grill-Me 4.0:** editing an earlier answer invalidates only the decisions,
+  requirements and dependent branches created from that question, keeps
+  history, reopens applicable follow-ups, skips branches that no longer apply
+  and blocks approval until the branch is answered. Repeated identical answers
+  stay idempotent.
+- **Runtime capability detection:** `python tools/capabilities.py show --detect
+  --json` probes installed CLIs, versions and authentication without reading
+  credential stores or retaining raw output. On this machine it detects Codex
+  `0.164.0` and OpenCode `v2.1.1` as authenticated, the Cursor agent CLI
+  (`2026.10.22`) as installed but **authentication required**, and Antigravity
+  as app-only with no CLI. Unknown fields stay `null`.
+- **Benchmark integrity:** `tools/v79_benchmark.py` ships a 12-task corpus and
+  refuses to measure without a prepared project. It records only real exit
+  codes and wall time; token/cost fields are absent rather than zero.
+
+```bash
+python3.11 tools/universal_teamwork.py --root . --platform codex brief
+python3.11 tools/capabilities.py show --detect --json
+python3.11 tools/v79_benchmark.py --validate
+```
+
+See [Advanced Intelligent Teamwork](docs/V79_ADVANCED_INTELLIGENT_TEAMWORK.md).
 
 ## V7.8 — Native IDE Teamwork, Grill-Me 3.0 and sequential handoff
 
