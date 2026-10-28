@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "kind": "ide-capability-detection",
+  "generated_at": 1793169969.184279,
+  "platforms": {
+    "codex": {
+      "installed": true,
+      "version_detected": "0.164.0",
+      "cli_available": true,
+      "authenticated": true,
+      "skill_discovered": true,
+      "command_discovered": false,
+      "native_agent_available": true,
+      "lifecycle_observable": null,
+      "child_completion_authoritative": null,
+      "handoff_supported": true,
+      "grill_supported": true,
+      "live_e2e_verified": true
+    },
+    "opencode": {
+      "installed": true,
+      "version_detected": "v2.1.1",
+      "cli_available": true,
+      "authenticated": true,
+      "skill_discovered": true,
+      "command_discovered": true,
+      "native_agent_available": true,
+      "lifecycle_observable": null,
+      "child_completion_authoritative": null,
+      "handoff_supported": true,
+      "grill_supported": true,
+      "live_e2e_verified": true
+    },
+    "cursor": {
+      "installed": true,
+      "version_detected": "2026.10.22-27dcf5f",
+      "cli_available": true,
+      "authenticated": false,
+      "skill_discovered": true,
+      "command_discovered": false,
+      "native_agent_available": true,
+      "lifecycle_observable": null,
+      "child_completion_authoritative": null,
+      "handoff_supported": null,
+      "grill_supported": true,
+      "live_e2e_verified": false
+    },
+    "antigravity": {
+      "installed": true,
+      "version_detected": null,
+      "cli_available": false,
+      "authenticated": null,
+      "skill_discovered": true,
+      "command_discovered": false,
+      "native_agent_available": true,
+      "lifecycle_observable": false,
+      "child_completion_authoritative": false,
+      "handoff_supported": null,
+      "grill_supported": true,
+      "live_e2e_verified": false
+    }
+  },
+  "evidence": "local-probe"
+}

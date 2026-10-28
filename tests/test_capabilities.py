@@ -3,9 +3,12 @@ from __future__ import annotations
 
 import io
 import json
+import subprocess
+import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from unittest import mock
 
 from tools import capabilities
 
@@ -327,6 +330,621 @@ class CapabilityMatrixTests(unittest.TestCase):
         with redirect_stderr(stderr), self.assertRaises(SystemExit) as caught:
             capabilities.main(["show", "--platform", "emacs"])
         self.assertEqual(caught.exception.code, 2)
+
+
+class RuntimeDetectionTests(unittest.TestCase):
+    """V7.9 detection is deterministic with injected probes."""
+
+    def setUp(self):
+        self._temporary = tempfile.TemporaryDirectory()
+        self.base = Path(self._temporary.name)
+        self.root = self.base / "project"
+        self.home = self.base / "home"
+        self.apps = self.base / "Applications"
+        for path in (self.root, self.home, self.apps):
+            path.mkdir(parents=True, exist_ok=True)
+
+    def tearDown(self):
+        self._temporary.cleanup()
+
+    def _detect(self, **overrides):
+        arguments = {
+            "root": self.root,
+            "home": self.home,
+            "apps_root": self.apps,
+            "which": lambda name: None,
+            "runner": mock.Mock(),
+            "now": 123.0,
+        }
+        arguments.update(overrides)
+        return capabilities.detect_environment(**arguments)
+
+    def _touch(self, relative, content="x"):
+        path = self.root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+
+    def _create_project_surfaces(self):
+        for relative in (
+            ".codex/skills/teamwork/SKILL.md",
+            ".codex/agents/auto_planner.toml",
+            ".codex/hooks.json",
+            ".codex/commands/not-teamwork.md",
+            ".agents/skills/grill-me/SKILL.md",
+            ".agents/skills/auto-orchestrator/SKILL.md",
+            ".agents/skills/ao-grill-me/SKILL.md",
+            ".agents/agents/auto_planner.md",
+            ".opencode/skills/teamwork/SKILL.md",
+            ".opencode/commands/teamwork.md",
+            ".opencode/commands/grill-me.md",
+            ".opencode/agents/auto_planner.md",
+            ".cursor/agents/auto_planner.md",
+            ".cursor/hooks.json",
+        ):
+            self._touch(relative)
+
+    @staticmethod
+    def _completed(argv, returncode, stdout="", stderr=""):
+        return subprocess.CompletedProcess(
+            argv, returncode, stdout=stdout, stderr=stderr
+        )
+
+    def _snapshot(self):
+        entries = []
+        for path in sorted(self.base.rglob("*")):
+            relative = str(path.relative_to(self.base))
+            if path.is_file():
+                entries.append((relative, "file", path.read_bytes()))
+            else:
+                entries.append((relative, "dir", b""))
+        return entries
+
+    def test_detection_shape_and_platform_order_are_exact(self):
+        result = self._detect()
+        self.assertEqual(
+            list(result),
+            ["schema_version", "kind", "generated_at", "platforms", "evidence"],
+        )
+        self.assertEqual(result["schema_version"], 1)
+        self.assertEqual(result["kind"], "ide-capability-detection")
+        self.assertEqual(result["evidence"], "local-probe")
+        self.assertEqual(result["generated_at"], 123.0)
+        self.assertEqual(
+            list(result["platforms"]),
+            ["codex", "opencode", "cursor", "antigravity"],
+        )
+        for platform, record in result["platforms"].items():
+            with self.subTest(platform=platform):
+                self.assertEqual(
+                    tuple(record), capabilities.DETECTION_FIELDS
+                )
+                self.assertEqual(len(record), 12)
+
+    def test_absent_binaries_and_apps_are_null_or_false(self):
+        runner = mock.Mock()
+        result = self._detect(runner=runner)
+        runner.assert_not_called()
+        for platform in ("codex", "opencode", "cursor", "antigravity"):
+            record = result["platforms"][platform]
+            with self.subTest(platform=platform):
+                self.assertIs(record["installed"], False)
+                self.assertIs(record["cli_available"], False)
+                self.assertIsNone(record["version_detected"])
+                self.assertIsNone(record["authenticated"])
+                self.assertIs(record["skill_discovered"], False)
+                self.assertIs(record["command_discovered"], False)
+                self.assertIs(record["native_agent_available"], False)
+                self.assertIs(record["grill_supported"], False)
+        # No V7.8 evidence file in this temporary root.
+        self.assertIsNone(result["platforms"]["codex"]["live_e2e_verified"])
+        self.assertIsNone(result["platforms"]["opencode"]["live_e2e_verified"])
+        self.assertIsNone(result["platforms"]["cursor"]["live_e2e_verified"])
+        self.assertIs(
+            result["platforms"]["antigravity"]["live_e2e_verified"], False
+        )
+        self.assertIs(
+            result["platforms"]["antigravity"]["lifecycle_observable"], False
+        )
+        self.assertIs(
+            result["platforms"]["antigravity"][
+                "child_completion_authoritative"
+            ],
+            False,
+        )
+        for platform in ("codex", "opencode", "cursor"):
+            self.assertIsNone(
+                result["platforms"][platform]["handoff_supported"]
+            )
+
+    def test_real_project_files_are_discovered_under_root(self):
+        repository = Path(__file__).resolve().parents[1]
+        result = capabilities.detect_environment(
+            root=repository,
+            home=self.home,
+            apps_root=self.apps,
+            which=lambda name: None,
+            runner=mock.Mock(),
+            now=5.0,
+        )
+        codex = result["platforms"]["codex"]
+        self.assertTrue(codex["skill_discovered"])
+        self.assertFalse(codex["command_discovered"])
+        self.assertTrue(codex["native_agent_available"])
+        self.assertTrue(codex["grill_supported"])
+
+        opencode = result["platforms"]["opencode"]
+        self.assertTrue(opencode["skill_discovered"])
+        self.assertTrue(opencode["command_discovered"])
+        self.assertTrue(opencode["native_agent_available"])
+        self.assertTrue(opencode["grill_supported"])
+
+        cursor = result["platforms"]["cursor"]
+        self.assertTrue(cursor["skill_discovered"])
+        self.assertFalse(cursor["command_discovered"])
+        self.assertTrue(cursor["native_agent_available"])
+        self.assertTrue(cursor["grill_supported"])
+
+        antigravity = result["platforms"]["antigravity"]
+        self.assertTrue(antigravity["skill_discovered"])
+        self.assertFalse(antigravity["command_discovered"])
+        self.assertTrue(antigravity["native_agent_available"])
+        self.assertTrue(antigravity["grill_supported"])
+        # With no PATH entries and injected empty app root, no CLI is claimed.
+        for path in ("codex", "opencode", "cursor", "antigravity"):
+            self.assertFalse(result["platforms"][path]["cli_available"])
+
+    def test_cursor_auth_true_false_and_null_from_canned_output(self):
+        which = lambda name: "cursor-agent" if name == "cursor-agent" else None
+
+        def runner_for(models):
+            def runner(argv, timeout):
+                if argv[-1] == "--version":
+                    return self._completed(
+                        argv, 0, "2026.10.22-27dcf5f\n", ""
+                    )
+                if argv[-1] == "--list-models":
+                    return models(argv)
+                raise AssertionError("unexpected cursor probe: " + repr(argv))
+            return runner
+
+        cases = {
+            "authenticated": (
+                lambda argv: self._completed(
+                    argv, 0, "gpt-5\nclaude-4\n", ""
+                ),
+                True,
+            ),
+            "authentication-required": (
+                lambda argv: self._completed(
+                    argv,
+                    1,
+                    "",
+                    "Error: Authentication required. Run 'cursor agent "
+                    "login', pass --api-key/--auth-token, or set "
+                    "CURSOR_API_KEY/CURSOR_AUTH_TOKEN.\n",
+                ),
+                False,
+            ),
+            "login-marker-with-zero-exit": (
+                lambda argv: self._completed(
+                    argv, 0, "Authentication required\n", ""
+                ),
+                False,
+            ),
+            "unclear-error": (
+                lambda argv: self._completed(
+                    argv, 2, "", "network unavailable\n"
+                ),
+                None,
+            ),
+        }
+        for name, (models, expected) in cases.items():
+            with self.subTest(case=name):
+                result = self._detect(
+                    which=which, runner=runner_for(models)
+                )
+                cursor = result["platforms"]["cursor"]
+                self.assertIs(cursor["installed"], True)
+                self.assertIs(cursor["cli_available"], True)
+                self.assertEqual(
+                    cursor["version_detected"], "2026.10.22-27dcf5f"
+                )
+                self.assertIs(cursor["authenticated"], expected)
+
+    def test_cursor_auth_is_null_on_timeout_and_no_auth_probe_without_agent(self):
+        which = lambda name: "cursor-agent" if name == "cursor-agent" else None
+
+        def timeout_runner(argv, timeout):
+            if argv[-1] == "--version":
+                return self._completed(argv, 0, "2026.10.22-27dcf5f\n", "")
+            raise subprocess.TimeoutExpired(argv, timeout)
+
+        result = self._detect(which=which, runner=timeout_runner)
+        cursor = result["platforms"]["cursor"]
+        self.assertIs(cursor["cli_available"], True)
+        self.assertIsNone(cursor["authenticated"])
+
+        calls = []
+
+        def unsupported_runner(argv, timeout):
+            calls.append(list(argv))
+            return self._completed(argv, 1, "", "unknown command: agent\n")
+
+        result = self._detect(which=which, runner=unsupported_runner)
+        cursor = result["platforms"]["cursor"]
+        self.assertIs(cursor["installed"], True)
+        self.assertIs(cursor["cli_available"], False)
+        self.assertIsNone(cursor["version_detected"])
+        self.assertIsNone(cursor["authenticated"])
+        # Both version and help were tried; --list-models was not.
+        self.assertFalse(
+            any("--list-models" in argv for argv in calls), calls
+        )
+
+    def test_cursor_app_bundle_and_home_candidates_are_probed(self):
+        def install_candidate(path):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            path.chmod(0o755)
+            return path
+
+        app_candidate = install_candidate(
+            self.apps
+            / "Cursor.app/Contents/Resources/app/bin/cursor"
+        )
+        home_candidate = install_candidate(
+            self.home / ".local/bin/cursor-agent"
+        )
+
+        def runner_for(seen):
+            def runner(argv, timeout):
+                seen.append(list(argv))
+                if argv[-1] == "--version":
+                    return self._completed(
+                        argv, 0, "2026.10.22-27dcf5f\n", ""
+                    )
+                if argv[-1] == "--list-models":
+                    return self._completed(argv, 0, "gpt-5\n", "")
+                raise AssertionError(
+                    "unexpected cursor probe: " + repr(argv)
+                )
+            return runner
+
+        # The home candidate is found before the app bundle, so it wins.
+        home_seen = []
+        result = self._detect(
+            which=lambda name: None, runner=runner_for(home_seen)
+        )
+        cursor = result["platforms"]["cursor"]
+        self.assertIs(cursor["installed"], True)
+        self.assertIs(cursor["cli_available"], True)
+        self.assertEqual(
+            cursor["version_detected"], "2026.10.22-27dcf5f"
+        )
+        self.assertIs(cursor["authenticated"], True)
+        self.assertIn(
+            str(home_candidate), {argv[0] for argv in home_seen}
+        )
+
+        home_candidate.unlink()
+        app_seen = []
+        result = self._detect(
+            which=lambda name: None, runner=runner_for(app_seen)
+        )
+        cursor = result["platforms"]["cursor"]
+        self.assertIs(cursor["installed"], True)
+        self.assertIs(cursor["cli_available"], True)
+        self.assertIn(
+            str(app_candidate), {argv[0] for argv in app_seen}
+        )
+
+    def test_antigravity_app_presence_without_cli_is_not_a_cli_claim(self):
+        (self.apps / "Antigravity.app").mkdir(parents=True, exist_ok=True)
+        result = self._detect()
+        antigravity = result["platforms"]["antigravity"]
+        self.assertIs(antigravity["installed"], True)
+        self.assertIs(antigravity["cli_available"], False)
+        self.assertIsNone(antigravity["version_detected"])
+        self.assertIsNone(antigravity["authenticated"])
+        self.assertIs(antigravity["lifecycle_observable"], False)
+        self.assertIs(
+            antigravity["child_completion_authoritative"], False
+        )
+        self.assertIs(antigravity["live_e2e_verified"], False)
+        self.assertIsNone(antigravity["handoff_supported"])
+
+    def test_run_version_false_does_not_spawn_and_keeps_paths(self):
+        mapping = {
+            "codex": "/fake/codex",
+            "opencode": "/fake/opencode",
+            "cursor-agent": "/fake/cursor-agent",
+        }
+        runner = mock.Mock()
+        result = self._detect(
+            which=lambda name: mapping.get(name),
+            run_version=False,
+            runner=runner,
+        )
+        runner.assert_not_called()
+        for platform in ("codex", "opencode", "cursor"):
+            record = result["platforms"][platform]
+            self.assertIs(record["installed"], True)
+            self.assertIs(record["cli_available"], True)
+            self.assertIsNone(record["version_detected"])
+            self.assertIsNone(record["authenticated"])
+
+    def test_probe_errors_and_timeouts_become_unknown_not_crashes(self):
+        mapping = {
+            "codex": "/fake/codex",
+            "opencode": "/fake/opencode",
+            "cursor-agent": "/fake/cursor-agent",
+        }
+
+        def broken_runner(argv, timeout):
+            raise RuntimeError("probe exploded")
+
+        result = self._detect(
+            which=lambda name: mapping.get(name), runner=broken_runner
+        )
+        for platform in ("codex", "opencode"):
+            record = result["platforms"][platform]
+            self.assertIs(record["cli_available"], True)
+            self.assertIsNone(record["version_detected"])
+        cursor = result["platforms"]["cursor"]
+        self.assertIs(cursor["installed"], True)
+        self.assertIsNone(cursor["cli_available"])
+        self.assertIsNone(cursor["version_detected"])
+
+        result = self._detect(
+            which=lambda name: mapping.get(name),
+            runner=lambda argv, timeout: (_ for _ in ()).throw(
+                subprocess.TimeoutExpired(argv, timeout)
+            ),
+        )
+        self.assertIsNone(
+            result["platforms"]["codex"]["version_detected"]
+        )
+        self.assertIsNone(
+            result["platforms"]["cursor"]["authenticated"]
+        )
+
+    def test_live_e2e_fields_come_only_from_v78_evidence(self):
+        self._touch(
+            "docs/assets/v78-live-handoff.json",
+            json.dumps({"live_ides": ["codex", "opencode", "emacs"]}),
+        )
+        result = self._detect()
+        self.assertIs(
+            result["platforms"]["codex"]["live_e2e_verified"], True
+        )
+        self.assertIs(
+            result["platforms"]["codex"]["handoff_supported"], True
+        )
+        self.assertIs(
+            result["platforms"]["opencode"]["live_e2e_verified"], True
+        )
+        self.assertIs(
+            result["platforms"]["cursor"]["live_e2e_verified"], False
+        )
+        self.assertIs(
+            result["platforms"]["antigravity"]["live_e2e_verified"], False
+        )
+        self.assertIsNone(
+            result["platforms"]["cursor"]["handoff_supported"]
+        )
+        self.assertIsNone(
+            result["platforms"]["antigravity"]["handoff_supported"]
+        )
+
+    def test_missing_or_invalid_live_evidence_stays_unknown(self):
+        for content in (None, "{not json", json.dumps({"live_ides": "codex"})):
+            with self.subTest(content=content):
+                path = self.root / "docs/assets/v78-live-handoff.json"
+                if content is None:
+                    if path.exists():
+                        path.unlink()
+                else:
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text(content, encoding="utf-8")
+                result = self._detect()
+                for platform in ("codex", "opencode", "cursor"):
+                    self.assertIsNone(
+                        result["platforms"][platform]["live_e2e_verified"]
+                    )
+                    self.assertIsNone(
+                        result["platforms"][platform]["handoff_supported"]
+                    )
+                self.assertIs(
+                    result["platforms"]["antigravity"][
+                        "live_e2e_verified"
+                    ],
+                    False,
+                )
+
+    def test_no_token_strings_are_captured(self):
+        mapping = {
+            "codex": "/fake/codex",
+            "opencode": "/fake/opencode",
+            "cursor-agent": "/fake/cursor-agent",
+        }
+        secrets = (
+            "sk-live-CODEX-SECRET",
+            "opencode-SECRET-TOKEN",
+            "ghp_CURSOR_SECRET",
+            "Bearer CURSOR-AUTH-SECRET",
+        )
+
+        def runner(argv, timeout):
+            if argv[:1] == ["/fake/codex"]:
+                return self._completed(
+                    argv,
+                    0,
+                    "codex-cli 0.164.0\nsk-live-CODEX-SECRET\n",
+                    "",
+                )
+            if argv[:1] == ["/fake/opencode"]:
+                return self._completed(
+                    argv,
+                    0,
+                    "opencode v2.1.1\nopencode-SECRET-TOKEN\n",
+                    "",
+                )
+            if argv[-1] == "--version":
+                return self._completed(
+                    argv,
+                    0,
+                    "2026.10.22-27dcf5f\ngithub ghp_CURSOR_SECRET\n",
+                    "",
+                )
+            if argv[-1] == "--list-models":
+                return self._completed(
+                    argv,
+                    0,
+                    "gpt-5\nAuthorization: Bearer CURSOR-AUTH-SECRET\n",
+                    "",
+                )
+            raise AssertionError("unexpected probe: " + repr(argv))
+
+        result = self._detect(
+            which=lambda name: mapping.get(name), runner=runner
+        )
+        serialized = json.dumps(result)
+        for secret in secrets:
+            self.assertNotIn(secret, serialized)
+        self.assertNotIn("CURSOR_API_KEY", serialized)
+        self.assertNotIn("CURSOR_AUTH_TOKEN", serialized)
+        self.assertEqual(
+            result["platforms"]["codex"]["version_detected"], "0.164.0"
+        )
+        self.assertEqual(
+            result["platforms"]["opencode"]["version_detected"], "v2.1.1"
+        )
+        self.assertEqual(
+            result["platforms"]["cursor"]["version_detected"],
+            "2026.10.22-27dcf5f",
+        )
+
+    def test_probe_environment_strips_keys_and_auth_tokens(self):
+        cleaned = capabilities._clean_probe_env({
+            "PATH": "/bin",
+            "CURSOR_API_KEY": "secret",
+            "CURSOR_AUTH_TOKEN": "secret",
+            "OPENAI_API_KEY": "secret",
+            "SOME_VENDOR_API_KEY": "secret",
+            "HARMLESS": "kept",
+        })
+        self.assertEqual(
+            cleaned, {"PATH": "/bin", "HARMLESS": "kept"}
+        )
+
+    def test_detection_never_writes_files(self):
+        self._create_project_surfaces()
+        mapping = {
+            "codex": "/fake/codex",
+            "opencode": "/fake/opencode",
+            "cursor-agent": "/fake/cursor-agent",
+        }
+
+        def runner(argv, timeout):
+            if argv[-1] == "--version":
+                return self._completed(argv, 0, "1.2.3\n", "")
+            if argv[-1] == "--list-models":
+                return self._completed(argv, 0, "model-a\n", "")
+            raise AssertionError("unexpected probe: " + repr(argv))
+
+        before = self._snapshot()
+        self._detect(which=lambda name: mapping.get(name), runner=runner)
+        after = self._snapshot()
+        self.assertEqual(before, after)
+
+    def test_timeout_is_bounded(self):
+        seen = []
+        mapping = {"codex": "/fake/codex"}
+
+        def runner(argv, timeout):
+            seen.append(timeout)
+            return self._completed(argv, 0, "0.1.0\n", "")
+
+        self._detect(
+            which=lambda name: mapping.get(name),
+            timeout=10_000,
+            runner=runner,
+        )
+        self.assertTrue(seen)
+        self.assertTrue(all(value <= 30.0 for value in seen), seen)
+
+    def test_cli_detect_json_keeps_static_sections_and_adds_detection(self):
+        detection = self._detect()
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with mock.patch.object(
+            capabilities, "detect_environment", return_value=detection
+        ):
+            with redirect_stdout(stdout), redirect_stderr(stderr):
+                code = capabilities.main(["show", "--detect", "--json"])
+        self.assertEqual(code, 0)
+        self.assertEqual(stderr.getvalue(), "")
+        document = json.loads(stdout.getvalue())
+        self.assertEqual(document["detection"], detection)
+        static = capabilities.matrix()
+        for key in static:
+            self.assertIn(key, document)
+        self.assertEqual(document["platforms"], static["platforms"])
+
+    def test_cli_no_detect_keeps_static_json_exact(self):
+        stdout = io.StringIO()
+        with redirect_stdout(stdout):
+            code = capabilities.main(["show", "--no-detect", "--json"])
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            json.loads(stdout.getvalue()), capabilities.matrix()
+        )
+
+    def test_cli_detect_text_is_explicit_about_unknowns(self):
+        detection = self._detect()
+        stdout = io.StringIO()
+        with mock.patch.object(
+            capabilities, "detect_environment", return_value=detection
+        ):
+            with redirect_stdout(stdout):
+                code = capabilities.main(["show", "--detect"])
+        self.assertEqual(code, 0)
+        text = stdout.getvalue()
+        self.assertIn("Runtime IDE capability detection", text)
+        self.assertIn("no live execution claimed", text)
+        self.assertIn("authenticated: null", text)
+        self.assertIn("cli_available: false", text)
+        self.assertIn("live_e2e_verified: false", text)
+
+    def test_cli_detect_platform_filter_limits_detection_block(self):
+        detection = self._detect()
+        stdout = io.StringIO()
+        with mock.patch.object(
+            capabilities, "detect_environment", return_value=detection
+        ):
+            with redirect_stdout(stdout):
+                code = capabilities.main([
+                    "show", "--detect", "--json", "--platform", "cursor"
+                ])
+        self.assertEqual(code, 0)
+        document = json.loads(stdout.getvalue())
+        self.assertEqual(
+            [record["platform"] for record in document["platforms"]],
+            ["cursor"],
+        )
+        self.assertEqual(list(document["detection"]["platforms"]), ["cursor"])
+
+    def test_cli_detect_does_not_crash_with_absent_probes(self):
+        detection = self._detect()
+        stdout = io.StringIO()
+        with mock.patch.object(
+            capabilities, "detect_environment", return_value=detection
+        ):
+            with redirect_stdout(stdout):
+                code = capabilities.main(["show", "--detect", "--json"])
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            json.loads(stdout.getvalue())["detection"], detection
+        )
 
 
 if __name__ == "__main__":
