@@ -1040,6 +1040,21 @@ class GrillMeEngine:
                      if item["status"] not in ("invalidated", "superseded")]
         invalidated_decisions = [item for item in all_decisions
                                  if item["status"] == "invalidated"]
+        try:
+            from tools import question_quality
+        except ModuleNotFoundError:
+            question_quality = None  # type: ignore
+        if question_quality is not None:
+            answered_keys = {item["question_key"] for item in questions
+                             if item["status"] == "answered"}
+            decision_topics = {item["topic"] for item in decisions}
+            for item in questions:
+                try:
+                    item["quality"] = question_quality.score_question(
+                        item, answered_keys=answered_keys,
+                        decision_topics=decision_topics)
+                except (TypeError, ValueError):
+                    item["quality"] = None
         summary = {
             "interview_id": interview["interview_id"],
             "status": interview["status"],

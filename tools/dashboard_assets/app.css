@@ -2203,10 +2203,10 @@ body.inspector-open .office-stage { height: min(760px, calc(100vh - 180px)); }
 .ide-handoff { margin: 8px 0; padding: 8px; border: 1px solid var(--line); background: var(--panel-2); }
 .ide-handoff-route, .ide-handoff-age, .ide-handoff-digest, .ide-handoff-drift { display: inline-block; margin-right: 10px; color: var(--muted); font: 9px/1.4 var(--mono); }
 .ide-handoff-drift[data-drift="true"] { color: #e0a458; }
-.ide-current, .ide-next, .ide-requirements, .ide-verification, .ide-integrity { margin: 8px 0; padding: 7px 8px; border: 1px solid var(--line); background: var(--panel-2); }
+.ide-current, .ide-next, .ide-requirements, .ide-verification, .ide-integrity, .ide-dispatches { margin: 8px 0; padding: 7px 8px; border: 1px solid var(--line); background: var(--panel-2); }
 .ide-current span { display: block; color: var(--muted); font: 9px/1.5 var(--mono); }
 .ide-next strong { display: block; margin-top: 2px; font-size: 11px; }
-.ide-verification, .ide-integrity { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.ide-verification, .ide-integrity, .ide-dispatches { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
 .ide-verification[data-state="failed"], .ide-verification[data-state="blocked"] { border-color: color-mix(in oklab, #e0a458 48%, var(--line)); }
 .ide-verification-commit, .ide-integrity-mode { color: var(--muted); font: 9px/1.2 var(--mono); }
 .ide-requirements { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }

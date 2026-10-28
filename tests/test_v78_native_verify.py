@@ -18,6 +18,7 @@ from pathlib import Path
 from tools import requirements_contract
 from tools import teamwork_chat
 from tools import universal_teamwork as universal
+from tools import native_dispatch
 
 REQUEST = ("Add a short contributor note to the README and one small unit "
            "test. Keep the change documentation-only.")
@@ -36,7 +37,8 @@ class NativeVerifyTests(unittest.TestCase):
             subprocess.run(["git", "-C", str(self.root), *args], check=True,
                            capture_output=True)
         (self.root / ".gitignore").write_text(
-            ".auto-orchestrator/\n__pycache__/\n*.pyc\n", encoding="utf-8")
+            ".auto-orchestrator/\n__pycache__/\n*.pyc\nsubdir/\n",
+            encoding="utf-8")
         (self.root / "README.md").write_text("# demo\n", encoding="utf-8")
         (self.root / "tests").mkdir()
         (self.root / "tests" / "test_ok.py").write_text(
@@ -58,6 +60,12 @@ class NativeVerifyTests(unittest.TestCase):
             "classname=\"tests.test_writer\" name=\"test_ok\"/>"
             "</testsuite>', encoding='utf-8')\n"
             "        self.assertTrue(True)\n",
+            encoding="utf-8")
+        (self.root / "tests" / "test_fail.py").write_text(
+            "import unittest\n\n"
+            "class Fail(unittest.TestCase):\n"
+            "    def test_fail(self):\n"
+            "        self.assertEqual(1, 2)\n",
             encoding="utf-8")
         (self.root / "tests" / "test_writer_empty.py").write_text(
             "import os\n"
@@ -173,6 +181,111 @@ class NativeVerifyTests(unittest.TestCase):
         self.assertTrue(result["verified_completion"],
                         result["criteria"])
 
+    def test_dispatch_advances_only_after_real_verification(self):
+        started = self._native_run_with_contract()
+        plan = json.loads(Path(started["plan"]).read_text(encoding="utf-8"))
+        task_id = plan["tasks"][0]["id"]
+        dispatch = native_dispatch.create(
+            self.root, run_id="run-verify-1", task_id=task_id,
+            role="implementer", ide="codex", owner_session_id="codex",
+            write_scope=["src/"])
+        native_dispatch.request(self.root, dispatch["dispatch_id"],
+                                run_id="run-verify-1")
+        native_dispatch.confirm(self.root, dispatch["dispatch_id"],
+                                run_id="run-verify-1",
+                                native_child_ref="child-1")
+        native_dispatch.start(self.root, dispatch["dispatch_id"],
+                              run_id="run-verify-1")
+        evidence = self.root / ".auto-orchestrator" / "dispatch-out" / "out.txt"
+        evidence.parent.mkdir(parents=True, exist_ok=True)
+        evidence.write_text("result\n", encoding="utf-8")
+        native_dispatch.complete(self.root, dispatch["dispatch_id"],
+                                 run_id="run-verify-1", result_ref="out.txt")
+        native_dispatch.collect(
+            self.root, dispatch["dispatch_id"], run_id="run-verify-1",
+            evidence_ref=".auto-orchestrator/dispatch-out/out.txt")
+        result = self.cli("codex", "native-verify", "--run-id",
+                          "run-verify-1", "--task-id", task_id,
+                          "--dispatch-id", dispatch["dispatch_id"])
+        self.assertTrue(result["verified_completion"], result["criteria"])
+        self.assertEqual(result["dispatch_state"], "verified")
+        record = native_dispatch.list_dispatches(self.root, "run-verify-1")[0]
+        self.assertEqual(record["state"], "verified")
+
+        # A second dispatch for the same task must not replay the first
+        # receipt, even though run/task/HEAD are unchanged.
+        second = native_dispatch.create(
+            self.root, run_id="run-verify-1", task_id=task_id,
+            role="implementer", ide="codex", owner_session_id="codex",
+            write_scope=["src/"])
+        for action in ("request", "confirm", "start", "complete", "collect"):
+            if action == "confirm":
+                native_dispatch.confirm(
+                    self.root, second["dispatch_id"], run_id="run-verify-1",
+                    native_child_ref="child-2")
+            elif action == "start":
+                native_dispatch.start(
+                    self.root, second["dispatch_id"], run_id="run-verify-1")
+            elif action == "complete":
+                native_dispatch.complete(
+                    self.root, second["dispatch_id"], run_id="run-verify-1",
+                    result_ref="out.txt")
+            elif action == "collect":
+                (self.root / ".auto-orchestrator" / "dispatch-out" /
+                 "out-b.txt").write_text("other\n", encoding="utf-8")
+                native_dispatch.collect(
+                    self.root, second["dispatch_id"], run_id="run-verify-1",
+                    evidence_ref=".auto-orchestrator/dispatch-out/out-b.txt")
+            else:
+                getattr(native_dispatch, action)(
+                    self.root, second["dispatch_id"], run_id="run-verify-1")
+        code, error = self._error(
+            "codex", "native-dispatch", "verify", "--run-id",
+            "run-verify-1", "--dispatch-id", second["dispatch_id"],
+            "--verification-run-id", result["receipt_id"])
+        self.assertEqual(code, 1)
+        self.assertIn("dispatch", error.lower())
+
+    def test_nested_output_dir_is_verified_through_the_cli(self):
+        started = self._native_run_with_contract()
+        plan = json.loads(Path(started["plan"]).read_text(encoding="utf-8"))
+        task_id = plan["tasks"][0]["id"]
+        dispatch = native_dispatch.create(
+            self.root, run_id="run-verify-1", task_id=task_id,
+            role="implementer", ide="codex", owner_session_id="codex",
+            write_scope=["src/"])
+        for action in ("request", "confirm", "start", "complete", "collect"):
+            if action == "confirm":
+                native_dispatch.confirm(
+                    self.root, dispatch["dispatch_id"], run_id="run-verify-1",
+                    native_child_ref="child-nested")
+            elif action == "start":
+                native_dispatch.start(
+                    self.root, dispatch["dispatch_id"], run_id="run-verify-1")
+            elif action == "complete":
+                native_dispatch.complete(
+                    self.root, dispatch["dispatch_id"], run_id="run-verify-1",
+                    result_ref="out.txt")
+            elif action == "collect":
+                subdir = self.root / "subdir"
+                subdir.mkdir(exist_ok=True)
+                (subdir / "out.txt").write_text("nested\n", encoding="utf-8")
+                self.cli(
+                    "codex", "native-dispatch", "collect", "--run-id",
+                    "run-verify-1", "--dispatch-id", dispatch["dispatch_id"],
+                    "--evidence-ref", "out.txt", "--output-dir", "subdir")
+            else:
+                getattr(native_dispatch, action)(
+                    self.root, dispatch["dispatch_id"], run_id="run-verify-1")
+        result = self.cli(
+            "codex", "native-verify", "--run-id", "run-verify-1",
+            "--task-id", task_id, "--dispatch-id", dispatch["dispatch_id"])
+        self.assertTrue(result["verified_completion"], result["criteria"])
+        record = native_dispatch.list_dispatches(
+            self.root, "run-verify-1")[0]
+        self.assertEqual(record["state"], "verified")
+        self.assertEqual(record["artifact_ref"], "subdir/out.txt")
+
     def test_review_required_criterion_needs_accepted_independence(self):
         self._native_run_with_contract(review_required=True)
         head = subprocess.run(
@@ -212,6 +325,16 @@ class NativeVerifyTests(unittest.TestCase):
         self.assertFalse(result["verified_completion"])
         self.assertEqual(result["status"], "results_missing")
         self.assertIn("no result file", result["results_error"])
+
+    def test_a_failing_test_command_is_not_verified(self):
+        self._native_run_with_contract()
+        result = self.cli(
+            "codex", "native-verify", "--run-id", "run-verify-1",
+            "--task-id", "build", "--verification-command",
+            "python3 -m unittest tests.test_fail")
+        self.assertEqual(result["exit_code"], 1)
+        self.assertFalse(result["verified_completion"])
+        self.assertEqual(result["status"], "command_failed")
 
     def test_missing_runner_evidence_fails_closed(self):
         self._native_run_with_contract()

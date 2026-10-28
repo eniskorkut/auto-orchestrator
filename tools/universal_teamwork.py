@@ -809,6 +809,26 @@ def brief(args) -> dict:
             run_state = module._run_state(root, identity)
         except Exception:  # noqa: BLE001 - optional read-only helper
             run_state = {}
+    dispatch_status = None
+    try:
+        from tools import native_dispatch
+    except ModuleNotFoundError:
+        try:
+            import native_dispatch  # type: ignore
+        except ModuleNotFoundError:
+            native_dispatch = None  # type: ignore
+    if native_dispatch is not None:
+        try:
+            value = native_dispatch.status(root, run_id=run_id or None)
+            dispatch_status = {
+                "total": value.get("total", 0),
+                "counts": value.get("counts") or {},
+                "active": len(value.get("active") or []),
+                "verified": len(value.get("verified") or []),
+                "unknown": len(value.get("unknown") or []),
+            }
+        except Exception:  # noqa: BLE001 - optional evidence
+            dispatch_status = None
     memory_view = _readonly_memory_brief(root, identity["project_id"])
     interview = memory_view["interview"]
     requirements = memory_view["requirements"]
@@ -851,6 +871,8 @@ def brief(args) -> dict:
     if run_state.get("failed_tests"):
         steps.append("Re-run the failing tests: " + ", ".join(
             run_state["failed_tests"][:5]))
+    if dispatch_status and dispatch_status["unknown"]:
+        steps.append("Resolve unknown native dispatches before continuing.")
     if blocking:
         steps.append("Resolve blocking requirements: " + ", ".join(
             str(item) for item in blocking[:5]))
@@ -892,6 +914,7 @@ def brief(args) -> dict:
         },
         "confirmed_decisions": list(decisions)[:10],
         "verification": verified,
+        "dispatches": dispatch_status,
         "resume_steps": steps,
         "read_only": True,
         "note": ("This brief does not grant write authority and does not "
@@ -1472,6 +1495,11 @@ def _run_bounded(argv, *, cwd, env, timeout):
             pass
     for thread in threads:
         thread.join(timeout=5)
+    for stream in (process.stdout, process.stderr):
+        try:
+            stream.close()
+        except OSError:
+            pass
     stdout = chunks["stdout"].decode("utf-8", "replace")
     stderr = chunks["stderr"].decode("utf-8", "replace")
     return {
@@ -1762,7 +1790,91 @@ def native_verify(args) -> dict:
     directory = Path(root) / ".auto-orchestrator" / "verification"
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     path = directory / f"{run_id}-{task_id}-{time.time_ns()}.json"
+    record_sha256 = hashlib.sha256(json.dumps(
+        record, sort_keys=True, separators=(",", ":"),
+        ensure_ascii=False).encode("utf-8")).hexdigest()
     atomic_write_json(path, record)
+    dispatch_id = getattr(args, "dispatch_id", None)
+    dispatch_state = None
+    dispatch_artifact_sha256 = None
+    dispatch_artifact_size = None
+    if dispatch_id:
+        try:
+            from tools import native_dispatch
+        except ModuleNotFoundError:
+            import native_dispatch  # type: ignore
+        matches = [item for item in native_dispatch.list_dispatches(root, run_id)
+                   if item.get("dispatch_id") == dispatch_id]
+        if not matches:
+            raise UniversalError("dispatch does not exist for this run")
+        current = matches[0]
+        if current.get("task_id") != task_id:
+            raise UniversalError("dispatch belongs to another task")
+        if current.get("state") not in ("output_collected",
+                                        "verification_pending"):
+            raise UniversalError(
+                "dispatch output is not collected; collect it before verifying")
+        artifact_ref = (current.get("artifact_ref")
+                        or current.get("evidence_ref"))
+        if not isinstance(artifact_ref, str) or not artifact_ref:
+            raise UniversalError("dispatch has no collected artifact")
+        try:
+            artifact_path = native_dispatch._workspace_path(
+                Path(root).resolve(), Path(root).resolve(), artifact_ref)
+        except native_dispatch.DispatchError as exc:
+            raise UniversalError(str(exc)) from exc
+        dispatch_artifact_sha256, dispatch_artifact_size = (
+            native_dispatch._hash_path(artifact_path))
+        if (dispatch_artifact_sha256 != current.get("output_digest")
+                or dispatch_artifact_size != current.get("output_size")):
+            raise UniversalError(
+                "dispatch artifact changed after collection; re-collect it")
+        dispatch_state = current.get("state")
+    receipt_id = None
+    receipt_error = None
+    try:
+        from tools import verification_receipt
+    except ModuleNotFoundError:
+        import verification_receipt  # type: ignore
+    try:
+        project = ensure_project_identity(root)
+        receipt_payload = {
+            "verification_run_id": verification_run_id,
+            "project_id": project["project_id"],
+            "run_id": run_id,
+            "task_id": task_id,
+            "commit": head,
+            "contract_sha256": (contract or {}).get("sha256"),
+            "plan_sha256": approval.get("plan_sha256"),
+            "verified": record["verified"],
+            "exit_code": exit_code,
+            "test_results_sha256": results_sha256 or hashlib.sha256(
+                output.encode("utf-8", "replace")).hexdigest(),
+            "test_output_sha256": hashlib.sha256(
+                output.encode("utf-8", "replace")).hexdigest(),
+            "verification_record_sha256": record_sha256,
+            "record_ref": path.relative_to(root).as_posix(),
+            "issued_at": time.time(),
+        }
+        if dispatch_id:
+            receipt_payload.update({
+                "dispatch_id": dispatch_id,
+                "dispatch_artifact_sha256": dispatch_artifact_sha256,
+                "dispatch_artifact_size": dispatch_artifact_size,
+            })
+        receipt = verification_receipt.issue(root, receipt_payload)
+        receipt_id = receipt.name[:-5]
+    except Exception as exc:  # noqa: BLE001 - optional receipt boundary
+        receipt_error = str(exc)[:300]
+    if dispatch_id and record["verified"]:
+        try:
+            from tools import native_dispatch
+        except ModuleNotFoundError:
+            import native_dispatch  # type: ignore
+        native_dispatch.verify(
+            root, dispatch_id, run_id=run_id,
+            verification_run_id=verification_run_id)
+        dispatch_state = "verified"
     try:
         from tools import project_identity
         identity = project_identity.ensure_project_identity(root)
@@ -1793,6 +1905,10 @@ def native_verify(args) -> dict:
         "criteria": result.get("criteria"),
         "review_count": len(reviews),
         "verification_run_id": verification_run_id,
+        "dispatch_id": dispatch_id,
+        "dispatch_state": dispatch_state,
+        "receipt_id": receipt_id,
+        "receipt_error": receipt_error,
         "results_error": results_error,
         "evidence": str(path),
         "observation_id": (observation or {}).get("observation_id"),
@@ -2081,6 +2197,115 @@ def native_report(args) -> dict:
     }, ownership)
 
 
+
+# -- V8.0 native dispatch -------------------------------------------------
+DISPATCH_ACTIONS = ("create", "request", "confirm", "start", "permission",
+                    "complete", "collect", "verify", "fail", "cancel",
+                    "recover", "status")
+
+
+def native_dispatch_command(args) -> dict:
+    root = _root(args.root)
+    platform = _native_platform(args)
+    action = getattr(args, "dispatch_action", None)
+    if action not in DISPATCH_ACTIONS:
+        raise UniversalError("unknown native-dispatch action")
+    try:
+        from tools import native_dispatch
+    except ModuleNotFoundError:
+        import native_dispatch  # type: ignore
+    run_id = _run_id(getattr(args, "run_id", None) or "")
+    if action == "status":
+        return {"status": "ok", "platform": platform,
+                "dispatch": native_dispatch.status(root, run_id=run_id or None),
+                "read_only": True}
+    ownership = _claim_ownership(root, platform, run_id=run_id,
+                                 action=f"native-dispatch {action}")
+    dispatch_id = getattr(args, "dispatch_id", None)
+    if action == "create":
+        task_id = _run_id(getattr(args, "task_id", None) or "")
+        commit = None
+        plan_sha256 = None
+        contract_sha256 = None
+        try:
+            from tools import completion_engine
+        except ModuleNotFoundError:
+            import completion_engine  # type: ignore
+        commit = completion_engine._head_sha(root)
+        try:
+            plan = teamwork_chat.load_native_plan(root, run_id)
+            plan_sha256 = teamwork_chat.plan_digest(plan)
+            reference = plan.get("requirements_contract")
+            if isinstance(reference, dict) and isinstance(
+                    reference.get("sha256"), str):
+                contract_sha256 = reference["sha256"]
+            else:
+                try:
+                    from tools import requirements_contract
+                except ModuleNotFoundError:
+                    import requirements_contract  # type: ignore
+                current = requirements_contract.current_contract_ref(root)
+                if isinstance(current, dict):
+                    contract_sha256 = current.get("sha256")
+        except (UniversalError, teamwork_chat.ChatError, OSError, ValueError):
+            plan_sha256 = None
+        result = native_dispatch.create(
+            root, run_id=run_id, task_id=task_id,
+            role=getattr(args, "role", None) or "implementer",
+            ide=platform,
+            owner_session_id=getattr(args, "owner_session_id", None) or platform,
+            read_scope=getattr(args, "read_scope", None) or [],
+            write_scope=getattr(args, "write_scope", None) or [],
+            dependencies=getattr(args, "dependency", None) or [],
+            parent_agent_id=getattr(args, "parent_agent_id", None),
+            commit=commit, contract_sha256=contract_sha256,
+            plan_sha256=plan_sha256)
+        return _with_ownership({"status": "created", "dispatch": result},
+                               ownership)
+    if not dispatch_id:
+        raise UniversalError("native-dispatch requires --dispatch-id")
+    if action == "request":
+        result = native_dispatch.request(root, dispatch_id, run_id=run_id)
+    elif action == "confirm":
+        result = native_dispatch.confirm(
+            root, dispatch_id, run_id=run_id,
+            native_child_ref=getattr(args, "native_child_ref", None))
+    elif action == "start":
+        result = native_dispatch.start(
+            root, dispatch_id, run_id=run_id,
+            native_child_ref=getattr(args, "native_child_ref", None))
+    elif action == "permission":
+        result = native_dispatch.permission(
+            root, dispatch_id, run_id=run_id,
+            waiting=bool(getattr(args, "waiting", False)))
+    elif action == "complete":
+        result = native_dispatch.complete(
+            root, dispatch_id, run_id=run_id,
+            result_ref=getattr(args, "result_ref", None) or "")
+    elif action == "collect":
+        result = native_dispatch.collect(
+            root, dispatch_id, run_id=run_id,
+            evidence_ref=getattr(args, "evidence_ref", None) or "",
+            output_dir=getattr(args, "output_dir", None))
+    elif action == "verify":
+        result = native_dispatch.verify(
+            root, dispatch_id, run_id=run_id,
+            verification_run_id=getattr(args, "verification_run_id", None) or "")
+    elif action == "fail":
+        result = native_dispatch.fail(
+            root, dispatch_id, run_id=run_id,
+            reason=getattr(args, "reason", None) or "failed")
+    elif action == "cancel":
+        result = native_dispatch.cancel(
+            root, dispatch_id, run_id=run_id,
+            reason=getattr(args, "reason", None) or "cancelled")
+    else:
+        result = native_dispatch.recover(
+            root, dispatch_id, run_id=run_id,
+            reason=getattr(args, "reason", None) or "explicit recovery")
+    return _with_ownership({"status": result.get("state"),
+                            "dispatch": result}, ownership)
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", default=".")
@@ -2143,6 +2368,7 @@ def main(argv=None) -> int:
     verify_p.add_argument("--results-file",
                           help="JUnit XML or pytest JSON from the real run")
     verify_p.add_argument("--results-format", choices=["junit", "pytest-json"])
+    verify_p.add_argument("--dispatch-id")
     verify_p.add_argument("--timeout", type=float, default=900)
 
     audit_p = sub.add_parser("native-audit")
@@ -2179,6 +2405,25 @@ def main(argv=None) -> int:
     context_p.add_argument("--request")
     context_p.add_argument("--selection-budget", type=int, default=900)
     context_p.add_argument("--module", action="append")
+    dispatch_p = sub.add_parser("native-dispatch")
+    dispatch_p.add_argument("dispatch_action", choices=list(DISPATCH_ACTIONS))
+    dispatch_p.add_argument("--run-id", required=True)
+    dispatch_p.add_argument("--dispatch-id")
+    dispatch_p.add_argument("--task-id")
+    dispatch_p.add_argument("--role")
+    dispatch_p.add_argument("--owner-session-id")
+    dispatch_p.add_argument("--parent-agent-id")
+    dispatch_p.add_argument("--read-scope", action="append")
+    dispatch_p.add_argument("--write-scope", action="append")
+    dispatch_p.add_argument("--dependency", action="append")
+    dispatch_p.add_argument("--native-child-ref")
+    dispatch_p.add_argument("--result-ref")
+    dispatch_p.add_argument("--evidence-ref")
+    dispatch_p.add_argument("--output-dir")
+    dispatch_p.add_argument("--verification-run-id")
+    dispatch_p.add_argument("--waiting", action="store_true")
+    dispatch_p.add_argument("--reason")
+
     brief_p = sub.add_parser("brief")
     brief_p.add_argument("--run-id")
     handoff_p = sub.add_parser("handoff")
@@ -2297,7 +2542,7 @@ def main(argv=None) -> int:
             "native-report": native_report, "native-verify": native_verify,
             "native-audit": native_audit, "context": context,
             "handoff": handoff, "pause": pause, "grill": grill,
-            "brief": brief,
+            "brief": brief, "native-dispatch": native_dispatch_command,
             "memory": memory_command, "ide": ide,
             "status": lambda a: delegate(a, "status"),
             "agents": lambda a: delegate(a, "agents"),

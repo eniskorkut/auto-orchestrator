@@ -1519,6 +1519,30 @@ def _plan_integrity(root: Path) -> dict | None:
         "objective": scope.get("objective"),
     }
 
+
+def _dispatch_summary(root: Path) -> dict | None:
+    """Summarize native dispatch records without claiming they ran."""
+    try:
+        from tools import native_dispatch
+    except ModuleNotFoundError:
+        try:
+            import native_dispatch  # type: ignore
+        except ModuleNotFoundError:
+            return None
+    try:
+        status = native_dispatch.status(root)
+    except Exception:  # noqa: BLE001 - optional evidence
+        return None
+    return {
+        "total": status.get("total", 0),
+        "counts": status.get("counts") or {},
+        "active": len(status.get("active") or []),
+        "unknown": len(status.get("unknown") or []),
+        "verified": len(status.get("verified") or []),
+        "source": "native_dispatch",
+        "note": status.get("note"),
+    }
+
 def _ide_ownership_snapshot(root: Path) -> dict:
     """Read the optional handoff status; every missing field stays unknown."""
     base = {
@@ -1540,11 +1564,13 @@ def _ide_ownership_snapshot(root: Path) -> dict:
         "stale": None,
         "verification": None,
         "integrity": None,
+        "dispatches": None,
         "diagnostics": ["ide_handoff_unavailable",
                         "ownership_record_absent"],
     }
     base["verification"] = _verification_evidence(root)
     base["integrity"] = _plan_integrity(root)
+    base["dispatches"] = _dispatch_summary(root)
     module = _ide_handoff_module()
     if module is None:
         return base

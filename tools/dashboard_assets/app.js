@@ -1884,6 +1884,7 @@
     const requirements = ide.requirements_completion || {};
     const verification = ide.verification || null;
     const integrity = ide.integrity || null;
+    const dispatches = ide.dispatches || null;
     const verificationState = verification
       ? (verification.verified ? 'verified'
         : (verification.aggregate_status || 'not_run'))
@@ -2050,6 +2051,18 @@
             }),
           })
           : null,
+      ),
+      h('div', { class: 'ide-dispatches' },
+        h('span', { class: 'memory-label', text: t('ide.dispatches') }),
+        h('strong', {
+          text: dispatches
+            ? t('ide.dispatchesCount', {
+              active: dispatches.active || 0,
+              verified: dispatches.verified || 0,
+              unknown: dispatches.unknown || 0,
+            })
+            : t('ide.unknown'),
+        }),
       ),
       h('div', {
         class: `ide-requirements${requirementWarning ? ' warning' : ''}`,
