@@ -235,7 +235,7 @@ Local results on the V7.9 branch (macOS, Python 3.11.15):
 
 | Suite | Result |
 |---|---|
-| Python `unittest discover` | 819 tests OK (1 skipped) |
+| Python `unittest discover` | 820 tests OK (1 skipped) |
 | Node (`npm run test:js`) | 96/96 |
 | Playwright functional (`AO_SKIP_VISUALS=1`) | 22 passed, 4 visual snapshots skipped |
 | Simulated V7.8 handoff E2E | 9/9 scenarios |
