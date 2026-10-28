@@ -56,12 +56,19 @@ class GrillMeTests(unittest.TestCase):
             first = start["question"]
             engine.answer(first["question_id"], option="jwt")
             second = engine.next_question(start["interview"]["interview_id"])
-            back = engine.back(second["question_id"])
+            self.assertEqual(second["question_key"], "jwt_refresh")
+            engine.answer(second["question_id"], option="refresh")
+            back = engine.back(first["question_id"])
             self.assertEqual(back["question"]["status"], "open")
             self.assertIsNone(back["question"]["selected_option"])
+            self.assertEqual(back["question"]["previous_answer"]["option"], "jwt")
+            changed = engine.answer(first["question_id"], option="cookie")
+            self.assertTrue(changed["changed"])
             with ProjectMemory(self.root) as memory:
                 decisions = memory.list_decisions(topic="jwt_refresh")
-                self.assertTrue(all(item["status"] == "superseded" for item in decisions))
+                self.assertTrue(decisions)
+                self.assertTrue(all(item["status"] == "invalidated"
+                                    for item in decisions))
 
     def test_skipped_critical_question_can_be_resumed_and_answered(self):
         with GrillMeEngine(self.root) as engine:
@@ -91,6 +98,8 @@ class GrillMeTests(unittest.TestCase):
             first = start["question"]
             answered = engine.answer(first["question_id"], option="jwt")
             second = answered["next"]
+            self.assertEqual(second["question_key"], "jwt_refresh")
+            engine.answer(second["question_id"], option="refresh")
             engine.back(first["question_id"])
             engine.answer(first["question_id"], option="cookie")
             expiry = engine.next_question(start["interview"]["interview_id"])
@@ -101,7 +110,8 @@ class GrillMeTests(unittest.TestCase):
             self.assertEqual(summary["blocking_questions"], [])
             with ProjectMemory(self.root) as memory:
                 stale = [item for item in memory.list_decisions(topic="jwt_refresh")]
-                self.assertTrue(all(item["status"] == "superseded" for item in stale))
+                self.assertTrue(stale)
+                self.assertTrue(all(item["status"] == "invalidated" for item in stale))
             with self.assertRaises(GrillError):
                 engine.answer(second["question_id"], option="refresh")
 

@@ -47,10 +47,11 @@ QUESTION_METADATA_COLUMNS = (
 )
 DECISION_STATUSES = {
     "confirmed", "code_derived", "unresolved", "superseded", "rejected",
+    "invalidated",
 }
 REQUIREMENT_STATUSES = {
     "confirmed", "code_derived", "doc_constraint", "unresolved_blocking",
-    "unresolved_nonblocking", "conflicting", "superseded",
+    "unresolved_nonblocking", "conflicting", "superseded", "invalidated",
 }
 SOURCES = {"user", "code", "docs", "agent", "import", "git"}
 DECISION_ID = re.compile(r"^d_[0-9a-f]{16}$")
@@ -72,6 +73,15 @@ EXPORT_LIMITS = {
 INTERVIEW_STATUSES = {"open", "blocked", "ready", "approved", "cancelled"}
 QUESTION_STATUSES = {"open", "answered", "skipped", "invalidated"}
 INTERVIEW_MODES = {"off", "auto", "required", "plan-only"}
+# Append-only provenance for answer edits, branch invalidation and reopened
+# questions. Existing v1/v2 databases get the table lazily; no column rewrite
+# and no data migration is required.
+GRILL_AUDIT_EVENTS = frozenset({
+    "answer", "answer_changed", "skipped", "back", "question_reopened",
+    "question_invalidated", "decision_invalidated",
+    "decision_reconfirmed", "requirement_invalidated",
+    "requirement_reconfirmed",
+})
 
 
 class MemoryError(ValueError):
@@ -324,6 +334,28 @@ class ProjectMemory:
         );
         CREATE INDEX IF NOT EXISTS questions_open
           ON interview_questions(interview_id,status,ordinal);
+        CREATE TABLE IF NOT EXISTS grill_audit (
+          audit_id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          interview_id TEXT NOT NULL,
+          question_id TEXT,
+          question_key TEXT,
+          event TEXT NOT NULL,
+          decision_id TEXT,
+          requirement_id TEXT,
+          previous_status TEXT,
+          new_status TEXT,
+          previous_option TEXT,
+          new_option TEXT,
+          previous_text TEXT,
+          new_text TEXT,
+          reason TEXT,
+          created_at REAL NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS grill_audit_interview
+          ON grill_audit(project_id,interview_id,created_at);
+        CREATE INDEX IF NOT EXISTS grill_audit_question
+          ON grill_audit(project_id,question_id,created_at);
         """)
         try:
             columns = {row[1] for row in self.conn.execute(
@@ -392,7 +424,8 @@ class ProjectMemory:
             raise MemoryError("invalid decision id")
         existing = self.conn.execute(
             "SELECT * FROM decisions WHERE project_id=? AND topic=? AND decision=? "
-            "AND status<>'superseded'", (self.project_id, topic, decision)
+            "AND status NOT IN ('superseded','invalidated')",
+            (self.project_id, topic, decision)
         ).fetchone()
         if existing is not None:
             return self._decision_dict(existing)
@@ -453,9 +486,100 @@ class ProjectMemory:
             raise MemoryError("source_ref is required")
         self.conn.execute(
             "UPDATE decisions SET status='superseded',updated_at=? "
-            "WHERE project_id=? AND source_ref=? AND status<>'superseded'",
+            "WHERE project_id=? AND source_ref=? AND status IN "
+            "('confirmed','code_derived','unresolved')",
             (time.time(), self.project_id, source_ref))
         self.conn.commit()
+
+    # -- Grill-Me audit history ------------------------------------------
+    def record_grill_audit(self, *, interview_id, event, question_id=None,
+                           question_key=None, decision_id=None,
+                           requirement_id=None, previous_status=None,
+                           new_status=None, previous_option=None,
+                           new_option=None, previous_text=None, new_text=None,
+                           reason=None) -> dict:
+        """Append one bounded provenance record for an interview edit."""
+        if not isinstance(interview_id, str) or not INTERVIEW_ID.fullmatch(
+                interview_id):
+            raise MemoryError("interview id is invalid")
+        event = _text(event, "audit event", limit=40)
+        if event not in GRILL_AUDIT_EVENTS:
+            raise MemoryError("unsupported audit event")
+        audit_id = _id("ga_")
+        now = time.time()
+        value = {
+            "audit_id": audit_id,
+            "project_id": self.project_id,
+            "interview_id": interview_id,
+            "question_id": _optional_id(question_id, QUESTION_ID, "question_id"),
+            "question_key": (_text(question_key, "question_key",
+                                   required=False, limit=80) or None),
+            "event": event,
+            "decision_id": _optional_id(decision_id, DECISION_ID, "decision_id"),
+            "requirement_id": (
+                _text(requirement_id, "requirement_id", required=False,
+                      limit=80) or None),
+            "previous_status": (_text(previous_status, "previous_status",
+                                      required=False, limit=40) or None),
+            "new_status": (_text(new_status, "new_status", required=False,
+                                 limit=40) or None),
+            "previous_option": (_text(previous_option, "previous_option",
+                                      required=False, limit=100) or None),
+            "new_option": (_text(new_option, "new_option", required=False,
+                                 limit=100) or None),
+            "previous_text": (_text(previous_text, "previous_text",
+                                    required=False, limit=2000) or None),
+            "new_text": (_text(new_text, "new_text", required=False,
+                               limit=2000) or None),
+            "reason": (_text(reason, "reason", required=False, limit=500)
+                       or None),
+            "created_at": now,
+        }
+        self.conn.execute("""
+          INSERT INTO grill_audit(audit_id,project_id,interview_id,question_id,
+            question_key,event,decision_id,requirement_id,previous_status,
+            new_status,previous_option,new_option,previous_text,new_text,
+            reason,created_at)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """, tuple(value[key] for key in (
+            "audit_id", "project_id", "interview_id", "question_id",
+            "question_key", "event", "decision_id", "requirement_id",
+            "previous_status", "new_status", "previous_option", "new_option",
+            "previous_text", "new_text", "reason", "created_at")))
+        self.conn.commit()
+        return value
+
+    def list_grill_audit(self, interview_id, *, question_id=None, event=None,
+                         limit=200) -> list[dict]:
+        if not isinstance(interview_id, str) or not INTERVIEW_ID.fullmatch(
+                interview_id):
+            raise MemoryError("interview id is invalid")
+        values = [self.project_id, interview_id]
+        sql = ("SELECT * FROM grill_audit WHERE project_id=? "
+               "AND interview_id=?")
+        if question_id is not None:
+            question_id = _optional_id(question_id, QUESTION_ID, "question_id")
+            sql += " AND question_id=?"
+            values.append(question_id)
+        if event is not None:
+            event = _text(event, "audit event", limit=40)
+            if event not in GRILL_AUDIT_EVENTS:
+                raise MemoryError("unsupported audit event")
+            sql += " AND event=?"
+            values.append(event)
+        values.append(min(max(int(limit), 1), 500))
+        return [dict(row) for row in self.conn.execute(
+            sql + " ORDER BY created_at ASC, rowid ASC LIMIT ?", values)]
+
+    def latest_grill_answer(self, question_id) -> dict | None:
+        """Newest recorded answer for one question, including invalidated ones."""
+        question_id = _optional_id(question_id, QUESTION_ID, "question_id")
+        row = self.conn.execute(
+            "SELECT * FROM grill_audit WHERE project_id=? AND question_id=? "
+            "AND event IN ('answer','answer_changed') "
+            "ORDER BY created_at DESC, rowid DESC LIMIT 1",
+            (self.project_id, question_id)).fetchone()
+        return dict(row) if row is not None else None
 
     @staticmethod
     def _decision_dict(row):
@@ -1229,6 +1353,12 @@ class ProjectMemory:
             if confirmed_by.strip().lower() in ("agent", "recommended", "auto", "system"):
                 raise MemoryError("recommendations cannot be recorded as confirmed")
             confirmed_by = confirmed_by.strip()
+        elif (status == "invalidated" and isinstance(confirmed_by, str)
+              and confirmed_by.strip()
+              and confirmed_by.strip().lower() not in (
+                  "agent", "recommended", "auto", "system")):
+            # Invalidated rows keep their original user-confirmation history.
+            confirmed_by = confirmed_by.strip()
         else:
             confirmed_by = None
         return {
@@ -1561,7 +1691,8 @@ class ProjectMemory:
                                 "bundle and the local ledger"))
                     same_topic = self.conn.execute(
                         "SELECT decision FROM decisions WHERE project_id=? "
-                        "AND topic=? AND status<>'superseded' AND decision<>? "
+                        "AND topic=? AND status NOT IN ('superseded','invalidated') "
+                        "AND decision<>? "
                         "ORDER BY updated_at DESC LIMIT 1",
                         (self.project_id, value["topic"],
                          value["decision"])).fetchone()
