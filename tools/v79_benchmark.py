@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shlex
 import subprocess
 import time
@@ -144,8 +145,13 @@ def validate_corpus(corpus=None) -> dict:
 def _run_command(root: Path, command: str, timeout: int) -> dict:
     started = time.time()
     try:
+        # POSIX shlex eats Windows backslashes in an executable path. Keep the
+        # platform mode and strip quotes from tokens on Windows.
+        argv = shlex.split(command, posix=(os.name != "nt"))
+        if os.name == "nt":
+            argv = [token.strip('"') for token in argv]
         process = subprocess.run(
-            shlex.split(command), cwd=str(root), capture_output=True,
+            argv, cwd=str(root), capture_output=True,
             text=True, timeout=timeout)
         return {
             "exit_code": process.returncode,
