@@ -89,7 +89,10 @@ class TestEvidenceTests(unittest.TestCase):
     def test_symlink_is_rejected(self):
         target = self.write("junit.xml", JUNIT)
         link = self.root / "link.xml"
-        link.symlink_to(target)
+        try:
+            link.symlink_to(target)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlinks are not available on this platform")
         with self.assertRaises(test_evidence.TestEvidenceError):
             test_evidence.parse_file(link)
 
