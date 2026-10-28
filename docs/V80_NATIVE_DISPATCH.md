@@ -65,7 +65,10 @@ Rules:
 - `collect` stores the canonical workspace-relative `artifact_ref`, digest and
   size (not just the caller's filename), so `--output-dir subdir` verifies the
   same `subdir/...` file later. The artifact is hashed in chunks; symlinks,
-  symlinked parents and external output directories are rejected.
+  symlinked parents and external output directories are rejected. Put dispatch
+  artifacts under `.auto-orchestrator/` or a gitignored scratch directory: a
+  tracked artifact dirties the tree and is intentionally rejected by the
+  merged-tree verification gate.
 - `verify` requires a **verification receipt** issued by `native-verify`:
   HMAC-protected under `.auto-orchestrator/verification/receipts/`, bound to the
   project/run/task, **dispatch id**, current HEAD, contract/plan digests, the

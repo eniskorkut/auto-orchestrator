@@ -37,7 +37,8 @@ class NativeVerifyTests(unittest.TestCase):
             subprocess.run(["git", "-C", str(self.root), *args], check=True,
                            capture_output=True)
         (self.root / ".gitignore").write_text(
-            ".auto-orchestrator/\n__pycache__/\n*.pyc\n", encoding="utf-8")
+            ".auto-orchestrator/\n__pycache__/\n*.pyc\nsubdir/\n",
+            encoding="utf-8")
         (self.root / "README.md").write_text("# demo\n", encoding="utf-8")
         (self.root / "tests").mkdir()
         (self.root / "tests" / "test_ok.py").write_text(
@@ -244,6 +245,46 @@ class NativeVerifyTests(unittest.TestCase):
             "--verification-run-id", result["receipt_id"])
         self.assertEqual(code, 1)
         self.assertIn("dispatch", error.lower())
+
+    def test_nested_output_dir_is_verified_through_the_cli(self):
+        started = self._native_run_with_contract()
+        plan = json.loads(Path(started["plan"]).read_text(encoding="utf-8"))
+        task_id = plan["tasks"][0]["id"]
+        dispatch = native_dispatch.create(
+            self.root, run_id="run-verify-1", task_id=task_id,
+            role="implementer", ide="codex", owner_session_id="codex",
+            write_scope=["src/"])
+        for action in ("request", "confirm", "start", "complete", "collect"):
+            if action == "confirm":
+                native_dispatch.confirm(
+                    self.root, dispatch["dispatch_id"], run_id="run-verify-1",
+                    native_child_ref="child-nested")
+            elif action == "start":
+                native_dispatch.start(
+                    self.root, dispatch["dispatch_id"], run_id="run-verify-1")
+            elif action == "complete":
+                native_dispatch.complete(
+                    self.root, dispatch["dispatch_id"], run_id="run-verify-1",
+                    result_ref="out.txt")
+            elif action == "collect":
+                subdir = self.root / "subdir"
+                subdir.mkdir(exist_ok=True)
+                (subdir / "out.txt").write_text("nested\n", encoding="utf-8")
+                self.cli(
+                    "codex", "native-dispatch", "collect", "--run-id",
+                    "run-verify-1", "--dispatch-id", dispatch["dispatch_id"],
+                    "--evidence-ref", "out.txt", "--output-dir", "subdir")
+            else:
+                getattr(native_dispatch, action)(
+                    self.root, dispatch["dispatch_id"], run_id="run-verify-1")
+        result = self.cli(
+            "codex", "native-verify", "--run-id", "run-verify-1",
+            "--task-id", task_id, "--dispatch-id", dispatch["dispatch_id"])
+        self.assertTrue(result["verified_completion"], result["criteria"])
+        record = native_dispatch.list_dispatches(
+            self.root, "run-verify-1")[0]
+        self.assertEqual(record["state"], "verified")
+        self.assertEqual(record["artifact_ref"], "subdir/out.txt")
 
     def test_review_required_criterion_needs_accepted_independence(self):
         self._native_run_with_contract(review_required=True)
