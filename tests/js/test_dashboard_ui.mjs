@@ -91,6 +91,7 @@ test('IDE ownership labels are translated and distinguish unknown from released'
     'ide.recovery', 'ide.ownerProcess', 'ide.blocked', 'ide.orphaned',
     'ide.stale', 'ide.staleUnknown', 'ide.nativeUnknown', 'ide.demo',
     'ide.snapshots', 'ide.state.demo', 'ide.state.unknown',
+    'ide.dispatches', 'ide.dispatchesCount',
     'ide.requirementsStatus.verified', 'ide.requirementsStatus.partial',
     'ide.requirementsStatus.review_needed', 'ide.requirementsStatus.failed',
     'ide.requirementsStatus.not_run', 'ide.requirementsStatus.unknown',
@@ -108,6 +109,8 @@ test('IDE ownership labels are translated and distinguish unknown from released'
   assert.equal(I18n.t('ide.activeIde', { platform: 'cursor' }), 'active IDE: cursor');
   assert.equal(I18n.t('ide.previousIde', { platform: 'codex' }), 'previous IDE: codex');
   assert.equal(I18n.t('ide.state.unknown'), 'unknown');
+  assert.match(I18n.t('ide.dispatchesCount',
+    { active: 1, verified: 2, unknown: 0 }), /1.*2.*0/);
   assert.equal(I18n.t('ide.nativeUnknown'),
     'Native connection unknown — no client evidence was reported');
   I18n.setLanguage('tr', { persist: false, announce: false });
@@ -119,6 +122,7 @@ test('IDE ownership labels are translated and distinguish unknown from released'
       source: 'codex', target: 'cursor', age: '2m', digest: 'abc', state: 'unknown',
       count: 2, reasons: 'head_mismatch', why: 'W', rationale: 'R',
       run: 'r1', status: 'verifying', milestone: 'M2', task: 'api',
+      active: 1, verified: 2, unknown: 0,
     });
     assert.doesNotMatch(rendered, /\{\w+\}/, `TR ${key} must not leak a placeholder`);
   }
@@ -128,7 +132,7 @@ test('IDE ownership labels are translated and distinguish unknown from released'
 test('IDE ownership UI uses text nodes, not HTML, and keeps native unknown', () => {
   const app = readFileSync(join(assets, 'app.js'), 'utf8');
   for (const className of ['ide-ownership', 'ide-state-chip', 'ide-handoff-drift',
-    'ide-requirements', 'ide-question', 'ide-native']) {
+    'ide-requirements', 'ide-question', 'ide-native', 'ide-dispatches']) {
     assert.match(app, new RegExp(className), `missing ${className}`);
   }
   assert.match(app, /ide\.nativeUnknown/);
