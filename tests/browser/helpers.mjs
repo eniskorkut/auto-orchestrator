@@ -134,27 +134,43 @@ export async function selectProject(page, name) {
 }
 
 export async function roomDrag(page, roomId, dxTiles, dyTiles = 0) {
-  const geometry = await page.evaluate((id) => {
-    const debug = window.AOOffice.officeDebugState();
-    const canvas = document.querySelector('.office-canvas');
-    const rect = canvas.getBoundingClientRect();
-    const camera = debug.scene.getCamera();
-    const room = debug.layout.rooms.find((item) => item.id === id);
-    return {
-      room: { x: room.x, y: room.y, w: room.w, h: room.h },
-      camera,
-      rect: { x: rect.x, y: rect.y },
-      scale: camera.scale,
-    };
-  }, roomId);
-  const tile = geometry.scale * 16;
-  const startX = geometry.rect.x + (geometry.room.x + geometry.room.w / 2) * tile + geometry.camera.x;
-  const startY = geometry.rect.y + (geometry.room.y + geometry.room.h / 2) * tile + geometry.camera.y;
-  await page.mouse.move(startX, startY);
-  await page.mouse.down();
-  await page.waitForTimeout(80);
-  await page.mouse.move(startX + dxTiles * tile, startY + dyTiles * tile, { steps: 12 });
-  await page.waitForTimeout(120);
-  await page.mouse.up();
-  await page.waitForTimeout(250);
+  const xSteps = Math.abs(dxTiles);
+  const ySteps = Math.abs(dyTiles);
+  const stepX = Math.sign(dxTiles);
+  const stepY = Math.sign(dyTiles);
+  // Move one tile per drag. A single multi-tile pointer move can lose its last
+  // event on a slow Chromium runner, leaving the room one tile short. Alt
+  // makes the editor prefer the room over a desk at the same tile.
+  await page.keyboard.down('Alt');
+  try {
+    for (let step = 0; step < xSteps + ySteps; step += 1) {
+      const geometry = await page.evaluate((id) => {
+        const debug = window.AOOffice.officeDebugState();
+        const canvas = document.querySelector('.office-canvas');
+        const rect = canvas.getBoundingClientRect();
+        const camera = debug.scene.getCamera();
+        const room = debug.layout.rooms.find((item) => item.id === id);
+        return {
+          room: { x: room.x, y: room.y, w: room.w, h: room.h },
+          camera,
+          rect: { x: rect.x, y: rect.y },
+          scale: camera.scale,
+        };
+      }, roomId);
+      const tile = geometry.scale * 16;
+      const startX = geometry.rect.x + (geometry.room.x + geometry.room.w / 2 + 0.5) * tile + geometry.camera.x;
+      const startY = geometry.rect.y + (geometry.room.y + geometry.room.h / 2 + 0.5) * tile + geometry.camera.y;
+      const moveX = step < xSteps ? stepX * tile : 0;
+      const moveY = step < xSteps ? 0 : stepY * tile;
+      await page.mouse.move(startX, startY);
+      await page.mouse.down();
+      await page.waitForTimeout(80);
+      await page.mouse.move(startX + moveX, startY + moveY, { steps: 4 });
+      await page.waitForTimeout(120);
+      await page.mouse.up();
+      await page.waitForTimeout(250);
+    }
+  } finally {
+    await page.keyboard.up('Alt');
+  }
 }
