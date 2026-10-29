@@ -134,43 +134,41 @@ export async function selectProject(page, name) {
 }
 
 export async function roomDrag(page, roomId, dxTiles, dyTiles = 0) {
-  const xSteps = Math.abs(dxTiles);
-  const ySteps = Math.abs(dyTiles);
-  const stepX = Math.sign(dxTiles);
-  const stepY = Math.sign(dyTiles);
-  // Move one tile per drag. A single multi-tile pointer move can lose its last
-  // event on a slow Chromium runner, leaving the room one tile short. Alt
-  // makes the editor prefer the room over a desk at the same tile.
-  await page.keyboard.down('Alt');
-  try {
-    for (let step = 0; step < xSteps + ySteps; step += 1) {
-      const geometry = await page.evaluate((id) => {
-        const debug = window.AOOffice.officeDebugState();
-        const canvas = document.querySelector('.office-canvas');
-        const rect = canvas.getBoundingClientRect();
-        const camera = debug.scene.getCamera();
-        const room = debug.layout.rooms.find((item) => item.id === id);
-        return {
-          room: { x: room.x, y: room.y, w: room.w, h: room.h },
-          camera,
-          rect: { x: rect.x, y: rect.y },
-          scale: camera.scale,
-        };
-      }, roomId);
-      const tile = geometry.scale * 16;
-      const startX = geometry.rect.x + (geometry.room.x + geometry.room.w / 2 + 0.5) * tile + geometry.camera.x;
-      const startY = geometry.rect.y + (geometry.room.y + geometry.room.h / 2 + 0.5) * tile + geometry.camera.y;
-      const moveX = step < xSteps ? stepX * tile : 0;
-      const moveY = step < xSteps ? 0 : stepY * tile;
-      await page.mouse.move(startX, startY);
-      await page.mouse.down();
-      await page.waitForTimeout(80);
-      await page.mouse.move(startX + moveX, startY + moveY, { steps: 4 });
-      await page.waitForTimeout(120);
-      await page.mouse.up();
-      await page.waitForTimeout(250);
+  // Select a room tile that is not a desk, desk seat or door, then move with the
+  // editor's documented arrow-key path. This is deterministic across Chromium
+  // builds; pointer dragging is covered by the door editor assertion.
+  const point = await page.evaluate((id) => {
+    const debug = window.AOOffice.officeDebugState();
+    const canvas = document.querySelector('.office-canvas');
+    const rect = canvas.getBoundingClientRect();
+    const camera = debug.scene.getCamera();
+    const layout = debug.layout;
+    const room = layout.rooms.find((item) => item.id === id);
+    const occupied = new Set();
+    for (const desk of layout.desks || []) {
+      if (desk.room !== id) continue;
+      occupied.add(`${desk.x},${desk.y}`);
+      if (desk.seat) occupied.add(`${desk.seat.x},${desk.seat.y}`);
     }
-  } finally {
-    await page.keyboard.up('Alt');
-  }
+    let tile = null;
+    for (let y = room.y + 1; y < room.y + room.h - 1 && !tile; y += 1) {
+      for (let x = room.x + 1; x < room.x + room.w - 1; x += 1) {
+        if (room.door && room.door.x === x && room.door.y === y) continue;
+        if (occupied.has(`${x},${y}`)) continue;
+        tile = { x, y };
+        break;
+      }
+    }
+    const tilePx = camera.scale * 16;
+    return {
+      x: rect.x + (tile.x + 0.5) * tilePx + camera.x,
+      y: rect.y + (tile.y + 0.5) * tilePx + camera.y,
+    };
+  }, roomId);
+  await page.mouse.click(point.x, point.y);
+  const xKey = dxTiles >= 0 ? 'ArrowRight' : 'ArrowLeft';
+  const yKey = dyTiles >= 0 ? 'ArrowDown' : 'ArrowUp';
+  for (let step = 0; step < Math.abs(dxTiles); step += 1) await page.keyboard.press(xKey);
+  for (let step = 0; step < Math.abs(dyTiles); step += 1) await page.keyboard.press(yKey);
+  await page.waitForTimeout(250);
 }
