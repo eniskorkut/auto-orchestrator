@@ -190,7 +190,9 @@ test('layout editor moves rooms and desks, saves per project, survives reload an
   const doorEnd = point(doorTarget.x, doorTarget.y);
   await page.mouse.move(doorStart.x, doorStart.y);
   await page.mouse.down();
-  await page.mouse.move(doorEnd.x, doorEnd.y, { steps: 8 });
+  await page.waitForTimeout(80);
+  await page.mouse.move(doorEnd.x, doorEnd.y, { steps: 10 });
+  await page.waitForTimeout(120);
   await page.mouse.up();
   await page.waitForTimeout(250);
   debug = await officeDebug(page);

@@ -152,7 +152,9 @@ export async function roomDrag(page, roomId, dxTiles, dyTiles = 0) {
   const startY = geometry.rect.y + (geometry.room.y + geometry.room.h / 2) * tile + geometry.camera.y;
   await page.mouse.move(startX, startY);
   await page.mouse.down();
-  await page.mouse.move(startX + dxTiles * tile, startY + dyTiles * tile, { steps: 10 });
+  await page.waitForTimeout(80);
+  await page.mouse.move(startX + dxTiles * tile, startY + dyTiles * tile, { steps: 12 });
+  await page.waitForTimeout(120);
   await page.mouse.up();
   await page.waitForTimeout(250);
 }
