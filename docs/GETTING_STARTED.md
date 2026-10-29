@@ -5,8 +5,9 @@ IDE continuity to an existing project. It does not host a model, start another
 IDE or replace your client's own subagent system.
 
 For a first install, use **one scope**: project-local (recommended for a single
-repository) or global (shared by many repositories). Loading both copies in the
-same workspace can produce duplicate hooks and telemetry.
+repository) or global (shared by many repositories). Two current V2 copies claim
+a project once per process, but a V1 + V2 mix or an older plugin can duplicate
+hooks and telemetry. One scope is still the clearest setup.
 
 ## Requirements
 

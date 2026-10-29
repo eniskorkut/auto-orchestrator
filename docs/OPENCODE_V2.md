@@ -41,8 +41,10 @@ object with `id: 'auto-orchestrator'` and `setup(ctx)`. The V1 plugin is a
 class-based `AutoOrchestratorPlugin`; it is not compatible with the V2 loader.
 
 If a workspace has both a project-local and a global plugin for the same
-client, remove one. The installer does not delete an unmanaged plugin and
-cannot prevent your client from loading two independent copies.
+client, remove one. Two V2 copies are guarded: the adapter claims each project
+once per process and only the first instance registers hooks. A V1 + V2 mix is
+not covered by that guard and must be avoided. The installer does not delete an
+unmanaged plugin.
 
 ## Install and restart
 
