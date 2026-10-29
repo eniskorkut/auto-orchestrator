@@ -1,5 +1,8 @@
 import hashlib
 import json
+import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -88,6 +91,28 @@ class GlobalInstallTests(unittest.TestCase):
             if (source/'tools/assumption_guard.py').is_file():
                 self.assertTrue((base/'assumption_guard.py').is_file())
 
+
+    def test_v80_runtime_modules_and_cli_smoke(self):
+        self.run_install()
+        base = self.home/'.config/opencode/auto-orchestrator/tools'
+        for name in ('native_dispatch.py', 'verification_receipt.py',
+                     'test_evidence.py', 'question_quality.py'):
+            self.assertTrue((base/name).is_file(), name)
+        root = Path(self.tmp.name)/'smoke-project'
+        root.mkdir()
+        env = dict(os.environ)
+        env.pop('PYTHONPATH', None)
+        for extra in (['--help'], ['brief'],
+                      ['native-dispatch', 'status', '--run-id', 'run-global'],
+                      ['native-verify', '--help']):
+            with self.subTest(command=extra):
+                process = subprocess.run(
+                    [sys.executable, str(base/'universal_teamwork.py'),
+                     '--root', str(root), '--platform', 'opencode', *extra],
+                    cwd=str(root), env=env, capture_output=True, text=True,
+                    timeout=60)
+                self.assertEqual(process.returncode, 0,
+                                 process.stderr[-800:])
 
     def test_v78_handoff_module_is_installed_for_every_platform(self):
         source = Path(__file__).resolve().parents[1] / 'tools' / 'ide_handoff.py'

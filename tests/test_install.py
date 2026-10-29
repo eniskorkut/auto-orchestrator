@@ -1,10 +1,13 @@
 import hashlib
 import json
+import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from tools.install import (Conflict, END, MANIFEST_RELATIVE, START,
-                           V78_MODULES, install, uninstall)
+                           V78_MODULES, V80_MODULES, install, uninstall)
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -140,6 +143,45 @@ class InstallerTests(unittest.TestCase):
         user_file.write_text('user notes')
         self.assertEqual(uninstall(self.dest), [])
         self.assertEqual(user_file.read_text(), 'user notes')
+
+    def test_v80_runtime_modules_are_shipped_and_importable(self):
+        self.call('opencode')
+        tools_dir = self.dest / 'tools'
+        for name in V80_MODULES:
+            self.assertTrue((tools_dir / name).is_file(), name)
+        env = dict(os.environ)
+        env.pop('PYTHONPATH', None)
+        commands = [
+            ['--help'],
+            ['brief'],
+            ['native-dispatch', 'status', '--run-id', 'run-clean'],
+            ['native-verify', '--help'],
+        ]
+        for extra in commands:
+            with self.subTest(command=extra):
+                process = subprocess.run(
+                    [sys.executable, str(tools_dir / 'universal_teamwork.py'),
+                     '--root', str(self.dest), '--platform', 'opencode',
+                     *extra], cwd=str(self.dest), env=env,
+                    capture_output=True, text=True, timeout=60)
+                self.assertEqual(process.returncode, 0,
+                                 process.stderr[-800:])
+        dashboard = subprocess.run(
+            [sys.executable, str(tools_dir / 'dashboard.py'), '--help'],
+            cwd=str(self.dest), env=env, capture_output=True, text=True,
+            timeout=60)
+        self.assertEqual(dashboard.returncode, 0, dashboard.stderr[-500:])
+
+    def test_v80_runtime_modules_survive_uninstall_reinstall(self):
+        self.call('opencode')
+        module = self.dest / 'tools' / 'native_dispatch.py'
+        self.assertTrue(module.is_file())
+        uninstall(self.dest)
+        self.assertFalse(module.exists())
+        self.call('opencode')
+        self.assertTrue(module.is_file())
+        self.assertEqual(module.read_bytes(),
+                         (ROOT / 'tools' / 'native_dispatch.py').read_bytes())
 
     def test_v78_handoff_module_is_shipped_when_present(self):
         self.call('opencode')

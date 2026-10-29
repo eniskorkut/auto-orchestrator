@@ -31,6 +31,8 @@ V761_MODULES = ('requirements_contract.py', 'assumption_guard.py',
 V77_MODULES = ('completion_engine.py', 'context_selector.py',
                'grill_llm.py', 'grill_benchmark.py')
 V78_MODULES = ('ide_handoff.py',)
+V80_MODULES = ('native_dispatch.py', 'verification_receipt.py',
+               'test_evidence.py', 'question_quality.py')
 # Installer-generated runtime and integration files may be upgraded in place
 # only while the manifest still proves the file is ours. Everything else keeps
 # the conservative opt-in rule.
@@ -273,7 +275,7 @@ def _runtime_sources() -> list[Path]:
     # V7.6.1 modules ship when present. A partial source tree must not make a
     # previously working installer unusable. V7.8 adds the read-only IDE
     # handoff module on the same optional basis.
-    sources.extend(ROOT/'tools'/name for name in V761_MODULES + V77_MODULES + V78_MODULES
+    sources.extend(ROOT/'tools'/name for name in V761_MODULES + V77_MODULES + V78_MODULES + V80_MODULES
                    if (ROOT/'tools'/name).is_file())
     return sources
 
@@ -286,7 +288,8 @@ def install(target: Path, platform: str, codex_model: str, dry_run: bool, force_
     target = target.resolve()
     selected = {'codex','opencode','antigravity','cursor'} if platform == 'all' else {platform}
     def destination(source: Path) -> Path:
-        if source == ROOT/'adapters/opencode-v2/auto_orchestrator.js':
+        if source in (ROOT/'adapters/opencode-v2/auto_orchestrator.js',
+                      ROOT/'adapters/opencode-v1/auto_orchestrator.js'):
             return target/'.opencode/plugins/auto_orchestrator.js'
         return target/source.relative_to(ROOT)
     sources = [ROOT/'.agents/skills/auto-orchestrator/SKILL.md']
@@ -309,7 +312,7 @@ def install(target: Path, platform: str, codex_model: str, dry_run: bool, force_
         skills = ROOT/'.opencode/skills'
         if skills.is_dir():
             sources.extend(sorted(p for p in skills.rglob('*') if p.is_file()))
-        sources.append(ROOT/('adapters/opencode-v2/auto_orchestrator.js' if opencode_version == 'v2' else '.opencode/plugins/auto_orchestrator.js'))
+        sources.append(ROOT/('adapters/opencode-v2/auto_orchestrator.js' if opencode_version == 'v2' else 'adapters/opencode-v1/auto_orchestrator.js'))
     if 'antigravity' in selected:
         sources.extend(sorted((ROOT/'.agents/agents').glob('*.md')))
         sources.append(ROOT/'.agents/hooks.json')

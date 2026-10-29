@@ -134,25 +134,41 @@ export async function selectProject(page, name) {
 }
 
 export async function roomDrag(page, roomId, dxTiles, dyTiles = 0) {
-  const geometry = await page.evaluate((id) => {
+  // Select a room tile that is not a desk, desk seat or door, then move with the
+  // editor's documented arrow-key path. This is deterministic across Chromium
+  // builds; pointer dragging is covered by the door editor assertion.
+  const point = await page.evaluate((id) => {
     const debug = window.AOOffice.officeDebugState();
     const canvas = document.querySelector('.office-canvas');
     const rect = canvas.getBoundingClientRect();
     const camera = debug.scene.getCamera();
-    const room = debug.layout.rooms.find((item) => item.id === id);
+    const layout = debug.layout;
+    const room = layout.rooms.find((item) => item.id === id);
+    const occupied = new Set();
+    for (const desk of layout.desks || []) {
+      if (desk.room !== id) continue;
+      occupied.add(`${desk.x},${desk.y}`);
+      if (desk.seat) occupied.add(`${desk.seat.x},${desk.seat.y}`);
+    }
+    let tile = null;
+    for (let y = room.y + 1; y < room.y + room.h - 1 && !tile; y += 1) {
+      for (let x = room.x + 1; x < room.x + room.w - 1; x += 1) {
+        if (room.door && room.door.x === x && room.door.y === y) continue;
+        if (occupied.has(`${x},${y}`)) continue;
+        tile = { x, y };
+        break;
+      }
+    }
+    const tilePx = camera.scale * 16;
     return {
-      room: { x: room.x, y: room.y, w: room.w, h: room.h },
-      camera,
-      rect: { x: rect.x, y: rect.y },
-      scale: camera.scale,
+      x: rect.x + (tile.x + 0.5) * tilePx + camera.x,
+      y: rect.y + (tile.y + 0.5) * tilePx + camera.y,
     };
   }, roomId);
-  const tile = geometry.scale * 16;
-  const startX = geometry.rect.x + (geometry.room.x + geometry.room.w / 2) * tile + geometry.camera.x;
-  const startY = geometry.rect.y + (geometry.room.y + geometry.room.h / 2) * tile + geometry.camera.y;
-  await page.mouse.move(startX, startY);
-  await page.mouse.down();
-  await page.mouse.move(startX + dxTiles * tile, startY + dyTiles * tile, { steps: 10 });
-  await page.mouse.up();
+  await page.mouse.click(point.x, point.y);
+  const xKey = dxTiles >= 0 ? 'ArrowRight' : 'ArrowLeft';
+  const yKey = dyTiles >= 0 ? 'ArrowDown' : 'ArrowUp';
+  for (let step = 0; step < Math.abs(dxTiles); step += 1) await page.keyboard.press(xKey);
+  for (let step = 0; step < Math.abs(dyTiles); step += 1) await page.keyboard.press(yKey);
   await page.waitForTimeout(250);
 }

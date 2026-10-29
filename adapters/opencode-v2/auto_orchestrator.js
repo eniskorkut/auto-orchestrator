@@ -39,6 +39,21 @@ const normalized = (path) => {
   const result = resolve(path);
   return process.platform === 'win32' ? result.toLowerCase() : result;
 };
+const PROJECT_CLAIMS = Symbol.for('auto-orchestrator.v2.project-claims');
+
+/**
+ * Claim one project per process. A project-local plugin and a global plugin can
+ * both be installed; loading both would duplicate hooks and telemetry. The
+ * first instance owns the project, later instances register no hooks.
+ */
+export const claimProject = (directory, registry = globalThis) => {
+  const key = normalized(directory);
+  if (!key) return true;
+  const claims = registry[PROJECT_CLAIMS] ??= new Set();
+  if (claims.has(key)) return false;
+  claims.add(key);
+  return true;
+};
 
 /**
  * Trusted helper locations for a project or global plugin install.
@@ -102,6 +117,7 @@ export default {
   id: 'auto-orchestrator',
   async setup(ctx) {
     const directory = normalized(ctx.location?.directory);
+    if (!claimProject(directory)) return {};
     const base = directory && join(directory, '.auto-orchestrator', 'runs');
     const runs = new Map();
     const promptRouting = new Map();

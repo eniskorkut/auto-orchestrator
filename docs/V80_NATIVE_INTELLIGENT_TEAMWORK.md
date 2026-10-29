@@ -74,7 +74,8 @@ No IDE is launched by another IDE. Native child identity is never invented.
 
 ## 3. Validation
 
-- Python: 849 tests OK (1 skipped) locally.
+- Python: 849 tests OK (1 skipped) at the V8.0 feature commit; clean-install
+  regression tests were added afterwards.
 - Node: 96/96.
 - Playwright functional: 22 passed, 4 visual snapshots skipped.
 - Dispatch tests: happy path, no-child start refusal, duplicate/overlap,

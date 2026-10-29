@@ -1,6 +1,11 @@
-# Native capability matrix (V7.1)
+# Native capability matrix (V8.0)
 
 [`tools/capabilities.py`](../tools/capabilities.py) is the machine-readable source of truth for what this repository's adapters can and cannot establish per native client. It is deliberately conservative: **no capability is advertised as unconditional**, and no platform is marked as supporting external agent dispatch, cancellation, background tracking, resume or a live terminal stream.
+
+V8.0 adds typed dispatch records, ownership-aware scheduling and receipt-bound
+verification on top of these native capabilities. It does **not** add an external
+spawn, cancel or background-completion API; the parent IDE remains the only
+entity that starts its own children.
 
 The matrix does not claim that a native IDE was launched or authenticated. It describes documented native contracts plus the adapters and simulated tests shipped here. See [Real IDE smoke tests vs simulated tests](#real-ide-smoke-tests-vs-simulated-tests).
 

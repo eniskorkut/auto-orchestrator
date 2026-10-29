@@ -8,7 +8,7 @@ import { pathToFileURL } from 'node:url';
 const root = process.cwd();
 const copyDir = mkdtempSync(join(tmpdir(), 'orchestrator-plugin-'));
 const filepath=join(copyDir,'plugin.mjs');
-cpSync(join(root,'.opencode/plugins/auto_orchestrator.js'),filepath);
+cpSync(join(root,'adapters/opencode-v1/auto_orchestrator.js'),filepath);
 const { AutoOrchestratorPlugin } = await import(pathToFileURL(filepath));
 
 test('OpenCode plugin measures native task tool and avoids prompt storage', async () => {
