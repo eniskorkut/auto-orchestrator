@@ -288,7 +288,8 @@ def install(target: Path, platform: str, codex_model: str, dry_run: bool, force_
     target = target.resolve()
     selected = {'codex','opencode','antigravity','cursor'} if platform == 'all' else {platform}
     def destination(source: Path) -> Path:
-        if source == ROOT/'adapters/opencode-v2/auto_orchestrator.js':
+        if source in (ROOT/'adapters/opencode-v2/auto_orchestrator.js',
+                      ROOT/'adapters/opencode-v1/auto_orchestrator.js'):
             return target/'.opencode/plugins/auto_orchestrator.js'
         return target/source.relative_to(ROOT)
     sources = [ROOT/'.agents/skills/auto-orchestrator/SKILL.md']
@@ -311,7 +312,7 @@ def install(target: Path, platform: str, codex_model: str, dry_run: bool, force_
         skills = ROOT/'.opencode/skills'
         if skills.is_dir():
             sources.extend(sorted(p for p in skills.rglob('*') if p.is_file()))
-        sources.append(ROOT/('adapters/opencode-v2/auto_orchestrator.js' if opencode_version == 'v2' else '.opencode/plugins/auto_orchestrator.js'))
+        sources.append(ROOT/('adapters/opencode-v2/auto_orchestrator.js' if opencode_version == 'v2' else 'adapters/opencode-v1/auto_orchestrator.js'))
     if 'antigravity' in selected:
         sources.extend(sorted((ROOT/'.agents/agents').glob('*.md')))
         sources.append(ROOT/'.agents/hooks.json')

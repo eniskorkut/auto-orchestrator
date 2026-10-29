@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import plugin, { observedOverlapMs } from '../../adapters/opencode-v2/auto_orchestrator.js';
+import plugin, { claimProject, observedOverlapMs } from '../../adapters/opencode-v2/auto_orchestrator.js';
 
 const tick = async () => { await new Promise(resolve => setImmediate(resolve)); await new Promise(resolve => setImmediate(resolve)); };
 
@@ -74,6 +74,14 @@ const lifecycle = (type, sessionID, directory, details = {}) => ({
 const subagent = (id, sessionID, status, directory) => ({
   id, tool: 'subagent', status, ...(directory === undefined ? {} : { location: { directory } }),
   data: { sessionID, prompt: 'SENSITIVE-PROMPT', agent: 'auto_explorer' },
+});
+
+test('one project claim per process prevents duplicate plugin hooks', () => {
+  const registry = {};
+  assert.equal(claimProject('/tmp/ao-project', registry), true);
+  assert.equal(claimProject('/tmp/ao-project/', registry), false);
+  assert.equal(claimProject('/tmp/ao-other-project', registry), true);
+  assert.equal(claimProject(undefined, registry), true);
 });
 
 test('V2 context hook and live native subagent event spans', async () => {

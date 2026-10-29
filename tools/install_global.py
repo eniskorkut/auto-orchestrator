@@ -177,7 +177,7 @@ def installed_map(home:Path,platforms:set[str],opencode_version:str,codex_model:
                 files[oc/'commands'/source.name]=source.read_bytes()
         for path,content in opencode_skill_files().items():
             files[oc/'skills/teamwork'/path]=content
-        plugin=ROOT/('adapters/opencode-v2/auto_orchestrator.js' if opencode_version=='v2' else '.opencode/plugins/auto_orchestrator.js')
+        plugin=ROOT/('adapters/opencode-v2/auto_orchestrator.js' if opencode_version=='v2' else 'adapters/opencode-v1/auto_orchestrator.js')
         files[oc/'plugins/auto_orchestrator.js']=plugin.read_bytes()
         files[oc/'auto-orchestrator/tools/perf.py']=(ROOT/'tools/perf.py').read_bytes()
         for name in ('supervisor.py','router.py','router_eval.py','worktree.py','benchmark.py','quality_gate.py','review_gate.py'):
