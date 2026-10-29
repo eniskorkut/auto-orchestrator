@@ -82,6 +82,15 @@ class DashboardEvidenceTests(unittest.TestCase):
         self.assertEqual(view["dispatches"]["active"], 1)
         self.assertEqual(view["dispatches"]["verified"], 0)
 
+    def test_ide_context_exposes_dispatch_summary_to_the_ui(self):
+        from tools import native_dispatch
+        native_dispatch.create(
+            self.root, run_id="run-d", task_id="build", role="implementer",
+            ide="codex", owner_session_id="s", write_scope=["src/"])
+        view = dashboard._ide_context(self.root)
+        self.assertEqual(view["dispatches"]["total"], 1)
+        self.assertEqual(view["dispatches"]["active"], 1)
+
     def test_oversized_or_invalid_artifacts_stay_unknown(self):
         path = self.root / ".auto-orchestrator" / "verification" / "big.json"
         path.parent.mkdir(parents=True)

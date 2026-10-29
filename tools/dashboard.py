@@ -18,7 +18,6 @@ import re
 import sqlite3
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 import webbrowser
@@ -2014,6 +2013,12 @@ def _ide_context(root, *, demo=False, memory=None, milestones=None) -> dict:
             "recovery": {"state": "demo", "blocked": False,
                          "owner_connected": None, "diagnostics": []},
             "snapshots": [], "snapshot_count": 0, "stale": None,
+            "dispatches": {
+                "total": 3, "counts": {"running": 1, "queued": 1,
+                                       "verified": 1},
+                "active": 1, "verified": 1, "unknown": 0, "source": "demo",
+                "note": "Synthetic demo dispatch records.",
+            },
             "diagnostics": ["demo_synthetic"],
         }
     else:
@@ -2092,6 +2097,7 @@ def _ide_context(root, *, demo=False, memory=None, milestones=None) -> dict:
         "grill_me": grill,
         "recovery": recovery,
         "stale_context": stale,
+        "dispatches": ownership.get("dispatches"),
         "snapshots": ownership.get("snapshots") or [],
         "snapshot_count": ownership.get("snapshot_count") or 0,
         # A local ownership file is not a native handshake. This stays
@@ -3149,7 +3155,7 @@ def _demo_milestones(project_id: str, theme: str = "ai") -> dict:
 
 def _demo_catalog() -> Catalog:
     """Three fixed synthetic projects. Never reads or writes evidence."""
-    base = Path(tempfile.gettempdir()) / "auto-orchestrator-demo"
+    base = Path("demo")
     profiles = (
         {
             "slug": "ai-lab", "profile": "ai", "name": "AI Research Lab", "theme": "ai",
