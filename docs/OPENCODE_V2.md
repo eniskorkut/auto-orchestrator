@@ -153,6 +153,10 @@ The dashboard and `doctor` cannot prove runtime plugin loading.
 - A local process with the same OS user can read project files. Ownership
   fencing is a coordination control, not an OS sandbox.
 - OpenCode V1 and V2 plugins must not be loaded simultaneously.
+- A chat command is a prompt, not a hard policy. In a non-interactive
+  `opencode run` smoke, the model ignored the `/grill-me` interview instruction
+  and wrote demo code; the underlying CLI interview was verified separately.
+  Confirm the first command action in the actual TUI.
 
 See [Getting started](GETTING_STARTED.md), [Architecture](ARCHITECTURE.md) and
 the [capability matrix](CAPABILITY_MATRIX.md).

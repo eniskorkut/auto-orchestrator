@@ -267,6 +267,11 @@ istenirse ayrıca elle temizlenir.
 - **Arka plan subagent** çağrısı, çocuk tamamlandığında değil, dağıtım kabul
   edildiğinde döner. Bu süre tam çalışma süresi sayılmaz.
 - **OpenCode V1/V2** plugin API'leri farklıdır; ikisini aynı anda yüklemeyin.
+- **Sohbet komutları model talimatıdır.** CLI motoru görüşme ve plan durumunu
+  zorlar, ancak model komut metnini yok sayabilir. Bu turda `opencode run` ile
+  yapılan bir `/grill-me` denemesinde model görüşmeyi atlayıp demo kod yazdı;
+  alttaki CLI görüşmesi ayrıca doğrulandı. Gerçek TUI'de komutun ilk adımını
+  kontrol edin.
 - **Codex managed write** açık `--provider codex --codex-sandbox
   workspace-write` opt-in'i gerektirir; Cursor ve Antigravity managed execution
   uygulanmamıştır.

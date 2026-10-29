@@ -318,6 +318,11 @@ non-guarantees.
   execution are not implemented.
 - **A passing `doctor` is not runtime proof.** It checks files, not plugin
   loading, model choice or native spawning.
+- **Chat commands are model instructions.** The CLI engine enforces interview
+  and plan state, but a model can ignore a command prompt. During release
+  validation, a non-interactive `opencode run` proxy ignored the `/grill-me`
+  interview instruction and wrote demo code; the underlying CLI interview was
+  verified separately. Check command behavior in the actual TUI.
 
 ## Documentation
 
