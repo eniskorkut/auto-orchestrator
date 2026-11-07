@@ -30,8 +30,9 @@ sıraya dizmek yasaktır.
 - **Wave-0:** İşin başında bağımlılık haritasını çıkar. Bağımsız olan her şeyi aynı
   anda başlat (Scaffolding, doküman, test, UI, ayrı katmanlar). "Önce şu bitsin"
   sadece gerçek bir veri/API bağımlılığı varsa geçerlidir.
-- **Eşzamanlılık:** Aynı anda en fazla **3** alt ajan. Daha fazlası bağlam/çakışma
-  maliyeti getirir; sıraya al, boşalan yuvaya yenisini ver.
+- **Eşzamanlılık:** Sabit bir üst sınır yok. İş kaç bağımsız parçaya ayrılabiliyorsa
+o kadar alt ajan koşar; sayıya **orkestratör karar verir**. Kısıt bağlam/çakışma
+  maliyetidir: aynı dosyaya yazanları ayır, gerçekten bağımsız olanları birlikte koştur.
 - **Bağımlılık:** Sadece gerçek bağımlılık bekler (şema, migration, paylaşılan arayüz).
   "Aynı dosya" bağımlılık değildir; dosya sahipliğini ayır ve paralel koş.
 - **Milestone sonrası:** Biten iş grubundan sonra kalan işi **yeniden** böl;

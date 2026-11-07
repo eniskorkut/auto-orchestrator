@@ -12,14 +12,14 @@ Read this skill whenever a coding task is non-trivial, spans components, needs i
 
 1. Classify as **trivial** (isolated local edit, little uncertainty), **moderate** (separate exploration/review useful), or **complex** (2+ independent subtasks). Use single-agent for trivial.
 2. Identify scope and dependency edges. Prefer parallel read-only research and review before parallel writers. Never treat 'different files' as sufficient if API/schema contracts overlap.
-3. At most 3 concurrent subagents by default. Choose the smallest useful team, not a fixed roster.
+3. Concurrency follows the work: split into as many independent parts as the task genuinely allows; the orchestrator decides the team size. Limit concurrency only by real coupling (shared files/contracts), not by a fixed ceiling.
 4. Use native subagent delegation capabilities only when available; do NOT simulate concurrency, claim unavailable agents were spawned, or fork hidden external processes.
 5. Keep context compact. Give each subagent: objective, exact scope, inputs, dependencies, allowed writes, acceptance tests, and expected result format.
 6. Assign write ownership for every file or use approved isolated worktrees. Serialize writes to shared configs, migrations, shared interfaces. Verify merges with tests.
 7. Let independent jobs progress without blocking one another. Wait for all required upstream dependencies before integration.
 8. Once implementation completes, verify executable tests and request an independent targeted review where warranted. Surface unresolved errors.
 9. Retry only on an actionable new signal and limit retries to two. Respect user permissions, stop requests and quotas.
-10. **Re-plan at every milestone.** Wave-0 parallelism is the starting point, not the whole plan. At each milestone boundary (task group finished, gate passed, or a subagent returns), re-split the *remaining* work into subagents (max 3), re-check dependency edges, and continue. Never collapse into single-agent execution after the first wave.
+10. **Re-plan at every milestone.** Wave-0 parallelism is the starting point, not the whole plan. At each milestone boundary (task group finished, gate passed, or a subagent returns), re-split the *remaining* work into subagents (as many independent parts as exist), re-check dependency edges, and continue. Never collapse into single-agent execution after the first wave.
 11. Report the task result first. Add **one short performance line only** if `perf.py report` returns a valid result; never claim measured user time savings without a matched baseline benchmark.
 
 ## Platform dispatch
