@@ -19,7 +19,8 @@ Read this skill whenever a coding task is non-trivial, spans components, needs i
 7. Let independent jobs progress without blocking one another. Wait for all required upstream dependencies before integration.
 8. Once implementation completes, verify executable tests and request an independent targeted review where warranted. Surface unresolved errors.
 9. Retry only on an actionable new signal and limit retries to two. Respect user permissions, stop requests and quotas.
-10. Report the task result first. Add **one short performance line only** if `perf.py report` returns a valid result; never claim measured user time savings without a matched baseline benchmark.
+10. **Re-plan at every milestone.** Wave-0 parallelism is the starting point, not the whole plan. At each milestone boundary (task group finished, gate passed, or a subagent returns), re-split the *remaining* work into subagents (max 3), re-check dependency edges, and continue. Never collapse into single-agent execution after the first wave.
+11. Report the task result first. Add **one short performance line only** if `perf.py report` returns a valid result; never claim measured user time savings without a matched baseline benchmark.
 
 ## Platform dispatch
 
