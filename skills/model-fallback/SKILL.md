@@ -22,6 +22,25 @@ Tek eşikle çalıştırmak istersen: `--weekly-low 0` (haftalık kontrolü kapa
 raporlar; harcama kararı kullanıcınındır. Limit dolduğunda önce devir yapılır,
 kredi harcama teklif edilmez.
 
+## Paralel yürütme (zorunlu)
+
+Bağımsız işler **her zaman paralel** yürütülür; birbirinin çıktısını beklemeyen işleri
+sıraya dizmek yasaktır.
+
+- **Wave-0:** İşin başında bağımlılık haritasını çıkar. Bağımsız olan her şeyi aynı
+  anda başlat (Scaffolding, doküman, test, UI, ayrı katmanlar). "Önce şu bitsin"
+  sadece gerçek bir veri/API bağımlılığı varsa geçerlidir.
+- **Eşzamanlılık:** Aynı anda en fazla **3** alt ajan. Daha fazlası bağlam/çakışma
+  maliyeti getirir; sıraya al, boşalan yuvaya yenisini ver.
+- **Bağımlılık:** Sadece gerçek bağımlılık bekler (şema, migration, paylaşılan arayüz).
+  "Aynı dosya" bağımlılık değildir; dosya sahipliğini ayır ve paralel koş.
+- **Milestone sonrası:** Biten iş grubundan sonra kalan işi **yeniden** böl;
+  ilk turda bölüp sonra her şeyi kendin yapma.
+- **Sözleşme:** Her alt ajana hedef, dosya kapsamı, kabul kriteri ve dönüş formatı ver.
+  Çakışan dosya sahipliği verme; sonucu doğrulamadan entegre etme.
+- **Doğrulama:** Paralel yürütme hız içindir; entegrasyon ve testler tek elden
+  (orkestratörde) yapılır.
+
 ## Davranış kuralı (eşik aşıldığında)
 
 1. **Yeni task başlatma.** O an çalışan adımı bitir (yarım bırakma).
