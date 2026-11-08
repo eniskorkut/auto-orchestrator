@@ -13,6 +13,7 @@ gereken her şeyi anlatır. Bir AI ajanına bu dosyayı verip "uygula" demen yet
 | `scripts/model-fallback.py` | Üç sağlayıcının kotasını okur, eşik aşılınca devir kararı verir |
 | `scripts/antigravity-quota.py` | Antigravity language server'ından canlı model kotası |
 | `scripts/codex-quota.py` | Codex app-server RPC'sinden canlı 5s/haftalık kota |
+| `scripts/opencode-quota.py` | OpenCode Go kotası (`GET /zen/go/v1/usage`: rolling/haftalık/aylık) |
 | `scripts/handoff.py` | `.auto-orchestrator/handoffs/` altına makine okunur devir kaydı |
 | `scripts/codex-opencode.sh` | Codex'i OpenCode Go (deepseek) provider'ıyla çalıştırır |
 | `scripts/codex-handoff.sh` | Codex devrini başlatır + sohbeti projeye bağlar |
@@ -119,8 +120,9 @@ opencode run --model opencode-go/deepseek-v4.1-flash#max --auto -f <brief> "<tal
 ## 4. Doğrulama (kurulumdan sonra şart)
 
 ```sh
-# 1) Kota okuma
+# 1) Kota okuma (üç sağlayıcı: Antigravity + Codex + OpenCode)
 ~/.config/opencode/scripts/model-fallback.py --status
+~/.config/opencode/scripts/opencode-quota.py
 
 # 2) DeepSeek ucu
 ~/.config/opencode/scripts/deepseek-ask.sh "Sadece OK yaz."
